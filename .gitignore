@@ -1,0 +1,22 @@
+# Visual Studio & .NET build artifacts
+bin/
+obj/
+dist/
+release/
+release_assets/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+# Sensitive / Environment files
+.env
+.env.*
+*.pfx
+*.snk
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
