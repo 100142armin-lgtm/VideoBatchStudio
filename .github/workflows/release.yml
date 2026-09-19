@@ -1,0 +1,77 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      id-token: write
+      contents: write
+      attestations: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build VideoBatchStudio
+        shell: pwsh
+        run: |
+          dotnet build -c Release VideoBatchStudio.csproj
+          if (-not (Test-Path "bin/Release/net48/VideoBatchStudio.exe")) {
+            throw "Build output VideoBatchStudio.exe not found!"
+          }
+
+      - name: Package Release Assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release_assets | Out-Null
+          New-Item -ItemType Directory -Force -Path staging/VideoBatchStudio | Out-Null
+
+          # Copy compiled binary
+          Copy-Item -Path "bin/Release/net48/VideoBatchStudio.exe" -Destination "release_assets/VideoBatchStudio.exe" -Force
+          Copy-Item -Path "bin/Release/net48/VideoBatchStudio.exe" -Destination "staging/VideoBatchStudio/VideoBatchStudio.exe" -Force
+
+          # Copy fonts and documentation
+          Copy-Item -Path "fonts" -Destination "staging/VideoBatchStudio/fonts" -Recurse -Force
+          Copy-Item -Path "完整使用说明.md" -Destination "staging/VideoBatchStudio/" -Force
+          Copy-Item -Path "使用说明.txt" -Destination "staging/VideoBatchStudio/" -Force
+          Copy-Item -Path "THIRD_PARTY_NOTICES.txt" -Destination "staging/VideoBatchStudio/" -Force
+          Copy-Item -Path "README.md" -Destination "staging/VideoBatchStudio/" -Force
+
+          # Copy bundled FFmpeg (pre-installed on windows-latest runner)
+          $ffmpegCmd = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
+          if ($ffmpegCmd) {
+            Copy-Item -Path $ffmpegCmd.Source -Destination "staging/VideoBatchStudio/ffmpeg.exe" -Force
+            Write-Host "Bundled FFmpeg from: $($ffmpegCmd.Source)"
+          } else {
+            Write-Host "ffmpeg.exe not found on PATH, attempting chocolatey bin..."
+            if (Test-Path "C:\ProgramData\chocolatey\bin\ffmpeg.exe") {
+              Copy-Item -Path "C:\ProgramData\chocolatey\bin\ffmpeg.exe" -Destination "staging/VideoBatchStudio/ffmpeg.exe" -Force
+            }
+          }
+
+          # Create Portable Zip
+          Compress-Archive -Path "staging/VideoBatchStudio/*" -DestinationPath "release_assets/VideoBatchStudio_Portable.zip" -Force
+
+          Write-Host "Generated release assets:"
+          Get-ChildItem -Path release_assets | Select-Object Name, Length
+
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'release_assets/*'
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release_assets/*
+          generate_release_notes: true
