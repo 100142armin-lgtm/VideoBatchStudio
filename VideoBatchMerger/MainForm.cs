@@ -51,6 +51,8 @@ internal sealed class MainForm : Form
 	private readonly List<CutSegment> _cutEditSegments = new List<CutSegment>();
 	private Label _cutEditVideoInfoLabel;
 	private PictureBox _cutEditPreviewBox;
+	private Label _cutEditEmptyPlaceholder;
+	private Button _splitScreenSendToCutBtn;
 	private System.Windows.Forms.Integration.ElementHost _cutEditElementHost;
 	private System.Windows.Controls.MediaElement _cutEditMediaElement;
 	private System.Windows.Forms.Timer _cutEditPlayTimer;
@@ -1281,6 +1283,23 @@ internal sealed class MainForm : Form
 			SendLatestMergeToCutEditor();
 		};
 		panel5.Controls.Add(mergeSendToCutBtn);
+
+		void CenterMergeActionButtons()
+		{
+			if (panel5.ClientSize.Width > 0 && _startButton != null && _cancelButton != null && _mergePreviewButton != null && mergeSendToCutBtn != null)
+			{
+				int totalW = _startButton.Width + 12 + _cancelButton.Width + 12 + _mergePreviewButton.Width + 12 + mergeSendToCutBtn.Width;
+				int startX = Math.Max(20, (panel5.ClientSize.Width - totalW) / 2);
+				_startButton.Left = startX;
+				_cancelButton.Left = _startButton.Right + 12;
+				_mergePreviewButton.Left = _cancelButton.Right + 12;
+				mergeSendToCutBtn.Left = _mergePreviewButton.Right + 12;
+			}
+		}
+		panel5.Resize += delegate { CenterMergeActionButtons(); };
+		base.Shown += delegate { CenterMergeActionButtons(); };
+		CenterMergeActionButtons();
+
 		Label label = MakeLabel("每批会自动创建“日期_批量合并_编号”文件夹；原视频不会被修改。", 650, 431);
 		label.ForeColor = Color.FromArgb(110, 119, 132);
 		SplitContainer mergeMainSplitter = new SplitContainer
@@ -2291,11 +2310,15 @@ internal sealed class MainForm : Form
 			ForeColor = Color.FromArgb(226, 232, 240),
 			MultiSelect = false,
 			AllowDrop = true,
+			OwnerDraw = true,
 			Font = new Font("Microsoft YaHei UI", 9f)
 		};
 		_cutEditMediaPoolList.Columns.Add("素材文件", 116);
 		_cutEditMediaPoolList.Columns.Add("时长", 60);
 		_cutEditMediaPoolList.Columns.Add("分辨率", 62);
+		_cutEditMediaPoolList.DrawColumnHeader += DrawVideoListColumnHeader;
+		_cutEditMediaPoolList.DrawItem += delegate(object s, DrawListViewItemEventArgs e) { e.DrawDefault = true; };
+		_cutEditMediaPoolList.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs e) { e.DrawDefault = true; };
 		_cutEditMediaPoolList.DoubleClick += delegate
 		{
 			LoadMediaPoolSelectedToTimeline();
@@ -2312,7 +2335,6 @@ internal sealed class MainForm : Form
 			}
 		};
 		mediaPoolPanel.Controls.Add(_cutEditMediaPoolList);
-		splitMain.Panel1.Controls.Add(mediaPoolPanel);
 
 		// Right: Inspector / Title Designer
 		Panel titlePanel = new Panel
@@ -2520,8 +2542,6 @@ internal sealed class MainForm : Form
 		};
 		audioGroupBox.Controls.Add(_cutEditAudioVolumeTrackBar);
 		titlePanel.Controls.Add(audioGroupBox);
-
-		splitMain.Panel1.Controls.Add(titlePanel);
 
 		// Center: Main Viewer (Hardware-accelerated WPF Player + Scrubber + DaVinci Transport)
 		Panel centerViewer = new Panel
@@ -2750,18 +2770,32 @@ internal sealed class MainForm : Form
 
 		_cutEditElementHost.Child = _cutEditMediaElement;
 
+		_cutEditEmptyPlaceholder = new Label
+		{
+			Dock = DockStyle.Fill,
+			TextAlign = ContentAlignment.MiddleCenter,
+			Text = "🎬 达芬奇全功能剪辑工作台\n\n请在左侧【素材媒体池】中拖拽或双击载入视频\n支持空格键播放/暂停、I / O 设置出入点、B 剃刀切割片段",
+			ForeColor = Color.FromArgb(120, 136, 160),
+			Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Regular),
+			BackColor = Color.FromArgb(12, 16, 24)
+		};
+
 		videoHostPanel.Controls.Add(_cutEditPreviewBox);
 		videoHostPanel.Controls.Add(_cutEditElementHost);
+		videoHostPanel.Controls.Add(_cutEditEmptyPlaceholder);
+		_cutEditElementHost.Visible = false;
 
-		// Ensure controls are added in correct WinForms docking order
+		// Ensure controls are added in correct WinForms docking order:
+		// Fill first, then Bottom controls from top to bottom
 		centerViewer.Controls.Add(videoHostPanel);
 		centerViewer.Controls.Add(scrubberPanel);
 		centerViewer.Controls.Add(transportBar);
-		transportBar.BringToFront();
-		scrubberPanel.BringToFront();
-		videoHostPanel.SendToBack();
 
+		// Critical docking order for splitMain.Panel1:
+		// Fill control MUST be added FIRST so Left and Right dock properly around it!
 		splitMain.Panel1.Controls.Add(centerViewer);
+		splitMain.Panel1.Controls.Add(mediaPoolPanel);
+		splitMain.Panel1.Controls.Add(titlePanel);
 
 		// Play Timer setup
 		_cutEditPlayTimer = new System.Windows.Forms.Timer { Interval = 60 };
@@ -2914,6 +2948,7 @@ internal sealed class MainForm : Form
 			BorderStyle = BorderStyle.None,
 			BackColor = Color.FromArgb(16, 20, 28),
 			ForeColor = Color.FromArgb(226, 232, 240),
+			OwnerDraw = true,
 			Font = new Font("Microsoft YaHei UI", 9f)
 		};
 		_cutEditSegmentList.Columns.Add("状态", 80);
@@ -2922,6 +2957,9 @@ internal sealed class MainForm : Form
 		_cutEditSegmentList.Columns.Add("出点时间", 80);
 		_cutEditSegmentList.Columns.Add("分段时长", 80);
 		_cutEditSegmentList.Columns.Add("处理说明与音画轨道", 280);
+		_cutEditSegmentList.DrawColumnHeader += DrawVideoListColumnHeader;
+		_cutEditSegmentList.DrawItem += delegate(object s, DrawListViewItemEventArgs e) { e.DrawDefault = true; };
+		_cutEditSegmentList.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs e) { e.DrawDefault = true; };
 		_cutEditSegmentList.DoubleClick += delegate
 		{
 			ToggleSelectedSegmentKept();
@@ -2944,6 +2982,18 @@ internal sealed class MainForm : Form
 		};
 		bottomTimelineHost.Controls.Add(_cutEditSegmentList);
 		_cutEditSegmentList.BringToFront();
+
+		void AutoFitSegmentColumns()
+		{
+			if (_cutEditSegmentList.Columns.Count >= 6 && _cutEditSegmentList.ClientSize.Width > 500)
+			{
+				int fixedW = 80 + 80 + 80 + 80 + 80;
+				_cutEditSegmentList.Columns[5].Width = Math.Max(280, _cutEditSegmentList.ClientSize.Width - fixedW - 4);
+			}
+		}
+		_cutEditSegmentList.Resize += delegate { AutoFitSegmentColumns(); };
+		base.Shown += delegate { AutoFitSegmentColumns(); };
+		AutoFitSegmentColumns();
 
 		splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		tabPage.Controls.Add(splitMain);
@@ -3180,7 +3230,16 @@ internal sealed class MainForm : Form
 		{
 			StartDeliverExport();
 		};
+		void CenterDeliverButton()
+		{
+			if (startPanel.ClientSize.Width > 0 && _deliverStartButton != null)
+			{
+				_deliverStartButton.Left = Math.Max(16, (startPanel.ClientSize.Width - _deliverStartButton.Width) / 2);
+			}
+		}
+		startPanel.Resize += delegate { CenterDeliverButton(); };
 		startPanel.Controls.Add(_deliverStartButton);
+		CenterDeliverButton();
 		leftScroll.Controls.Add(startPanel);
 
 		destGroup.BringToFront();
@@ -3239,6 +3298,7 @@ internal sealed class MainForm : Form
 			BackColor = Color.FromArgb(16, 20, 28),
 			ForeColor = Color.FromArgb(226, 232, 240),
 			MultiSelect = false,
+			OwnerDraw = true,
 			Font = new Font("Microsoft YaHei UI", 9f)
 		};
 		_deliverHistoryList.Columns.Add("成片文件名", 160);
@@ -3247,6 +3307,9 @@ internal sealed class MainForm : Form
 		_deliverHistoryList.Columns.Add("大小", 75);
 		_deliverHistoryList.Columns.Add("交付时间", 80);
 		_deliverHistoryList.Columns.Add("完整路径", 240);
+		_deliverHistoryList.DrawColumnHeader += DrawVideoListColumnHeader;
+		_deliverHistoryList.DrawItem += delegate(object s, DrawListViewItemEventArgs e) { e.DrawDefault = true; };
+		_deliverHistoryList.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs e) { e.DrawDefault = true; };
 		_deliverHistoryList.SelectedIndexChanged += delegate
 		{
 			bool hasSel = _deliverHistoryList.SelectedIndices.Count > 0;
@@ -3268,6 +3331,18 @@ internal sealed class MainForm : Form
 			}
 		};
 		histGroup.Controls.Add(_deliverHistoryList);
+
+		void AutoFitDeliverColumns()
+		{
+			if (_deliverHistoryList.Columns.Count >= 6 && _deliverHistoryList.ClientSize.Width > 500)
+			{
+				int fixedW = 160 + 80 + 70 + 75 + 80;
+				_deliverHistoryList.Columns[5].Width = Math.Max(240, _deliverHistoryList.ClientSize.Width - fixedW - 4);
+			}
+		}
+		_deliverHistoryList.Resize += delegate { AutoFitDeliverColumns(); };
+		base.Shown += delegate { AutoFitDeliverColumns(); };
+		AutoFitDeliverColumns();
 
 		FlowLayoutPanel histBtnRow = new FlowLayoutPanel
 		{
@@ -3741,6 +3816,8 @@ internal sealed class MainForm : Form
 					_cutEditIsPlaying = false;
 					if (_cutEditPlayPauseButton != null) _cutEditPlayPauseButton.Text = "▶ 播放 (空格)";
 					if (_cutEditPreviewBox != null) _cutEditPreviewBox.Visible = false;
+					if (_cutEditEmptyPlaceholder != null) _cutEditEmptyPlaceholder.Visible = false;
+					_cutEditElementHost?.BringToFront();
 				}
 				catch { }
 			}
@@ -5608,15 +5685,15 @@ internal sealed class MainForm : Form
 		_splitScreenCancelButton.Height = 42;
 		_splitScreenCancelButton.Enabled = false;
 		settings.Controls.Add(_splitScreenCancelButton);
-		Button splitScreenSendToCutBtn = MakeButton("🎬 发送最新成品至剪辑", 175);
-		splitScreenSendToCutBtn.Location = new Point(280, 330);
-		splitScreenSendToCutBtn.Height = 42;
-		splitScreenSendToCutBtn.Tag = "accent";
-		splitScreenSendToCutBtn.Click += delegate
+		_splitScreenSendToCutBtn = MakeButton("🎬 发送最新成品至剪辑", 175);
+		_splitScreenSendToCutBtn.Location = new Point(280, 330);
+		_splitScreenSendToCutBtn.Height = 42;
+		_splitScreenSendToCutBtn.Tag = "accent";
+		_splitScreenSendToCutBtn.Click += delegate
 		{
 			SendLatestSplitScreenToCutEditor();
 		};
-		settings.Controls.Add(splitScreenSendToCutBtn);
+		settings.Controls.Add(_splitScreenSendToCutBtn);
 		Label label4 = MakeLabel("主区域模式会逐条完整导出主视频；其他区域自动顺序或随机循环配合。", 468, 344);
 		label4.ForeColor = MutedColor;
 		settings.Controls.Add(label4);
@@ -5789,6 +5866,14 @@ internal sealed class MainForm : Form
 			{
 				_splitScreenBgmList.Width = Math.Max(360, num - _splitScreenBgmList.Left - 250);
 			}
+			if (_splitScreenStartButton != null && _splitScreenCancelButton != null && _splitScreenSendToCutBtn != null)
+			{
+				int totalBtnW = _splitScreenStartButton.Width + 14 + _splitScreenCancelButton.Width + 14 + _splitScreenSendToCutBtn.Width;
+				int startX = Math.Max(18, (panel.ClientSize.Width - totalBtnW) / 2);
+				_splitScreenStartButton.Left = startX;
+				_splitScreenCancelButton.Left = _splitScreenStartButton.Right + 14;
+				_splitScreenSendToCutBtn.Left = _splitScreenCancelButton.Right + 14;
+			}
 		}
 	}
 
@@ -5797,6 +5882,10 @@ internal sealed class MainForm : Form
 		if (host == null || _splitScreenPreview == null)
 		{
 			return;
+		}
+		if (host.ClientSize.Width > 20 && host.ClientSize.Height > 20)
+		{
+			_splitScreenPreview.Bounds = new Rectangle(0, 0, host.ClientSize.Width, host.ClientSize.Height);
 		}
 		RefreshSplitScreenPreview();
 	}
