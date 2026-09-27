@@ -1,4 +1,4 @@
-# 视频批处理工具 (VideoBatchStudio) V7.5
+# 视频批处理工具 (VideoBatchStudio) V7.6
 
 Windows 桌面音视频批处理工具，提供批量合并、视频拆分、动态水印、视频拼屏（多格分屏与画中画）和图片成片五大核心能力。
 
