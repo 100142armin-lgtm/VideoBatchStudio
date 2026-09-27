@@ -591,6 +591,12 @@ internal sealed class MainForm : Form
 
 	private bool _splitScreenPreviewLayoutBusy;
 
+	private Button _splitScreenPlayPreviewButton;
+
+	private ComboBox _splitScreenPreviewDuration;
+
+	private Button _mergePreviewButton;
+
 	private ComboBox _splitScreenRegionSelector;
 
 	private ListBox _splitScreenRegionList;
@@ -1083,7 +1089,11 @@ internal sealed class MainForm : Form
 		_cancelButton.Height = 42;
 		_cancelButton.Enabled = false;
 		panel5.Controls.Add(_cancelButton);
-		Label label = MakeLabel("每批会自动创建“日期_批量合并_编号”文件夹；原视频不会被修改。", 292, 431);
+		_mergePreviewButton = MakeButton("▶ 播放合并预览 (第1组)", 175);
+		_mergePreviewButton.Location = new Point(280, 417);
+		_mergePreviewButton.Height = 42;
+		panel5.Controls.Add(_mergePreviewButton);
+		Label label = MakeLabel("每批会自动创建“日期_批量合并_编号”文件夹；原视频不会被修改。", 465, 431);
 		label.ForeColor = Color.FromArgb(110, 119, 132);
 		panel5.Controls.Add(label);
 		tableLayoutPanel.Controls.Add(panel5, 0, 2);
@@ -2186,8 +2196,45 @@ internal sealed class MainForm : Form
 			Cursor = Cursors.Hand
 		};
 		previewSurface.Controls.Add(_splitScreenPreview);
+		Panel splitScreenPreviewBar = new Panel
+		{
+			Dock = DockStyle.Bottom,
+			Height = 38,
+			BackColor = Color.FromArgb(246, 248, 252),
+			Padding = new Padding(4, 4, 4, 2)
+		};
+		_splitScreenPlayPreviewButton = MakePrimaryButton("▶ 播放拼屏预览 (带声音)", 0, 0, 185);
+		_splitScreenPlayPreviewButton.Height = 30;
+		_splitScreenPlayPreviewButton.Dock = DockStyle.Left;
+
+		_splitScreenPreviewDuration = new ComboBox
+		{
+			Width = 105,
+			Height = 28,
+			DropDownStyle = ComboBoxStyle.DropDownList,
+			Dock = DockStyle.Left
+		};
+		_splitScreenPreviewDuration.Items.AddRange(new object[] { "5 秒预览", "8 秒预览", "10 秒预览", "完整成品" });
+		_splitScreenPreviewDuration.SelectedIndex = 0;
+
+		Label previewTip = new Label
+		{
+			Dock = DockStyle.Fill,
+			TextAlign = ContentAlignment.MiddleLeft,
+			ForeColor = Color.FromArgb(100, 110, 125),
+			Font = new Font("Microsoft YaHei UI", 8.5f),
+			Text = "  秒级合成当前区域视频、取景与配乐试看",
+			AutoEllipsis = true
+		};
+
+		splitScreenPreviewBar.Controls.Add(previewTip);
+		splitScreenPreviewBar.Controls.Add(_splitScreenPreviewDuration);
+		splitScreenPreviewBar.Controls.Add(_splitScreenPlayPreviewButton);
+
 		panel2.Controls.Add(previewSurface);
+		panel2.Controls.Add(splitScreenPreviewBar);
 		panel2.Controls.Add(value);
+		previewSurface.SendToBack();
 		previewSurface.Resize += delegate
 		{
 			LayoutSplitScreenPreview(previewSurface);
@@ -2988,6 +3035,10 @@ internal sealed class MainForm : Form
 		_splitScreenStartButton.Click += delegate
 		{
 			StartSplitScreenRender();
+		};
+		_splitScreenPlayPreviewButton.Click += delegate
+		{
+			StartSplitScreenPreview();
 		};
 		_splitScreenCancelButton.Click += delegate
 		{
@@ -4522,6 +4573,143 @@ internal sealed class MainForm : Form
 		return splitScreenRenderPlan;
 	}
 
+	private async void StartSplitScreenPreview()
+	{
+		if (_isRunning)
+		{
+			MessageBox.Show(this, "当前有正在执行的渲染或导出任务，请稍候再试。", "任务进行中", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			return;
+		}
+		if (_activeSplitScreenLayout == null)
+		{
+			MessageBox.Show(this, "请先选择一个拼屏模板。", "还没有模板", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+			return;
+		}
+		bool[] activeSplitScreenEnabledRegions = GetActiveSplitScreenEnabledRegions();
+		for (int i = 0; i < _activeSplitScreenLayout.RegionCount; i++)
+		{
+			if (activeSplitScreenEnabledRegions[i] && _splitScreenRegionVideos[i].Count == 0)
+			{
+				_splitScreenSelectedRegion = i;
+				_splitScreenRegionSelector.SelectedIndex = i;
+				MessageBox.Show(this, "区域 " + (i + 1) + " 还没有视频。请给开启的编号区域各添加至少一个视频后再预览。", "素材未放完整", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+				return;
+			}
+		}
+		string ffmpeg = FindFfmpeg();
+		if (string.IsNullOrWhiteSpace(ffmpeg))
+		{
+			MessageBox.Show(this, "没有找到 FFmpeg。请保持便携版文件完整。", "缺少 FFmpeg", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+			return;
+		}
+
+		SplitScreenRenderPlan plan = CaptureSplitScreenRenderPlan();
+		RectangleF[] normalizedRects = GetSplitScreenNormalizedRects(_activeSplitScreenLayout);
+		string[] sources = new string[plan.Layout.RegionCount];
+		for (int j = 0; j < plan.Layout.RegionCount; j++)
+		{
+			if (plan.EnabledRegions[j])
+			{
+				string p = GetSplitScreenPreviewPath(j);
+				if (string.IsNullOrWhiteSpace(p) || !File.Exists(p))
+				{
+					MessageBox.Show(this, "区域 " + (j + 1) + " 选中的视频文件不存在。", "素材异常", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+					return;
+				}
+				sources[j] = p;
+			}
+		}
+
+		double previewSec = 5.0;
+		int durationIdx = _splitScreenPreviewDuration.SelectedIndex;
+		if (durationIdx == 1) previewSec = 8.0;
+		else if (durationIdx == 2) previewSec = 10.0;
+		else if (durationIdx == 3)
+		{
+			if (plan.FollowMainDuration && plan.MainRegion >= 0 && plan.MainRegion < sources.Length && !string.IsNullOrWhiteSpace(sources[plan.MainRegion]))
+			{
+				VideoInfo vi = Probe(ffmpeg, sources[plan.MainRegion]);
+				previewSec = vi.DurationSeconds > 0.05 ? vi.DurationSeconds : plan.DurationSeconds;
+			}
+			else
+			{
+				previewSec = plan.DurationSeconds;
+			}
+		}
+
+		SplitScreenRenderPlan previewPlan = CloneSplitScreenRenderPlan(plan);
+		previewPlan.DurationSeconds = Math.Max(1.0, previewSec);
+		if (previewPlan.Width > 1280 || previewPlan.Height > 1280)
+		{
+			previewPlan.Width = (previewPlan.Width / 2) & ~1;
+			previewPlan.Height = (previewPlan.Height / 2) & ~1;
+		}
+		for (int m = 0; m < sources.Length; m++)
+		{
+			previewPlan.VideoViewSettings[m] = (string.IsNullOrWhiteSpace(sources[m]) ? new SplitScreenVideoViewSettings() : GetSplitScreenVideoViewSettings(m, sources[m]).Clone());
+		}
+
+		WatermarkProfile splitScreenWatermark = CaptureWatermarkProfile(_watermarkOnSplitScreen.Checked);
+		BgmPlan bgmPlan = CaptureBgmPlan(_splitScreenBgm);
+
+		string tempPreviewFile = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_SplitPreview_" + Guid.NewGuid().ToString("N") + ".mp4");
+
+		_splitScreenPlayPreviewButton.Enabled = false;
+		_splitScreenPlayPreviewButton.Text = "⏳ 正在合成预览...";
+		_splitScreenStatusLabel.Text = "正在生成拼屏动态试看 (包含画面裁剪与音频)...";
+
+		string error = null;
+		bool ok = false;
+
+		try
+		{
+			await Task.Run(() =>
+			{
+				ok = RenderSplitScreenOutput(ffmpeg, previewPlan, normalizedRects, sources, tempPreviewFile, delegate { }, out error, isFastPreview: true);
+				if (ok && File.Exists(tempPreviewFile))
+				{
+					if (splitScreenWatermark.Enabled)
+					{
+						ApplyWatermarkToSplitScreenOutput(ffmpeg, tempPreviewFile, splitScreenWatermark, previewPlan.DurationSeconds, delegate { }, out _);
+					}
+					if (bgmPlan.Enabled && bgmPlan.Files != null && bgmPlan.Files.Count > 0)
+					{
+						string bgmPath = SelectBgm(bgmPlan, 0, new Random());
+						if (File.Exists(bgmPath))
+						{
+							ApplyBackgroundMusic(ffmpeg, tempPreviewFile, bgmPath, bgmPlan.VolumePercent, delegate { }, out _);
+						}
+					}
+				}
+			});
+		}
+		catch (Exception ex)
+		{
+			ok = false;
+			error = ex.Message;
+		}
+		finally
+		{
+			_splitScreenPlayPreviewButton.Enabled = true;
+			_splitScreenPlayPreviewButton.Text = "▶ 播放拼屏预览 (带声音)";
+		}
+
+		if (ok && File.Exists(tempPreviewFile))
+		{
+			_splitScreenStatusLabel.Text = "拼屏效果预览已生成，正在播放...";
+			using (VideoPreviewForm previewForm = new VideoPreviewForm(tempPreviewFile, $"视频拼屏 - 效果试看 ({previewSec:0}秒)"))
+			{
+				previewForm.ShowDialog(this);
+			}
+			_splitScreenStatusLabel.Text = "视频拼屏待命中。可点击播放预览或开始批量拼屏导出。";
+		}
+		else
+		{
+			_splitScreenStatusLabel.Text = "生成预览失败：" + error;
+			MessageBox.Show(this, "生成拼屏预览失败：\n" + error, "预览失败", MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
+		}
+	}
+
 	private void StartSplitScreenRender()
 	{
 		if (_isRunning)
@@ -4820,7 +5008,7 @@ internal sealed class MainForm : Form
 		}
 	}
 
-	private bool RenderSplitScreenOutput(string ffmpeg, SplitScreenRenderPlan plan, RectangleF[] normalizedRects, string[] sources, string outputPath, Action<double> progress, out string error)
+	private bool RenderSplitScreenOutput(string ffmpeg, SplitScreenRenderPlan plan, RectangleF[] normalizedRects, string[] sources, string outputPath, Action<double> progress, out string error, bool isFastPreview = false)
 	{
 		error = null;
 		string text = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_Pip_" + Guid.NewGuid().ToString("N"));
@@ -4984,14 +5172,15 @@ internal sealed class MainForm : Form
 			{
 				stringBuilder.Append("-an ");
 			}
-			stringBuilder.Append("-c:v libx264 -preset fast -crf 17 -pix_fmt yuv420p -r 30 -metadata:s:v:0 rotate=0 -t ").Append(text2).Append(" -movflags +faststart -progress pipe:1 -nostats ")
+			string presetArg = isFastPreview ? "-preset ultrafast -crf 26" : "-preset fast -crf 17";
+			stringBuilder.Append("-c:v libx264 " + presetArg + " -pix_fmt yuv420p -r 30 -metadata:s:v:0 rotate=0 -t ").Append(text2).Append(" -movflags +faststart -progress pipe:1 -nostats ")
 				.Append(QuoteArg(outputPath));
 			if (RunFfmpeg(ffmpeg, stringBuilder.ToString(), plan.DurationSeconds, progress, out error) != 0 || !File.Exists(outputPath))
 			{
 				error = "拼屏渲染失败：" + LastUsefulLines(error, 10);
 				return false;
 			}
-			if (!ValidateExactDurationOutput(ffmpeg, outputPath, plan.DurationSeconds, out var reason))
+			if (!isFastPreview && !ValidateExactDurationOutput(ffmpeg, outputPath, plan.DurationSeconds, out var reason))
 			{
 				error = reason;
 				return false;
@@ -6238,6 +6427,10 @@ internal sealed class MainForm : Form
 		_cancelButton.Click += delegate
 		{
 			CancelMerge();
+		};
+		_mergePreviewButton.Click += delegate
+		{
+			StartMergePreview();
 		};
 		_transitionSelectAllButton.Click += delegate
 		{
@@ -9281,6 +9474,116 @@ internal sealed class MainForm : Form
 		{
 			RunBatchPlanned(ffmpeg, files, output, planning, fallback, transition, watermark);
 		}, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+	}
+
+	private async void StartMergePreview()
+	{
+		if (_isRunning)
+		{
+			MessageBox.Show(this, "当前有正在执行的渲染或导出任务，请稍候再试。", "任务进行中", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			return;
+		}
+		if (_videos.Count == 0)
+		{
+			MessageBox.Show(this, "请先拖入或添加要合并的视频。", "还没有视频", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+			return;
+		}
+		string ffmpeg = FindFfmpeg();
+		if (string.IsNullOrWhiteSpace(ffmpeg))
+		{
+			MessageBox.Show(this, "没有找到 FFmpeg。请保持便携版文件完整，或把 FFmpeg 加入系统 PATH。", "缺少 FFmpeg", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+			return;
+		}
+
+		List<string> validFiles = _videos.Where(File.Exists).ToList();
+		if (validFiles.Count == 0)
+		{
+			MessageBox.Show(this, "列表中的视频文件均不存在，请重新添加素材。", "素材未找到", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+			return;
+		}
+
+		WatermarkProfile watermark = CaptureWatermarkProfile(_watermarkOnMerge.Checked);
+		MergePlanningOptions planning = CaptureMergePlanningOptions();
+		TransitionPlan transition = CaptureTransitionSettings();
+		List<string> files = new List<string>(validFiles);
+		_activeMergeVideoAdjustments = CaptureVideoAdjustmentSnapshot(files, _mergeVideoAdjustments);
+		_activeMergeBgmPlan = CaptureBgmPlan(_mergeBgm);
+		_activeMergeOutputFrame = CaptureOutputFrameSettings(_mergeOutputFrameControls);
+		_activeMergeFillCanvas = _mergeCanvasFitMode.SelectedIndex != 1;
+		bool fallback = _autoFallback.Checked;
+
+		int groupCount = Math.Max(1, Math.Min(planning.MaxItemsPerGroup, validFiles.Count));
+		List<string> groupFiles = validFiles.Take(groupCount).ToList();
+
+		double previewLimit = 8.0;
+		if (planning.LimitDuration && planning.MaxDurationSeconds > 0)
+		{
+			previewLimit = Math.Min(planning.MaxDurationSeconds, 10.0);
+		}
+
+		TransitionPlan groupTransition = SelectTransitionPlanForOutput(transition, 0);
+		string tempOutputFile = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_MergePreview_" + Guid.NewGuid().ToString("N") + ".mp4");
+
+		_mergePreviewButton.Enabled = false;
+		_mergePreviewButton.Text = "⏳ 正在合成预览...";
+		_statusLabel.Text = "正在生成第 1 组效果动态试看 (包含转场、调色与画幅)...";
+
+		MergeResult result = null;
+		try
+		{
+			await Task.Run(() =>
+			{
+				using (StreamWriter dummyLog = new StreamWriter(Stream.Null))
+				{
+					result = MergeGroupWithProfileCapped(
+						ffmpeg,
+						groupFiles,
+						tempOutputFile,
+						fallback,
+						groupTransition,
+						watermark,
+						previewLimit,
+						planning.RandomClipRanges,
+						delegate { },
+						dummyLog
+					);
+				}
+
+				if (result.Success && File.Exists(tempOutputFile) && _activeMergeBgmPlan.Enabled && _activeMergeBgmPlan.Files != null && _activeMergeBgmPlan.Files.Count > 0)
+				{
+					string bgmPath = SelectBgm(_activeMergeBgmPlan, 0, new Random());
+					if (File.Exists(bgmPath))
+					{
+						ApplyBackgroundMusic(ffmpeg, tempOutputFile, bgmPath, _activeMergeBgmPlan.VolumePercent, delegate { }, out _);
+					}
+				}
+			});
+		}
+		catch (Exception ex)
+		{
+			result = new MergeResult { Error = ex.Message };
+		}
+		finally
+		{
+			_mergePreviewButton.Enabled = true;
+			_mergePreviewButton.Text = "▶ 播放合并预览 (第1组)";
+		}
+
+		if (result != null && result.Success && File.Exists(tempOutputFile))
+		{
+			_statusLabel.Text = "第 1 组效果预览已生成，正在播放...";
+			using (VideoPreviewForm previewForm = new VideoPreviewForm(tempOutputFile, "批量合并 - 第1组效果试看 (约8秒)"))
+			{
+				previewForm.ShowDialog(this);
+			}
+			_statusLabel.Text = "批量合并待命中。可点击播放预览或开始合并。";
+		}
+		else
+		{
+			string errMsg = result != null ? result.Error : "未知错误";
+			_statusLabel.Text = "生成合并预览失败：" + errMsg;
+			MessageBox.Show(this, "生成合并预览失败：\n" + errMsg, "预览失败", MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
+		}
 	}
 
 	private void StartSplit()
@@ -14763,6 +15066,10 @@ internal sealed class MainForm : Form
 		_transitionDuration.Enabled = !running;
 		_transitionLockSingleEffect.Enabled = !running;
 		_startButton.Enabled = !running;
+		if (_mergePreviewButton != null)
+		{
+			_mergePreviewButton.Enabled = !running;
+		}
 		_cancelButton.Enabled = running;
 		SetBgmControlsEnabled(_mergeBgm, !running);
 		_splitAddButton.Enabled = !running;
@@ -14862,6 +15169,14 @@ internal sealed class MainForm : Form
 		_splitScreenOutputBrowseButton.Enabled = !running;
 		_splitScreenResetButton.Enabled = !running;
 		_splitScreenStartButton.Enabled = !running;
+		if (_splitScreenPlayPreviewButton != null)
+		{
+			_splitScreenPlayPreviewButton.Enabled = !running;
+		}
+		if (_splitScreenPreviewDuration != null)
+		{
+			_splitScreenPreviewDuration.Enabled = !running;
+		}
 		_splitScreenCancelButton.Enabled = running;
 		SetBgmControlsEnabled(_splitScreenBgm, !running);
 		SetVideoAdjustmentEditorEnabled(_mergeAdjustmentEditor, !running);

@@ -4,6 +4,7 @@
     <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
     <OutputType>WinExe</OutputType>
     <UseWindowsForms>True</UseWindowsForms>
+    <UseWPF>True</UseWPF>
     <TargetFramework>net48</TargetFramework>
   </PropertyGroup>
   <PropertyGroup>
