@@ -1097,7 +1097,6 @@ internal sealed class MainForm : Form
 		};
 		StyleTechSplitter(mergeMainSplitter);
 		mergeMainSplitter.Panel1.Controls.Add(panel3);
-		mergeMainSplitter.Panel1MinSize = 140;
 
 		Panel mergeBottomScrollHost = new Panel
 		{
@@ -1110,7 +1109,6 @@ internal sealed class MainForm : Form
 		panel5.Height = 475;
 		mergeBottomScrollHost.Controls.Add(panel5);
 		mergeMainSplitter.Panel2.Controls.Add(mergeBottomScrollHost);
-		mergeMainSplitter.Panel2MinSize = 180;
 
 		tabPage.Controls.Add(mergeMainSplitter);
 		mergeMainSplitter.BringToFront();
@@ -1121,9 +1119,16 @@ internal sealed class MainForm : Form
 			{
 				try
 				{
-					if (mergeMainSplitter.ClientSize.Height > 550)
+					if (mergeMainSplitter.ClientSize.Height > 450)
 					{
-						mergeMainSplitter.SplitterDistance = Math.Max(180, mergeMainSplitter.ClientSize.Height - 485);
+						mergeMainSplitter.Panel1MinSize = 100;
+						mergeMainSplitter.Panel2MinSize = 120;
+						int targetDist = Math.Max(120, mergeMainSplitter.ClientSize.Height - 485);
+						if (targetDist >= mergeMainSplitter.Panel1MinSize &&
+						    targetDist <= mergeMainSplitter.ClientSize.Height - mergeMainSplitter.Panel2MinSize)
+						{
+							mergeMainSplitter.SplitterDistance = targetDist;
+						}
 					}
 				}
 				catch { }
@@ -1272,7 +1277,6 @@ internal sealed class MainForm : Form
 		};
 		StyleTechSplitter(splitTabSplitter);
 		splitTabSplitter.Panel1.Controls.Add(panel3);
-		splitTabSplitter.Panel1MinSize = 140;
 
 		Panel splitBottomScrollHost = new Panel
 		{
@@ -1285,7 +1289,6 @@ internal sealed class MainForm : Form
 		panel5.Height = 335;
 		splitBottomScrollHost.Controls.Add(panel5);
 		splitTabSplitter.Panel2.Controls.Add(splitBottomScrollHost);
-		splitTabSplitter.Panel2MinSize = 180;
 
 		tabPage.Controls.Add(splitTabSplitter);
 		splitTabSplitter.BringToFront();
@@ -1296,9 +1299,16 @@ internal sealed class MainForm : Form
 			{
 				try
 				{
-					if (splitTabSplitter.ClientSize.Height > 450)
+					if (splitTabSplitter.ClientSize.Height > 380)
 					{
-						splitTabSplitter.SplitterDistance = Math.Max(160, splitTabSplitter.ClientSize.Height - 345);
+						splitTabSplitter.Panel1MinSize = 100;
+						splitTabSplitter.Panel2MinSize = 120;
+						int targetDist = Math.Max(120, splitTabSplitter.ClientSize.Height - 345);
+						if (targetDist >= splitTabSplitter.Panel1MinSize &&
+						    targetDist <= splitTabSplitter.ClientSize.Height - splitTabSplitter.Panel2MinSize)
+						{
+							splitTabSplitter.SplitterDistance = targetDist;
+						}
 					}
 				}
 				catch { }
@@ -2206,7 +2216,6 @@ internal sealed class MainForm : Form
 			BackColor = Color.FromArgb(16, 20, 28)
 		};
 		StyleTechSplitter(splitScreenLeftSplitter);
-		splitScreenLeftSplitter.Panel1MinSize = 200;
 
 		SplitContainer splitScreenCenterRightSplitter = new SplitContainer
 		{
@@ -2216,8 +2225,6 @@ internal sealed class MainForm : Form
 			BackColor = Color.FromArgb(16, 20, 28)
 		};
 		StyleTechSplitter(splitScreenCenterRightSplitter);
-		splitScreenCenterRightSplitter.Panel1MinSize = 240;
-		splitScreenCenterRightSplitter.Panel2MinSize = 260;
 
 		splitScreenLeftSplitter.Panel2.Controls.Add(splitScreenCenterRightSplitter);
 		splitScreenMainSplitter.Panel1.Controls.Add(splitScreenLeftSplitter);
@@ -2230,7 +2237,6 @@ internal sealed class MainForm : Form
 			Padding = new Padding(0)
 		};
 		splitScreenMainSplitter.Panel2.Controls.Add(splitScreenBottomScrollHost);
-		splitScreenMainSplitter.Panel2MinSize = 180;
 		tabPage2.Controls.Add(splitScreenMainSplitter);
 		GroupBox groupBox = new GroupBox();
 		groupBox.Text = "① 选择拼屏模板";
@@ -2812,15 +2818,36 @@ internal sealed class MainForm : Form
 				{
 					if (splitScreenLeftSplitter.ClientSize.Width > 580)
 					{
-						splitScreenLeftSplitter.SplitterDistance = 310;
+						splitScreenLeftSplitter.Panel1MinSize = 120;
+						splitScreenLeftSplitter.Panel2MinSize = 200;
+						int targetDist = 310;
+						if (targetDist >= splitScreenLeftSplitter.Panel1MinSize &&
+						    targetDist <= splitScreenLeftSplitter.ClientSize.Width - splitScreenLeftSplitter.Panel2MinSize)
+						{
+							splitScreenLeftSplitter.SplitterDistance = targetDist;
+						}
 					}
-					if (splitScreenCenterRightSplitter.ClientSize.Width > 520)
+					if (splitScreenCenterRightSplitter.ClientSize.Width > 500)
 					{
-						splitScreenCenterRightSplitter.SplitterDistance = Math.Max(260, splitScreenCenterRightSplitter.ClientSize.Width - 380);
+						splitScreenCenterRightSplitter.Panel1MinSize = 180;
+						splitScreenCenterRightSplitter.Panel2MinSize = 200;
+						int targetDist = Math.Max(200, splitScreenCenterRightSplitter.ClientSize.Width - 380);
+						if (targetDist >= splitScreenCenterRightSplitter.Panel1MinSize &&
+						    targetDist <= splitScreenCenterRightSplitter.ClientSize.Width - splitScreenCenterRightSplitter.Panel2MinSize)
+						{
+							splitScreenCenterRightSplitter.SplitterDistance = targetDist;
+						}
 					}
-					if (splitScreenMainSplitter.ClientSize.Height > 450)
+					if (splitScreenMainSplitter.ClientSize.Height > 420)
 					{
-						splitScreenMainSplitter.SplitterDistance = Math.Max(240, splitScreenMainSplitter.ClientSize.Height - 395);
+						splitScreenMainSplitter.Panel1MinSize = 120;
+						splitScreenMainSplitter.Panel2MinSize = 140;
+						int targetDist = Math.Max(180, splitScreenMainSplitter.ClientSize.Height - 395);
+						if (targetDist >= splitScreenMainSplitter.Panel1MinSize &&
+						    targetDist <= splitScreenMainSplitter.ClientSize.Height - splitScreenMainSplitter.Panel2MinSize)
+						{
+							splitScreenMainSplitter.SplitterDistance = targetDist;
+						}
 					}
 					LayoutSplitScreenPreview(previewSurface);
 				}
@@ -6386,54 +6413,63 @@ internal sealed class MainForm : Form
 		return path;
 	}
 
+	private static readonly System.Collections.Generic.HashSet<Button> _glassStyledButtons = new System.Collections.Generic.HashSet<Button>();
+
 	private static void StyleTechSplitter(SplitContainer sc)
 	{
 		sc.SplitterWidth = 7;
 		sc.BackColor = Color.FromArgb(16, 20, 28);
 		sc.Paint += delegate(object sender, PaintEventArgs e)
 		{
-			Rectangle rect = sc.SplitterRectangle;
-			using (Brush bgBrush = new SolidBrush(Color.FromArgb(24, 29, 40)))
+			try
 			{
-				e.Graphics.FillRectangle(bgBrush, rect);
-			}
-			using (Pen pen = new Pen(Color.FromArgb(46, 55, 74)))
-			{
-				if (sc.Orientation == Orientation.Horizontal)
+				Rectangle rect = sc.SplitterRectangle;
+				if (rect.Width <= 0 || rect.Height <= 0) return;
+				using (Brush bgBrush = new SolidBrush(Color.FromArgb(24, 29, 40)))
 				{
-					e.Graphics.DrawLine(pen, rect.Left, rect.Top, rect.Right, rect.Top);
-					e.Graphics.DrawLine(pen, rect.Left, rect.Bottom - 1, rect.Right, rect.Bottom - 1);
-					int midX = rect.Left + rect.Width / 2;
-					int midY = rect.Top + rect.Height / 2;
-					using (Brush dotBrush = new SolidBrush(Color.FromArgb(130, 145, 175)))
+					e.Graphics.FillRectangle(bgBrush, rect);
+				}
+				using (Pen pen = new Pen(Color.FromArgb(46, 55, 74)))
+				{
+					if (sc.Orientation == Orientation.Horizontal)
 					{
-						e.Graphics.FillRectangle(dotBrush, midX - 16, midY - 1, 6, 2);
-						e.Graphics.FillRectangle(dotBrush, midX - 3, midY - 1, 6, 2);
-						e.Graphics.FillRectangle(dotBrush, midX + 10, midY - 1, 6, 2);
+						e.Graphics.DrawLine(pen, rect.Left, rect.Top, rect.Right, rect.Top);
+						e.Graphics.DrawLine(pen, rect.Left, rect.Bottom - 1, rect.Right, rect.Bottom - 1);
+						int midX = rect.Left + rect.Width / 2;
+						int midY = rect.Top + rect.Height / 2;
+						using (Brush dotBrush = new SolidBrush(Color.FromArgb(130, 145, 175)))
+						{
+							e.Graphics.FillRectangle(dotBrush, midX - 16, midY - 1, 6, 2);
+							e.Graphics.FillRectangle(dotBrush, midX - 3, midY - 1, 6, 2);
+							e.Graphics.FillRectangle(dotBrush, midX + 10, midY - 1, 6, 2);
+						}
+					}
+					else
+					{
+						e.Graphics.DrawLine(pen, rect.Left, rect.Top, rect.Left, rect.Bottom);
+						e.Graphics.DrawLine(pen, rect.Right - 1, rect.Top, rect.Right - 1, rect.Bottom);
+						int midX = rect.Left + rect.Width / 2;
+						int midY = rect.Top + rect.Height / 2;
+						using (Brush dotBrush = new SolidBrush(Color.FromArgb(130, 145, 175)))
+						{
+							e.Graphics.FillRectangle(dotBrush, midX - 1, midY - 16, 2, 6);
+							e.Graphics.FillRectangle(dotBrush, midX - 1, midY - 3, 2, 6);
+							e.Graphics.FillRectangle(dotBrush, midX - 1, midY + 10, 2, 6);
+						}
 					}
 				}
-				else
-				{
-					e.Graphics.DrawLine(pen, rect.Left, rect.Top, rect.Left, rect.Bottom);
-					e.Graphics.DrawLine(pen, rect.Right - 1, rect.Top, rect.Right - 1, rect.Bottom);
-					int midX = rect.Left + rect.Width / 2;
-					int midY = rect.Top + rect.Height / 2;
-					using (Brush dotBrush = new SolidBrush(Color.FromArgb(130, 145, 175)))
-					{
-						e.Graphics.FillRectangle(dotBrush, midX - 1, midY - 16, 2, 6);
-						e.Graphics.FillRectangle(dotBrush, midX - 1, midY - 3, 2, 6);
-						e.Graphics.FillRectangle(dotBrush, midX - 1, midY + 10, 2, 6);
-					}
-				}
 			}
+			catch { }
 		};
 	}
 
 	private static void ApplyGlassButtonEffects(Button button)
 	{
 		if (button == null) return;
-		if (button.Tag is string tag && tag == "glass_styled") return;
-		button.Tag = (button.Tag as string) ?? "normal";
+		if (_glassStyledButtons.Contains(button)) return;
+		_glassStyledButtons.Add(button);
+		button.Disposed += delegate { _glassStyledButtons.Remove(button); };
+
 		button.FlatStyle = FlatStyle.Flat;
 		button.FlatAppearance.BorderSize = 0;
 		button.Cursor = Cursors.Hand;
@@ -6448,135 +6484,146 @@ internal sealed class MainForm : Form
 
 		button.Paint += delegate(object sender, PaintEventArgs e)
 		{
-			Graphics g = e.Graphics;
-			g.SmoothingMode = SmoothingMode.AntiAlias;
-			g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-			g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-
-			Rectangle bounds = button.ClientRectangle;
-			bounds.Width -= 1;
-			bounds.Height -= 1;
-			if (bounds.Width < 2 || bounds.Height < 2) return;
-
-			bool isPrimary = (button.Tag as string) == "primary" || 
-			                 button.Text.StartsWith("开始") || 
-			                 button.Text.StartsWith("直接加水印") || 
-			                 button.Text.Contains("播放");
-
-			bool isDanger = (button.Tag as string) == "danger" || 
-			                button.Text == "重置全部设置" || 
-			                button.Text == "清空" || 
-			                button.Text == "取消";
-
-			bool isEnabled = button.Enabled;
-
-			Color topGrad, botGrad, borderColor, specularColor, textColor;
-
-			if (!isEnabled)
+			try
 			{
-				topGrad = Color.FromArgb(28, 33, 44);
-				botGrad = Color.FromArgb(20, 24, 32);
-				borderColor = Color.FromArgb(40, 46, 60);
-				specularColor = Color.Transparent;
-				textColor = Color.FromArgb(100, 112, 130);
-			}
-			else if (isPrimary)
-			{
-				if (isPressed)
+				Graphics g = e.Graphics;
+				g.SmoothingMode = SmoothingMode.AntiAlias;
+				g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+				g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+
+				Rectangle bounds = button.ClientRectangle;
+				bounds.Width -= 1;
+				bounds.Height -= 1;
+				if (bounds.Width < 2 || bounds.Height < 2) return;
+
+				bool isPrimary = (button.Tag as string) == "primary" || 
+				                 button.Text.StartsWith("开始") || 
+				                 button.Text.StartsWith("直接加水印") || 
+				                 button.Text.Contains("播放");
+
+				bool isDanger = (button.Tag as string) == "danger" || 
+				                button.Text == "重置全部设置" || 
+				                button.Text == "清空" || 
+				                button.Text == "取消";
+
+				bool isEnabled = button.Enabled;
+
+				Color topGrad, botGrad, borderColor, specularColor, textColor;
+
+				if (!isEnabled)
 				{
-					topGrad = Color.FromArgb(29, 78, 216);
-					botGrad = Color.FromArgb(30, 58, 138);
-					borderColor = Color.FromArgb(59, 130, 246);
-					specularColor = Color.FromArgb(40, 255, 255, 255);
-				}
-				else if (isHover)
-				{
-					topGrad = Color.FromArgb(96, 165, 250);
-					botGrad = Color.FromArgb(37, 99, 235);
-					borderColor = Color.FromArgb(147, 197, 253);
-					specularColor = Color.FromArgb(130, 255, 255, 255);
-				}
-				else
-				{
-					topGrad = Color.FromArgb(59, 130, 246);
-					botGrad = Color.FromArgb(29, 78, 216);
-					borderColor = Color.FromArgb(96, 165, 250);
-					specularColor = Color.FromArgb(80, 255, 255, 255);
-				}
-				textColor = Color.White;
-			}
-			else if (isDanger)
-			{
-				if (isPressed)
-				{
-					topGrad = Color.FromArgb(127, 29, 29);
-					botGrad = Color.FromArgb(69, 10, 10);
-					borderColor = Color.FromArgb(185, 28, 28);
-					specularColor = Color.FromArgb(30, 255, 200, 210);
-				}
-				else if (isHover)
-				{
-					topGrad = Color.FromArgb(185, 28, 28);
-					botGrad = Color.FromArgb(127, 29, 29);
-					borderColor = Color.FromArgb(248, 113, 113);
-					specularColor = Color.FromArgb(70, 255, 220, 230);
-				}
-				else
-				{
-					topGrad = Color.FromArgb(69, 18, 24);
-					botGrad = Color.FromArgb(42, 12, 16);
-					borderColor = Color.FromArgb(153, 27, 27);
-					specularColor = Color.FromArgb(45, 255, 200, 210);
-				}
-				textColor = Color.FromArgb(254, 205, 211);
-			}
-			else
-			{
-				if (isPressed)
-				{
-					topGrad = Color.FromArgb(22, 26, 36);
-					botGrad = Color.FromArgb(18, 21, 29);
-					borderColor = Color.FromArgb(55, 65, 85);
+					topGrad = Color.FromArgb(28, 33, 44);
+					botGrad = Color.FromArgb(20, 24, 32);
+					borderColor = Color.FromArgb(40, 46, 60);
 					specularColor = Color.Transparent;
+					textColor = Color.FromArgb(100, 112, 130);
 				}
-				else if (isHover)
+				else if (isPrimary)
 				{
-					topGrad = Color.FromArgb(48, 56, 76);
-					botGrad = Color.FromArgb(34, 40, 54);
-					borderColor = Color.FromArgb(96, 115, 148);
-					specularColor = Color.FromArgb(70, 255, 255, 255);
+					if (isPressed)
+					{
+						topGrad = Color.FromArgb(29, 78, 216);
+						botGrad = Color.FromArgb(30, 58, 138);
+						borderColor = Color.FromArgb(59, 130, 246);
+						specularColor = Color.FromArgb(40, 255, 255, 255);
+					}
+					else if (isHover)
+					{
+						topGrad = Color.FromArgb(96, 165, 250);
+						botGrad = Color.FromArgb(37, 99, 235);
+						borderColor = Color.FromArgb(147, 197, 253);
+						specularColor = Color.FromArgb(130, 255, 255, 255);
+					}
+					else
+					{
+						topGrad = Color.FromArgb(59, 130, 246);
+						botGrad = Color.FromArgb(29, 78, 216);
+						borderColor = Color.FromArgb(96, 165, 250);
+						specularColor = Color.FromArgb(80, 255, 255, 255);
+					}
+					textColor = Color.White;
+				}
+				else if (isDanger)
+				{
+					if (isPressed)
+					{
+						topGrad = Color.FromArgb(127, 29, 29);
+						botGrad = Color.FromArgb(69, 10, 10);
+						borderColor = Color.FromArgb(185, 28, 28);
+						specularColor = Color.FromArgb(30, 255, 200, 210);
+					}
+					else if (isHover)
+					{
+						topGrad = Color.FromArgb(185, 28, 28);
+						botGrad = Color.FromArgb(127, 29, 29);
+						borderColor = Color.FromArgb(248, 113, 113);
+						specularColor = Color.FromArgb(70, 255, 220, 230);
+					}
+					else
+					{
+						topGrad = Color.FromArgb(69, 18, 24);
+						botGrad = Color.FromArgb(42, 12, 16);
+						borderColor = Color.FromArgb(153, 27, 27);
+						specularColor = Color.FromArgb(45, 255, 200, 210);
+					}
+					textColor = Color.FromArgb(254, 205, 211);
 				}
 				else
 				{
-					topGrad = Color.FromArgb(36, 42, 58);
-					botGrad = Color.FromArgb(25, 30, 42);
-					borderColor = Color.FromArgb(60, 72, 96);
-					specularColor = Color.FromArgb(40, 255, 255, 255);
-				}
-				textColor = isHover ? Color.White : Color.FromArgb(226, 232, 240);
-			}
-
-			using (GraphicsPath path = CreateRoundedRectanglePath(bounds, 5))
-			{
-				using (LinearGradientBrush lgb = new LinearGradientBrush(bounds, topGrad, botGrad, LinearGradientMode.Vertical))
-				{
-					g.FillPath(lgb, path);
-				}
-				if (specularColor.A > 0)
-				{
-					using (Pen specPen = new Pen(specularColor, 1f))
+					if (isPressed)
 					{
-						g.DrawLine(specPen, bounds.Left + 5, bounds.Top + 1, bounds.Right - 5, bounds.Top + 1);
+						topGrad = Color.FromArgb(22, 26, 36);
+						botGrad = Color.FromArgb(18, 21, 29);
+						borderColor = Color.FromArgb(55, 65, 85);
+						specularColor = Color.Transparent;
+					}
+					else if (isHover)
+					{
+						topGrad = Color.FromArgb(48, 56, 76);
+						botGrad = Color.FromArgb(34, 40, 54);
+						borderColor = Color.FromArgb(96, 115, 148);
+						specularColor = Color.FromArgb(70, 255, 255, 255);
+					}
+					else
+					{
+						topGrad = Color.FromArgb(36, 42, 58);
+						botGrad = Color.FromArgb(25, 30, 42);
+						borderColor = Color.FromArgb(60, 72, 96);
+						specularColor = Color.FromArgb(40, 255, 255, 255);
+					}
+					textColor = isHover ? Color.White : Color.FromArgb(226, 232, 240);
+				}
+
+				using (GraphicsPath path = CreateRoundedRectanglePath(bounds, 5))
+				{
+					using (LinearGradientBrush lgb = new LinearGradientBrush(bounds, topGrad, botGrad, LinearGradientMode.Vertical))
+					{
+						g.FillPath(lgb, path);
+					}
+					if (specularColor.A > 0)
+					{
+						using (Pen specPen = new Pen(specularColor, 1f))
+						{
+							g.DrawLine(specPen, bounds.Left + 5, bounds.Top + 1, bounds.Right - 5, bounds.Top + 1);
+						}
+					}
+					using (Pen borderPen = new Pen(borderColor, 1f))
+					{
+						g.DrawPath(borderPen, path);
 					}
 				}
-				using (Pen borderPen = new Pen(borderColor, 1f))
+
+				Font btnFont = (isPrimary || isDanger) ? new Font(button.Font, FontStyle.Bold) : button.Font;
+				try
 				{
-					g.DrawPath(borderPen, path);
+					TextRenderer.DrawText(g, button.Text, btnFont, bounds, textColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+				}
+				finally
+				{
+					if (btnFont != button.Font) btnFont.Dispose();
 				}
 			}
-
-			Font btnFont = (isPrimary || isDanger) ? new Font(button.Font, FontStyle.Bold) : button.Font;
-			TextRenderer.DrawText(g, button.Text, btnFont, bounds, textColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+			catch { }
 		};
 	}
 
