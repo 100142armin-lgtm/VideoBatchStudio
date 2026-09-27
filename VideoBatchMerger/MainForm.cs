@@ -19,21 +19,23 @@ namespace VideoBatchMerger;
 
 internal sealed class MainForm : Form
 {
-	private static readonly Color CanvasColor = Color.FromArgb(246, 248, 252);
+	private static readonly Color CanvasColor = Color.FromArgb(16, 20, 28);
 
-	private static readonly Color SurfaceColor = Color.White;
+	private static readonly Color SurfaceColor = Color.FromArgb(24, 29, 40);
 
-	private static readonly Color InkColor = Color.FromArgb(31, 41, 55);
+	private static readonly Color SurfaceAltColor = Color.FromArgb(32, 38, 52);
 
-	private static readonly Color MutedColor = Color.FromArgb(100, 116, 139);
+	private static readonly Color InkColor = Color.FromArgb(241, 245, 249);
 
-	private static readonly Color BorderColor = Color.FromArgb(222, 229, 238);
+	private static readonly Color MutedColor = Color.FromArgb(148, 163, 184);
 
-	private static readonly Color AccentColor = Color.FromArgb(37, 99, 235);
+	private static readonly Color BorderColor = Color.FromArgb(46, 55, 74);
 
-	private static readonly Color AccentHoverColor = Color.FromArgb(29, 78, 216);
+	private static readonly Color AccentColor = Color.FromArgb(59, 130, 246);
 
-	private static readonly Color HeaderColor = Color.FromArgb(25, 52, 87);
+	private static readonly Color AccentHoverColor = Color.FromArgb(96, 165, 250);
+
+	private static readonly Color HeaderColor = Color.FromArgb(11, 14, 20);
 
 	private static readonly object WatermarkFontLock = new object();
 
@@ -783,6 +785,7 @@ internal sealed class MainForm : Form
 		tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 60f));
 		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+		base.BackColor = CanvasColor;
 		base.Controls.Add(tableLayoutPanel);
 		Panel header = new Panel();
 		header.Dock = DockStyle.Fill;
@@ -791,7 +794,7 @@ internal sealed class MainForm : Form
 		Panel panel = new Panel();
 		panel.Dock = DockStyle.Bottom;
 		panel.Height = 3;
-		panel.BackColor = Color.FromArgb(59, 130, 246);
+		panel.BackColor = AccentColor;
 		Panel value = panel;
 		header.Controls.Add(value);
 		Label label = new Label();
@@ -802,10 +805,9 @@ internal sealed class MainForm : Form
 		label.Text = "视频批处理工具 V7.5  ·  合并 / 拆分 / 水印 / 视频拼屏 / 图片成片 / BGM";
 		header.Controls.Add(label);
 		_globalResetButton = MakeButton("重置全部设置", 126);
+		_globalResetButton.Tag = "danger";
 		_globalResetButton.Location = new Point(0, 14);
 		_globalResetButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-		_globalResetButton.BackColor = Color.FromArgb(255, 247, 237);
-		_globalResetButton.ForeColor = Color.FromArgb(154, 52, 18);
 		header.Controls.Add(_globalResetButton);
 		header.Resize += delegate
 		{
@@ -828,21 +830,13 @@ internal sealed class MainForm : Form
 	private TabPage BuildMergeTab()
 	{
 		TabPage tabPage = new TabPage("批量合并");
-		tabPage.BackColor = Color.FromArgb(245, 247, 250);
-		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel();
-		tableLayoutPanel.Dock = DockStyle.Fill;
-		tableLayoutPanel.ColumnCount = 1;
-		tableLayoutPanel.RowCount = 3;
-		tableLayoutPanel.Margin = new Padding(0);
-		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
-		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 473f));
-		tabPage.Controls.Add(tableLayoutPanel);
+		tabPage.BackColor = CanvasColor;
 		Panel panel = new Panel();
-		panel.Dock = DockStyle.Fill;
+		panel.Dock = DockStyle.Top;
+		panel.Height = 52;
 		panel.Margin = new Padding(0);
-		panel.Padding = new Padding(12, 10, 12, 6);
-		panel.BackColor = Color.White;
+		panel.Padding = new Padding(12, 9, 12, 6);
+		panel.BackColor = SurfaceColor;
 		Panel panel2 = panel;
 		_addButton = MakeButton("＋ 添加视频", 106);
 		_removeButton = MakeButton("移除", 68);
@@ -867,12 +861,11 @@ internal sealed class MainForm : Form
 		flowLayoutPanel2.Controls.Add(_mergeResetButton);
 		flowLayoutPanel2.Controls.Add(_countLabel);
 		panel2.Controls.Add(flowLayoutPanel2);
-		tableLayoutPanel.Controls.Add(panel2, 0, 0);
+		tabPage.Controls.Add(panel2);
 		Panel panel3 = MakeListHost();
 		_videoList = MakeVideoList();
 		_mergeAdjustmentEditor = MakeVideoAdjustmentEditor();
 		InstallVideoListArea(panel3, _videoList, _mergeAdjustmentEditor);
-		tableLayoutPanel.Controls.Add(panel3, 0, 1);
 		Panel panel4 = new Panel();
 		panel4.Dock = DockStyle.Fill;
 		panel4.Margin = new Padding(0);
@@ -1095,8 +1088,47 @@ internal sealed class MainForm : Form
 		panel5.Controls.Add(_mergePreviewButton);
 		Label label = MakeLabel("每批会自动创建“日期_批量合并_编号”文件夹；原视频不会被修改。", 465, 431);
 		label.ForeColor = Color.FromArgb(110, 119, 132);
-		panel5.Controls.Add(label);
-		tableLayoutPanel.Controls.Add(panel5, 0, 2);
+		SplitContainer mergeMainSplitter = new SplitContainer
+		{
+			Dock = DockStyle.Fill,
+			Orientation = Orientation.Horizontal,
+			SplitterWidth = 7,
+			BackColor = Color.FromArgb(16, 20, 28)
+		};
+		StyleTechSplitter(mergeMainSplitter);
+		mergeMainSplitter.Panel1.Controls.Add(panel3);
+		mergeMainSplitter.Panel1MinSize = 140;
+
+		Panel mergeBottomScrollHost = new Panel
+		{
+			Dock = DockStyle.Fill,
+			AutoScroll = true,
+			BackColor = SurfaceColor,
+			Padding = new Padding(0)
+		};
+		panel5.Dock = DockStyle.Top;
+		panel5.Height = 475;
+		mergeBottomScrollHost.Controls.Add(panel5);
+		mergeMainSplitter.Panel2.Controls.Add(mergeBottomScrollHost);
+		mergeMainSplitter.Panel2MinSize = 180;
+
+		tabPage.Controls.Add(mergeMainSplitter);
+		mergeMainSplitter.BringToFront();
+
+		tabPage.HandleCreated += delegate
+		{
+			BeginInvoke((Action)delegate
+			{
+				try
+				{
+					if (mergeMainSplitter.ClientSize.Height > 550)
+					{
+						mergeMainSplitter.SplitterDistance = Math.Max(180, mergeMainSplitter.ClientSize.Height - 485);
+					}
+				}
+				catch { }
+			});
+		};
 		UpdateMergePlanningUi();
 		return tabPage;
 	}
@@ -1104,22 +1136,13 @@ internal sealed class MainForm : Form
 	private TabPage BuildSplitTab()
 	{
 		TabPage tabPage = new TabPage("视频拆分");
-		tabPage.BackColor = Color.FromArgb(245, 247, 250);
-		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel();
-		tableLayoutPanel.Dock = DockStyle.Fill;
-		tableLayoutPanel.ColumnCount = 1;
-		tableLayoutPanel.RowCount = 3;
-		tableLayoutPanel.Margin = new Padding(0);
-		TableLayoutPanel tableLayoutPanel2 = tableLayoutPanel;
-		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
-		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Absolute, 334f));
-		tabPage.Controls.Add(tableLayoutPanel2);
+		tabPage.BackColor = CanvasColor;
 		Panel panel = new Panel();
-		panel.Dock = DockStyle.Fill;
+		panel.Dock = DockStyle.Top;
+		panel.Height = 52;
 		panel.Margin = new Padding(0);
-		panel.Padding = new Padding(12, 10, 12, 6);
-		panel.BackColor = Color.White;
+		panel.Padding = new Padding(12, 9, 12, 6);
+		panel.BackColor = SurfaceColor;
 		Panel panel2 = panel;
 		_splitAddButton = MakeButton("＋ 添加视频", 106);
 		_splitRemoveButton = MakeButton("移除", 68);
@@ -1136,12 +1159,11 @@ internal sealed class MainForm : Form
 		flowLayoutPanel2.Controls.Add(_splitResetButton);
 		flowLayoutPanel2.Controls.Add(_splitCountLabel);
 		panel2.Controls.Add(flowLayoutPanel2);
-		tableLayoutPanel2.Controls.Add(panel2, 0, 0);
+		tabPage.Controls.Add(panel2);
 		Panel panel3 = MakeListHost();
 		_splitVideoList = MakeVideoList();
 		_splitAdjustmentEditor = MakeVideoAdjustmentEditor();
 		InstallVideoListArea(panel3, _splitVideoList, _splitAdjustmentEditor);
-		tableLayoutPanel2.Controls.Add(panel3, 0, 1);
 		Panel panel4 = new Panel();
 		panel4.Dock = DockStyle.Fill;
 		panel4.Margin = new Padding(0);
@@ -1241,8 +1263,47 @@ internal sealed class MainForm : Form
 		panel5.Controls.Add(_splitCancelButton);
 		Label label = MakeLabel("每批自动创建“日期_视频拆分_编号”文件夹；可在“水印处理”中勾选水印。", 292, 277);
 		label.ForeColor = Color.FromArgb(110, 119, 132);
-		panel5.Controls.Add(label);
-		tableLayoutPanel2.Controls.Add(panel5, 0, 2);
+		SplitContainer splitTabSplitter = new SplitContainer
+		{
+			Dock = DockStyle.Fill,
+			Orientation = Orientation.Horizontal,
+			SplitterWidth = 7,
+			BackColor = Color.FromArgb(16, 20, 28)
+		};
+		StyleTechSplitter(splitTabSplitter);
+		splitTabSplitter.Panel1.Controls.Add(panel3);
+		splitTabSplitter.Panel1MinSize = 140;
+
+		Panel splitBottomScrollHost = new Panel
+		{
+			Dock = DockStyle.Fill,
+			AutoScroll = true,
+			BackColor = SurfaceColor,
+			Padding = new Padding(0)
+		};
+		panel5.Dock = DockStyle.Top;
+		panel5.Height = 335;
+		splitBottomScrollHost.Controls.Add(panel5);
+		splitTabSplitter.Panel2.Controls.Add(splitBottomScrollHost);
+		splitTabSplitter.Panel2MinSize = 180;
+
+		tabPage.Controls.Add(splitTabSplitter);
+		splitTabSplitter.BringToFront();
+
+		tabPage.HandleCreated += delegate
+		{
+			BeginInvoke((Action)delegate
+			{
+				try
+				{
+					if (splitTabSplitter.ClientSize.Height > 450)
+					{
+						splitTabSplitter.SplitterDistance = Math.Max(160, splitTabSplitter.ClientSize.Height - 345);
+					}
+				}
+				catch { }
+			});
+		};
 		UpdateSplitModeUi();
 		return tabPage;
 	}
@@ -1250,7 +1311,7 @@ internal sealed class MainForm : Form
 	private TabPage BuildWatermarkTab()
 	{
 		TabPage tabPage = new TabPage("水印处理");
-		tabPage.BackColor = Color.FromArgb(245, 247, 250);
+		tabPage.BackColor = CanvasColor;
 		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel();
 		tableLayoutPanel.Dock = DockStyle.Fill;
 		tableLayoutPanel.ColumnCount = 1;
@@ -1528,7 +1589,7 @@ internal sealed class MainForm : Form
 	private TabPage BuildImageVideoTab()
 	{
 		TabPage tabPage = new TabPage("图片成片");
-		tabPage.BackColor = Color.FromArgb(245, 247, 250);
+		tabPage.BackColor = CanvasColor;
 		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel();
 		tableLayoutPanel.Dock = DockStyle.Fill;
 		tableLayoutPanel.ColumnCount = 1;
@@ -2128,26 +2189,49 @@ internal sealed class MainForm : Form
 		TabPage tabPage = new TabPage("视频拼屏");
 		tabPage.BackColor = Color.FromArgb(245, 247, 250);
 		TabPage tabPage2 = tabPage;
-		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel();
-		tableLayoutPanel.Dock = DockStyle.Fill;
-		tableLayoutPanel.ColumnCount = 1;
-		tableLayoutPanel.RowCount = 2;
-		tableLayoutPanel.Margin = new Padding(0);
-		TableLayoutPanel tableLayoutPanel2 = tableLayoutPanel;
-		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Absolute, 382f));
-		tabPage2.Controls.Add(tableLayoutPanel2);
-		TableLayoutPanel tableLayoutPanel3 = new TableLayoutPanel();
-		tableLayoutPanel3.Dock = DockStyle.Fill;
-		tableLayoutPanel3.ColumnCount = 3;
-		tableLayoutPanel3.RowCount = 1;
-		tableLayoutPanel3.Margin = new Padding(8, 7, 8, 4);
-		tableLayoutPanel3.BackColor = Color.FromArgb(245, 247, 250);
-		TableLayoutPanel tableLayoutPanel4 = tableLayoutPanel3;
-		tableLayoutPanel4.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330f));
-		tableLayoutPanel4.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-		tableLayoutPanel4.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 390f));
-		tableLayoutPanel2.Controls.Add(tableLayoutPanel4, 0, 0);
+		SplitContainer splitScreenMainSplitter = new SplitContainer
+		{
+			Dock = DockStyle.Fill,
+			Orientation = Orientation.Horizontal,
+			SplitterWidth = 7,
+			BackColor = Color.FromArgb(16, 20, 28)
+		};
+		StyleTechSplitter(splitScreenMainSplitter);
+
+		SplitContainer splitScreenLeftSplitter = new SplitContainer
+		{
+			Dock = DockStyle.Fill,
+			Orientation = Orientation.Vertical,
+			SplitterWidth = 7,
+			BackColor = Color.FromArgb(16, 20, 28)
+		};
+		StyleTechSplitter(splitScreenLeftSplitter);
+		splitScreenLeftSplitter.Panel1MinSize = 200;
+
+		SplitContainer splitScreenCenterRightSplitter = new SplitContainer
+		{
+			Dock = DockStyle.Fill,
+			Orientation = Orientation.Vertical,
+			SplitterWidth = 7,
+			BackColor = Color.FromArgb(16, 20, 28)
+		};
+		StyleTechSplitter(splitScreenCenterRightSplitter);
+		splitScreenCenterRightSplitter.Panel1MinSize = 240;
+		splitScreenCenterRightSplitter.Panel2MinSize = 260;
+
+		splitScreenLeftSplitter.Panel2.Controls.Add(splitScreenCenterRightSplitter);
+		splitScreenMainSplitter.Panel1.Controls.Add(splitScreenLeftSplitter);
+
+		Panel splitScreenBottomScrollHost = new Panel
+		{
+			Dock = DockStyle.Fill,
+			AutoScroll = true,
+			BackColor = SurfaceColor,
+			Padding = new Padding(0)
+		};
+		splitScreenMainSplitter.Panel2.Controls.Add(splitScreenBottomScrollHost);
+		splitScreenMainSplitter.Panel2MinSize = 180;
+		tabPage2.Controls.Add(splitScreenMainSplitter);
 		GroupBox groupBox = new GroupBox();
 		groupBox.Text = "① 选择拼屏模板";
 		groupBox.Dock = DockStyle.Fill;
@@ -2166,7 +2250,7 @@ internal sealed class MainForm : Form
 		AddSplitScreenPresetPage(_splitScreenPresetTabs, "多格", _splitScreenGridPresets);
 		AddSplitScreenPresetPage(_splitScreenPresetTabs, "画中画", _splitScreenPipPresets);
 		groupBox2.Controls.Add(_splitScreenPresetTabs);
-		tableLayoutPanel4.Controls.Add(groupBox2, 0, 0);
+		splitScreenLeftSplitter.Panel1.Controls.Add(groupBox2);
 		Panel panel = new Panel();
 		panel.Dock = DockStyle.Fill;
 		panel.Margin = new Padding(0, 0, 7, 0);
@@ -2239,7 +2323,19 @@ internal sealed class MainForm : Form
 		{
 			LayoutSplitScreenPreview(previewSurface);
 		};
-		tableLayoutPanel4.Resize += delegate
+		splitScreenMainSplitter.SplitterMoved += delegate
+		{
+			LayoutSplitScreenPreview(previewSurface);
+		};
+		splitScreenLeftSplitter.SplitterMoved += delegate
+		{
+			LayoutSplitScreenPreview(previewSurface);
+		};
+		splitScreenCenterRightSplitter.SplitterMoved += delegate
+		{
+			LayoutSplitScreenPreview(previewSurface);
+		};
+		tabPage2.Resize += delegate
 		{
 			LayoutSplitScreenPreview(previewSurface);
 		};
@@ -2256,7 +2352,7 @@ internal sealed class MainForm : Form
 			{
 			}
 		};
-		tableLayoutPanel4.Controls.Add(panel2, 1, 0);
+		splitScreenCenterRightSplitter.Panel1.Controls.Add(panel2);
 		GroupBox groupBox3 = new GroupBox();
 		groupBox3.Text = "③ 给编号区域添加视频";
 		groupBox3.Dock = DockStyle.Fill;
@@ -2431,7 +2527,7 @@ internal sealed class MainForm : Form
 		});
 		tableLayoutPanel6.Controls.Add(panel6, 0, 5);
 		groupBox4.Controls.Add(tableLayoutPanel6);
-		tableLayoutPanel4.Controls.Add(groupBox4, 2, 0);
+		splitScreenCenterRightSplitter.Panel2.Controls.Add(groupBox4);
 		Panel settings = new Panel
 		{
 			Dock = DockStyle.Fill,
@@ -2705,7 +2801,32 @@ internal sealed class MainForm : Form
 		{
 			LayoutSplitScreenOutputPanel(settings);
 		};
-		tableLayoutPanel2.Controls.Add(settings, 0, 1);
+		settings.Dock = DockStyle.Top;
+		settings.Height = 390;
+		splitScreenBottomScrollHost.Controls.Add(settings);
+		tabPage2.HandleCreated += delegate
+		{
+			BeginInvoke((Action)delegate
+			{
+				try
+				{
+					if (splitScreenLeftSplitter.ClientSize.Width > 580)
+					{
+						splitScreenLeftSplitter.SplitterDistance = 310;
+					}
+					if (splitScreenCenterRightSplitter.ClientSize.Width > 520)
+					{
+						splitScreenCenterRightSplitter.SplitterDistance = Math.Max(260, splitScreenCenterRightSplitter.ClientSize.Width - 380);
+					}
+					if (splitScreenMainSplitter.ClientSize.Height > 450)
+					{
+						splitScreenMainSplitter.SplitterDistance = Math.Max(240, splitScreenMainSplitter.ClientSize.Height - 395);
+					}
+					LayoutSplitScreenPreview(previewSurface);
+				}
+				catch { }
+			});
+		};
 		WireSplitScreenEvents();
 		if (_splitScreenQuickPresets.Items.Count > 0)
 		{
@@ -6246,14 +6367,225 @@ internal sealed class MainForm : Form
 		return label;
 	}
 
+	private static GraphicsPath CreateRoundedRectanglePath(Rectangle rect, int radius)
+	{
+		GraphicsPath path = new GraphicsPath();
+		if (rect.Width <= 0 || rect.Height <= 0) return path;
+		int d = radius * 2;
+		if (d > rect.Width) d = rect.Width;
+		if (d > rect.Height) d = rect.Height;
+		Rectangle arc = new Rectangle(rect.X, rect.Y, d, d);
+		path.AddArc(arc, 180, 90);
+		arc.X = rect.Right - d;
+		path.AddArc(arc, 270, 90);
+		arc.Y = rect.Bottom - d;
+		path.AddArc(arc, 0, 90);
+		arc.X = rect.Left;
+		path.AddArc(arc, 90, 90);
+		path.CloseFigure();
+		return path;
+	}
+
+	private static void StyleTechSplitter(SplitContainer sc)
+	{
+		sc.SplitterWidth = 7;
+		sc.BackColor = Color.FromArgb(16, 20, 28);
+		sc.Paint += delegate(object sender, PaintEventArgs e)
+		{
+			Rectangle rect = sc.SplitterRectangle;
+			using (Brush bgBrush = new SolidBrush(Color.FromArgb(24, 29, 40)))
+			{
+				e.Graphics.FillRectangle(bgBrush, rect);
+			}
+			using (Pen pen = new Pen(Color.FromArgb(46, 55, 74)))
+			{
+				if (sc.Orientation == Orientation.Horizontal)
+				{
+					e.Graphics.DrawLine(pen, rect.Left, rect.Top, rect.Right, rect.Top);
+					e.Graphics.DrawLine(pen, rect.Left, rect.Bottom - 1, rect.Right, rect.Bottom - 1);
+					int midX = rect.Left + rect.Width / 2;
+					int midY = rect.Top + rect.Height / 2;
+					using (Brush dotBrush = new SolidBrush(Color.FromArgb(130, 145, 175)))
+					{
+						e.Graphics.FillRectangle(dotBrush, midX - 16, midY - 1, 6, 2);
+						e.Graphics.FillRectangle(dotBrush, midX - 3, midY - 1, 6, 2);
+						e.Graphics.FillRectangle(dotBrush, midX + 10, midY - 1, 6, 2);
+					}
+				}
+				else
+				{
+					e.Graphics.DrawLine(pen, rect.Left, rect.Top, rect.Left, rect.Bottom);
+					e.Graphics.DrawLine(pen, rect.Right - 1, rect.Top, rect.Right - 1, rect.Bottom);
+					int midX = rect.Left + rect.Width / 2;
+					int midY = rect.Top + rect.Height / 2;
+					using (Brush dotBrush = new SolidBrush(Color.FromArgb(130, 145, 175)))
+					{
+						e.Graphics.FillRectangle(dotBrush, midX - 1, midY - 16, 2, 6);
+						e.Graphics.FillRectangle(dotBrush, midX - 1, midY - 3, 2, 6);
+						e.Graphics.FillRectangle(dotBrush, midX - 1, midY + 10, 2, 6);
+					}
+				}
+			}
+		};
+	}
+
+	private static void ApplyGlassButtonEffects(Button button)
+	{
+		if (button == null) return;
+		if (button.Tag is string tag && tag == "glass_styled") return;
+		button.Tag = (button.Tag as string) ?? "normal";
+		button.FlatStyle = FlatStyle.Flat;
+		button.FlatAppearance.BorderSize = 0;
+		button.Cursor = Cursors.Hand;
+
+		bool isHover = false;
+		bool isPressed = false;
+
+		button.MouseEnter += delegate { isHover = true; button.Invalidate(); };
+		button.MouseLeave += delegate { isHover = false; isPressed = false; button.Invalidate(); };
+		button.MouseDown += delegate(object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { isPressed = true; button.Invalidate(); } };
+		button.MouseUp += delegate { isPressed = false; button.Invalidate(); };
+
+		button.Paint += delegate(object sender, PaintEventArgs e)
+		{
+			Graphics g = e.Graphics;
+			g.SmoothingMode = SmoothingMode.AntiAlias;
+			g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+			g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+
+			Rectangle bounds = button.ClientRectangle;
+			bounds.Width -= 1;
+			bounds.Height -= 1;
+			if (bounds.Width < 2 || bounds.Height < 2) return;
+
+			bool isPrimary = (button.Tag as string) == "primary" || 
+			                 button.Text.StartsWith("开始") || 
+			                 button.Text.StartsWith("直接加水印") || 
+			                 button.Text.Contains("播放");
+
+			bool isDanger = (button.Tag as string) == "danger" || 
+			                button.Text == "重置全部设置" || 
+			                button.Text == "清空" || 
+			                button.Text == "取消";
+
+			bool isEnabled = button.Enabled;
+
+			Color topGrad, botGrad, borderColor, specularColor, textColor;
+
+			if (!isEnabled)
+			{
+				topGrad = Color.FromArgb(28, 33, 44);
+				botGrad = Color.FromArgb(20, 24, 32);
+				borderColor = Color.FromArgb(40, 46, 60);
+				specularColor = Color.Transparent;
+				textColor = Color.FromArgb(100, 112, 130);
+			}
+			else if (isPrimary)
+			{
+				if (isPressed)
+				{
+					topGrad = Color.FromArgb(29, 78, 216);
+					botGrad = Color.FromArgb(30, 58, 138);
+					borderColor = Color.FromArgb(59, 130, 246);
+					specularColor = Color.FromArgb(40, 255, 255, 255);
+				}
+				else if (isHover)
+				{
+					topGrad = Color.FromArgb(96, 165, 250);
+					botGrad = Color.FromArgb(37, 99, 235);
+					borderColor = Color.FromArgb(147, 197, 253);
+					specularColor = Color.FromArgb(130, 255, 255, 255);
+				}
+				else
+				{
+					topGrad = Color.FromArgb(59, 130, 246);
+					botGrad = Color.FromArgb(29, 78, 216);
+					borderColor = Color.FromArgb(96, 165, 250);
+					specularColor = Color.FromArgb(80, 255, 255, 255);
+				}
+				textColor = Color.White;
+			}
+			else if (isDanger)
+			{
+				if (isPressed)
+				{
+					topGrad = Color.FromArgb(127, 29, 29);
+					botGrad = Color.FromArgb(69, 10, 10);
+					borderColor = Color.FromArgb(185, 28, 28);
+					specularColor = Color.FromArgb(30, 255, 200, 210);
+				}
+				else if (isHover)
+				{
+					topGrad = Color.FromArgb(185, 28, 28);
+					botGrad = Color.FromArgb(127, 29, 29);
+					borderColor = Color.FromArgb(248, 113, 113);
+					specularColor = Color.FromArgb(70, 255, 220, 230);
+				}
+				else
+				{
+					topGrad = Color.FromArgb(69, 18, 24);
+					botGrad = Color.FromArgb(42, 12, 16);
+					borderColor = Color.FromArgb(153, 27, 27);
+					specularColor = Color.FromArgb(45, 255, 200, 210);
+				}
+				textColor = Color.FromArgb(254, 205, 211);
+			}
+			else
+			{
+				if (isPressed)
+				{
+					topGrad = Color.FromArgb(22, 26, 36);
+					botGrad = Color.FromArgb(18, 21, 29);
+					borderColor = Color.FromArgb(55, 65, 85);
+					specularColor = Color.Transparent;
+				}
+				else if (isHover)
+				{
+					topGrad = Color.FromArgb(48, 56, 76);
+					botGrad = Color.FromArgb(34, 40, 54);
+					borderColor = Color.FromArgb(96, 115, 148);
+					specularColor = Color.FromArgb(70, 255, 255, 255);
+				}
+				else
+				{
+					topGrad = Color.FromArgb(36, 42, 58);
+					botGrad = Color.FromArgb(25, 30, 42);
+					borderColor = Color.FromArgb(60, 72, 96);
+					specularColor = Color.FromArgb(40, 255, 255, 255);
+				}
+				textColor = isHover ? Color.White : Color.FromArgb(226, 232, 240);
+			}
+
+			using (GraphicsPath path = CreateRoundedRectanglePath(bounds, 5))
+			{
+				using (LinearGradientBrush lgb = new LinearGradientBrush(bounds, topGrad, botGrad, LinearGradientMode.Vertical))
+				{
+					g.FillPath(lgb, path);
+				}
+				if (specularColor.A > 0)
+				{
+					using (Pen specPen = new Pen(specularColor, 1f))
+					{
+						g.DrawLine(specPen, bounds.Left + 5, bounds.Top + 1, bounds.Right - 5, bounds.Top + 1);
+					}
+				}
+				using (Pen borderPen = new Pen(borderColor, 1f))
+				{
+					g.DrawPath(borderPen, path);
+				}
+			}
+
+			Font btnFont = (isPrimary || isDanger) ? new Font(button.Font, FontStyle.Bold) : button.Font;
+			TextRenderer.DrawText(g, button.Text, btnFont, bounds, textColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+		};
+	}
+
 	private Button MakePrimaryButton(string text, int x, int y, int width)
 	{
 		Button button = MakeButton(text, width);
 		button.Location = new Point(x, y);
 		button.Height = 42;
-		button.BackColor = Color.FromArgb(34, 92, 190);
-		button.ForeColor = Color.White;
-		button.FlatAppearance.BorderSize = 0;
+		button.Tag = "primary";
 		return button;
 	}
 
@@ -6264,10 +6596,10 @@ internal sealed class MainForm : Form
 		button.Width = width;
 		button.Height = 34;
 		button.FlatStyle = FlatStyle.Flat;
-		button.FlatAppearance.BorderColor = Color.FromArgb(205, 211, 220);
-		button.BackColor = Color.White;
+		button.FlatAppearance.BorderSize = 0;
 		button.Margin = new Padding(0, 0, 8, 0);
 		button.Cursor = Cursors.Hand;
+		ApplyGlassButtonEffects(button);
 		return button;
 	}
 
@@ -6275,77 +6607,65 @@ internal sealed class MainForm : Form
 	{
 		foreach (Control control in root.Controls)
 		{
-			Button button = control as Button;
-			if (button != null)
+			if (control is Button button)
 			{
-				bool primary = button.ForeColor == Color.White || button.Text.StartsWith("开始", StringComparison.Ordinal) || button.Text.StartsWith("直接加水印", StringComparison.Ordinal);
-				bool globalReset = button.Text == "重置全部设置";
-				button.FlatStyle = FlatStyle.Flat;
-				button.FlatAppearance.BorderSize = ((!primary) ? 1 : 0);
-				button.FlatAppearance.BorderColor = (globalReset ? Color.FromArgb(251, 146, 60) : BorderColor);
-				button.BackColor = (primary ? AccentColor : (globalReset ? Color.FromArgb(255, 247, 237) : Color.FromArgb(248, 250, 252)));
-				button.ForeColor = (primary ? Color.White : (globalReset ? Color.FromArgb(154, 52, 18) : InkColor));
-				button.Font = new Font("Microsoft YaHei UI", 9f, primary ? FontStyle.Bold : FontStyle.Regular);
-				Color normal = button.BackColor;
-				button.MouseEnter += delegate
-				{
-					if (button.Enabled)
-					{
-						button.BackColor = (primary ? AccentHoverColor : (globalReset ? Color.FromArgb(255, 237, 213) : Color.FromArgb(238, 243, 249)));
-					}
-				};
-				button.MouseLeave += delegate
-				{
-					button.BackColor = normal;
-				};
+				ApplyGlassButtonEffects(button);
 			}
-			else if (control is TextBox)
+			else if (control is TabPage tabPage)
 			{
-				TextBox textBox = (TextBox)control;
+				tabPage.BackColor = CanvasColor;
+			}
+			else if (control is GroupBox groupBox)
+			{
+				groupBox.BackColor = SurfaceColor;
+				groupBox.ForeColor = InkColor;
+			}
+			else if (control is Panel panel && !(control is SplitScreenPreviewBox))
+			{
+				if (panel != _splitScreenPreviewHost && (panel.BackColor == Color.White || panel.BackColor == Color.FromArgb(245, 247, 250) || panel.BackColor == Color.FromArgb(246, 248, 252)))
+				{
+					panel.BackColor = SurfaceColor;
+				}
+			}
+			else if (control is CheckBox || control is RadioButton)
+			{
+				control.ForeColor = InkColor;
+			}
+			else if (control is TextBox textBox)
+			{
 				textBox.BorderStyle = BorderStyle.FixedSingle;
-				textBox.BackColor = SurfaceColor;
+				textBox.BackColor = Color.FromArgb(19, 23, 32);
 				textBox.ForeColor = InkColor;
 			}
-			else if (control is ComboBox)
+			else if (control is ComboBox comboBox)
 			{
-				ComboBox comboBox = (ComboBox)control;
 				comboBox.FlatStyle = FlatStyle.Flat;
-				comboBox.BackColor = SurfaceColor;
+				comboBox.BackColor = Color.FromArgb(19, 23, 32);
 				comboBox.ForeColor = InkColor;
 			}
-			else if (control is NumericUpDown)
+			else if (control is NumericUpDown numericUpDown)
 			{
-				NumericUpDown numericUpDown = (NumericUpDown)control;
 				numericUpDown.BorderStyle = BorderStyle.FixedSingle;
-				numericUpDown.BackColor = SurfaceColor;
+				numericUpDown.BackColor = Color.FromArgb(19, 23, 32);
 				numericUpDown.ForeColor = InkColor;
 			}
-			else if (control is CheckedListBox)
+			else if (control is CheckedListBox || control is ListBox)
 			{
-				((CheckedListBox)control).BorderStyle = BorderStyle.FixedSingle;
-				control.BackColor = SurfaceColor;
+				control.BackColor = Color.FromArgb(19, 23, 32);
 				control.ForeColor = InkColor;
 			}
-			else if (control is ListBox)
+			else if (control is TabControl tabControl)
 			{
-				((ListBox)control).BorderStyle = BorderStyle.FixedSingle;
-				control.BackColor = SurfaceColor;
-				control.ForeColor = InkColor;
-			}
-			else if (control is TabControl)
-			{
-				TabControl tabControl = (TabControl)control;
 				tabControl.DrawMode = TabDrawMode.OwnerDrawFixed;
 				tabControl.SizeMode = TabSizeMode.Fixed;
 				tabControl.ItemSize = ((tabControl == _tabs) ? new Size(148, 38) : ((tabControl == _splitScreenPresetTabs) ? new Size(92, 32) : new Size(150, 32)));
 				tabControl.DrawItem += DrawModernTab;
 			}
-			else if (control is Label)
+			else if (control is Label label)
 			{
-				Label label = (Label)control;
-				if (label.ForeColor != Color.White && label.ForeColor.R > 45)
+				if (label.ForeColor != Color.White && label.ForeColor != Color.FromArgb(56, 189, 248))
 				{
-					label.ForeColor = ((label.ForeColor.B > label.ForeColor.R + 80) ? AccentColor : MutedColor);
+					label.ForeColor = InkColor;
 				}
 			}
 			ApplyModernVisualStyle(control);
@@ -6360,17 +6680,17 @@ internal sealed class MainForm : Form
 		}
 		bool flag = e.Index == tabControl.SelectedIndex;
 		Rectangle bounds = e.Bounds;
-		using (Brush brush = new SolidBrush(flag ? SurfaceColor : Color.FromArgb(238, 242, 247)))
+		using (Brush brush = new SolidBrush(flag ? SurfaceColor : Color.FromArgb(19, 23, 32)))
 		{
 			e.Graphics.FillRectangle(brush, bounds);
 		}
 		if (flag)
 		{
 			using Brush brush2 = new SolidBrush(AccentColor);
-			e.Graphics.FillRectangle(brush2, bounds.Left + 10, bounds.Bottom - 3, Math.Max(4, bounds.Width - 20), 3);
+			e.Graphics.FillRectangle(brush2, bounds.Left + 12, bounds.Bottom - 3, Math.Max(4, bounds.Width - 24), 3);
 		}
 		using Font font = new Font("Microsoft YaHei UI", (tabControl == _tabs) ? 10f : 9f, flag ? FontStyle.Bold : FontStyle.Regular);
-		TextRenderer.DrawText(e.Graphics, tabControl.TabPages[e.Index].Text, font, bounds, flag ? InkColor : MutedColor, TextFormatFlags.EndEllipsis | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+		TextRenderer.DrawText(e.Graphics, tabControl.TabPages[e.Index].Text, font, bounds, flag ? Color.White : MutedColor, TextFormatFlags.EndEllipsis | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
 	}
 
 	private void HookEvents()
@@ -7910,7 +8230,7 @@ internal sealed class MainForm : Form
 
 	private static void DrawVideoListColumnHeader(object sender, DrawListViewColumnHeaderEventArgs e)
 	{
-		using (Brush brush = new SolidBrush(Color.FromArgb(239, 243, 248)))
+		using (Brush brush = new SolidBrush(Color.FromArgb(20, 24, 34)))
 		{
 			e.Graphics.FillRectangle(brush, e.Bounds);
 		}
@@ -7920,17 +8240,17 @@ internal sealed class MainForm : Form
 			e.Graphics.DrawLine(pen, e.Bounds.Right - 1, e.Bounds.Top + 5, e.Bounds.Right - 1, e.Bounds.Bottom - 5);
 		}
 		using Font font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
-		TextRenderer.DrawText(e.Graphics, e.Header.Text, font, e.Bounds, InkColor, TextFormatFlags.EndEllipsis | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+		TextRenderer.DrawText(e.Graphics, e.Header.Text, font, e.Bounds, Color.FromArgb(210, 222, 240), TextFormatFlags.EndEllipsis | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
 	}
 
 	private static void DrawVideoListSubItem(DrawListViewSubItemEventArgs e, List<string> videos, Dictionary<string, VideoAdjustmentSettings> settings)
 	{
-		Color color = (e.Item.Selected ? Color.FromArgb(232, 240, 254) : ((e.ItemIndex % 2 == 0) ? SurfaceColor : Color.FromArgb(249, 251, 253)));
+		Color color = (e.Item.Selected ? Color.FromArgb(34, 58, 96) : ((e.ItemIndex % 2 == 0) ? SurfaceColor : Color.FromArgb(19, 23, 32)));
 		using (Brush brush = new SolidBrush(color))
 		{
 			e.Graphics.FillRectangle(brush, e.Bounds);
 		}
-		using (Pen pen = new Pen(Color.FromArgb(232, 237, 243)))
+		using (Pen pen = new Pen(Color.FromArgb(36, 43, 58)))
 		{
 			e.Graphics.DrawLine(pen, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
 			e.Graphics.DrawLine(pen, e.Bounds.Right - 1, e.Bounds.Top + 4, e.Bounds.Right - 1, e.Bounds.Bottom - 4);
