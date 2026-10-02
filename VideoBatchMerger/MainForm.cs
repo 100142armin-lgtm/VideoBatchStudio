@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.1.0";
+	public const string CurrentAppVersion = "8.1.1";
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
@@ -57,6 +57,8 @@ internal sealed class MainForm : Form
 	private Button _splitScreenSendToCutBtn;
 	private System.Windows.Forms.Integration.ElementHost _cutEditElementHost;
 	private System.Windows.Controls.MediaElement _cutEditMediaElement;
+	private System.Windows.Controls.Image _cutEditWpfOverlayImage;
+	private Button _cutEditClearAllBtn;
 	private System.Windows.Forms.Timer _cutEditPlayTimer;
 	private bool _cutEditIsPlaying;
 	private bool _cutEditIsDraggingScrubber;
@@ -259,6 +261,7 @@ internal sealed class MainForm : Form
 	private Label _deliverEmptyPlaceholder;
 	private System.Windows.Forms.Integration.ElementHost _deliverElementHost;
 	private System.Windows.Controls.MediaElement _deliverMediaElement;
+	private System.Windows.Controls.Image _deliverWpfOverlayImage;
 	private Button _deliverPlayPauseButton;
 	private TrackBar _deliverTimeScrubber;
 	private Label _deliverTimeLabel;
@@ -3972,7 +3975,16 @@ internal sealed class MainForm : Form
 			}
 		};
 
-		_cutEditElementHost.Child = _cutEditMediaElement;
+		_cutEditWpfOverlayImage = new System.Windows.Controls.Image
+		{
+			Stretch = System.Windows.Media.Stretch.Uniform,
+			IsHitTestVisible = false
+		};
+
+		System.Windows.Controls.Grid cutEditGrid = new System.Windows.Controls.Grid();
+		cutEditGrid.Children.Add(_cutEditMediaElement);
+		cutEditGrid.Children.Add(_cutEditWpfOverlayImage);
+		_cutEditElementHost.Child = cutEditGrid;
 
 		_cutEditEmptyPlaceholder = new Label
 		{
@@ -4112,6 +4124,7 @@ internal sealed class MainForm : Form
 			}
 
 			UpdateCutEditTimeLabel();
+			UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
 			_cutEditTimelineCanvas?.Invalidate();
 		};
 
@@ -4176,6 +4189,13 @@ internal sealed class MainForm : Form
 		_cutEditResetSegmentsButton.Margin = new Padding(3, 0, 0, 0);
 		_cutEditResetSegmentsButton.Click += delegate { ResetCutEditSegments(); };
 		tlToolsLeft.Controls.Add(_cutEditResetSegmentsButton);
+
+		_cutEditClearAllBtn = MakeButton("🗑️ 清空所有轨道", 115);
+		_cutEditClearAllBtn.Height = 30;
+		_cutEditClearAllBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditClearAllBtn.ForeColor = Color.FromArgb(248, 113, 113);
+		_cutEditClearAllBtn.Click += delegate { ClearCutEditorProject(suppressPrompt: false); };
+		tlToolsLeft.Controls.Add(_cutEditClearAllBtn);
 
 		_cutEditUndoButton = MakeButton("↶ 撤销 (Ctrl+Z)", 105);
 		_cutEditUndoButton.Height = 30;
@@ -4672,8 +4692,16 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		};
 		_deliverMediaElement.MediaOpened += DeliverMediaElement_MediaOpened;
 		_deliverMediaElement.MediaEnded += DeliverMediaElement_MediaEnded;
-		_deliverMediaElement.MediaFailed += DeliverMediaElement_MediaFailed;
-		_deliverElementHost.Child = _deliverMediaElement;
+		_deliverWpfOverlayImage = new System.Windows.Controls.Image
+		{
+			Stretch = System.Windows.Media.Stretch.Uniform,
+			IsHitTestVisible = false
+		};
+
+		System.Windows.Controls.Grid deliverGrid = new System.Windows.Controls.Grid();
+		deliverGrid.Children.Add(_deliverMediaElement);
+		deliverGrid.Children.Add(_deliverWpfOverlayImage);
+		_deliverElementHost.Child = deliverGrid;
 
 		monitorBox.Controls.Add(_deliverPreviewBox);
 		monitorBox.Controls.Add(_deliverEmptyPlaceholder);
@@ -5189,6 +5217,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				{
 					_cutEditInspectorTabs.SelectedIndex = 0;
 				}
+				SeekCutEditVideo(hitItem.StartSeconds);
+				UpdateCutEditWpfOverlay(hitItem.StartSeconds, forcePreviewSelected: true);
 				_cutEditTimelineCanvas?.Invalidate();
 				return;
 			}
@@ -5333,7 +5363,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 				SyncSelectedOverlayToControls();
 				_cutEditTimelineCanvas?.Invalidate();
-				TriggerTitleLivePreview();
+				SeekCutEditVideo(_draggedOverlayItem.StartSeconds);
+				UpdateCutEditWpfOverlay(_draggedOverlayItem.StartSeconds, forcePreviewSelected: true);
 				UpdateDeliverSummary();
 				return;
 			}
@@ -5420,7 +5451,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			_isDraggingOverlay = false;
 			_draggedOverlayItem = null;
 			_cutEditTimelineCanvas.Cursor = Cursors.Default;
-			TriggerTitleLivePreview();
+			UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: true);
 			UpdateDeliverSummary();
 			_cutEditTimelineCanvas?.Invalidate();
 			return;
@@ -6513,10 +6544,255 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		InsertSelectedMediaPoolToTimeline(2);
 	}
 
-	private void LoadVideoIntoCutEditor(string path)
+	[System.Runtime.InteropServices.DllImport("gdi32.dll", EntryPoint = "DeleteObject")]
+	[return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+	private static extern bool GdiDeleteObject(IntPtr hObject);
+
+	private static System.Windows.Media.Imaging.BitmapSource ConvertBitmapToBitmapSource(Bitmap bitmap)
+	{
+		if (bitmap == null) return null;
+		IntPtr hBitmap = bitmap.GetHbitmap();
+		try
+		{
+			return System.Windows.Interop.Imaging.CreateBitmapSourceFromHBitmap(
+				hBitmap,
+				IntPtr.Zero,
+				System.Windows.Int32Rect.Empty,
+				System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());
+		}
+		finally
+		{
+			GdiDeleteObject(hBitmap);
+		}
+	}
+
+	private void UpdateCutEditWpfOverlay(double timeSec, bool forcePreviewSelected = false)
+	{
+		if (_cutEditWpfOverlayImage == null) return;
+		try
+		{
+			bool hasActive = false;
+			if (forcePreviewSelected && _selectedOverlay != null && _selectedOverlay.Enabled)
+			{
+				hasActive = true;
+			}
+			else
+			{
+				foreach (var o in _cutEditOverlays)
+				{
+					if (o.Enabled && timeSec >= o.StartSeconds && timeSec <= o.StartSeconds + o.Duration)
+					{
+						hasActive = true;
+						break;
+					}
+				}
+			}
+
+			if (!hasActive)
+			{
+				if (_cutEditWpfOverlayImage.Source != null)
+				{
+					_cutEditWpfOverlayImage.Dispatcher.BeginInvoke(new Action(() =>
+					{
+						_cutEditWpfOverlayImage.Source = null;
+					}));
+				}
+				return;
+			}
+
+			int w = _cutEditWidth > 0 ? _cutEditWidth : 1920;
+			int h = _cutEditHeight > 0 ? _cutEditHeight : 1080;
+			using (Bitmap bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb))
+			{
+				using (Graphics g = Graphics.FromImage(bmp))
+				{
+					g.Clear(Color.Transparent);
+					g.SmoothingMode = SmoothingMode.AntiAlias;
+					g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+					g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+
+					if (forcePreviewSelected && _selectedOverlay != null)
+					{
+						if (_selectedOverlay.Enabled)
+						{
+							if (_selectedOverlay.Type == OverlayItemType.Text)
+								RenderSingleTextOverlay(g, _selectedOverlay, w, h);
+							else if (_selectedOverlay.Type == OverlayItemType.Image)
+								RenderSingleImageOverlay(g, _selectedOverlay, w, h);
+						}
+					}
+					else
+					{
+						foreach (var item in _cutEditOverlays)
+						{
+							if (!item.Enabled) continue;
+							if (timeSec < item.StartSeconds || timeSec > (item.StartSeconds + item.Duration)) continue;
+
+							if (item.Type == OverlayItemType.Text)
+								RenderSingleTextOverlay(g, item, w, h);
+							else if (item.Type == OverlayItemType.Image)
+								RenderSingleImageOverlay(g, item, w, h);
+						}
+					}
+				}
+
+				var bmpSrc = ConvertBitmapToBitmapSource(bmp);
+				bmpSrc?.Freeze();
+				_cutEditWpfOverlayImage.Dispatcher.BeginInvoke(new Action(() =>
+				{
+					_cutEditWpfOverlayImage.Source = bmpSrc;
+				}));
+			}
+		}
+		catch { }
+	}
+
+	private void UpdateDeliverWpfOverlay(double timeSec)
+	{
+		if (_deliverWpfOverlayImage == null) return;
+		try
+		{
+			bool hasActive = false;
+			foreach (var o in _cutEditOverlays)
+			{
+				if (o.Enabled && timeSec >= o.StartSeconds && timeSec <= o.StartSeconds + o.Duration)
+				{
+					hasActive = true;
+					break;
+				}
+			}
+
+			if (!hasActive)
+			{
+				if (_deliverWpfOverlayImage.Source != null)
+				{
+					_deliverWpfOverlayImage.Dispatcher.BeginInvoke(new Action(() =>
+					{
+						_deliverWpfOverlayImage.Source = null;
+					}));
+				}
+				return;
+			}
+
+			int w = _cutEditWidth > 0 ? _cutEditWidth : 1920;
+			int h = _cutEditHeight > 0 ? _cutEditHeight : 1080;
+			using (Bitmap bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb))
+			{
+				using (Graphics g = Graphics.FromImage(bmp))
+				{
+					g.Clear(Color.Transparent);
+					g.SmoothingMode = SmoothingMode.AntiAlias;
+					g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+					g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+
+					foreach (var item in _cutEditOverlays)
+					{
+						if (!item.Enabled) continue;
+						if (timeSec < item.StartSeconds || timeSec > (item.StartSeconds + item.Duration)) continue;
+
+						if (item.Type == OverlayItemType.Text)
+							RenderSingleTextOverlay(g, item, w, h);
+						else if (item.Type == OverlayItemType.Image)
+							RenderSingleImageOverlay(g, item, w, h);
+					}
+				}
+
+				var bmpSrc = ConvertBitmapToBitmapSource(bmp);
+				bmpSrc?.Freeze();
+				_deliverWpfOverlayImage.Dispatcher.BeginInvoke(new Action(() =>
+				{
+					_deliverWpfOverlayImage.Source = bmpSrc;
+				}));
+			}
+		}
+		catch { }
+	}
+
+	internal void LoadVideoIntoCutEditor(string path, bool clearExisting = false)
 	{
 		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
-		InsertMediaIntoTrackAtTime(path, "V1", _cutEditDuration);
+
+		if (_cutEditSegments.Count > 0)
+		{
+			if (clearExisting)
+			{
+				ClearCutEditorProject(suppressPrompt: true);
+			}
+			else
+			{
+				var dr = MessageBox.Show(this,
+					"剪辑工作台当前已有正在编辑的视频内容。\n\n是否清空当前轨道以载入全新的视频？\n\n• 点击【是 (Y)】：清空当前轨道并从头载入新视频（推荐）\n• 点击【否 (N)】：在当前轨道末尾追加此视频\n• 点击【取消】：放弃载入",
+					"载入视频到剪辑工作台",
+					MessageBoxButtons.YesNoCancel,
+					MessageBoxIcon.Question);
+
+				if (dr == DialogResult.Cancel) return;
+				if (dr == DialogResult.Yes)
+				{
+					ClearCutEditorProject(suppressPrompt: true);
+				}
+			}
+		}
+
+		InsertMediaIntoTrackAtTime(path, "V1", 0.0);
+		_cutEditCurrentPos = 0.0;
+		SeekCutEditVideo(0.0);
+	}
+
+	internal void ClearCutEditorProject(bool suppressPrompt = false)
+	{
+		if (!suppressPrompt && _cutEditSegments.Count > 0)
+		{
+			if (MessageBox.Show(this, "确定要清空剪辑工作台的所有轨道和内容吗？\n当前未保存的剪辑进度将被重置。", "清空剪辑轨道", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+			{
+				return;
+			}
+		}
+
+		try
+		{
+			if (_cutEditIsPlaying)
+			{
+				ToggleCutEditPlayPause();
+			}
+			if (_cutEditMediaElement != null)
+			{
+				_cutEditMediaElement.Pause();
+				_cutEditMediaElement.Source = null;
+			}
+
+			_cutEditSegments.Clear();
+			_cutEditOverlays.Clear();
+			_cutEditUndoStack.Clear();
+			_cutEditRedoStack.Clear();
+			_cutEditWaveformCache.Clear();
+			_cutEditSourcePath = null;
+			_cutEditCurrentProjectPath = null;
+			_cutEditDuration = 0.0;
+			_cutEditCurrentPos = 0.0;
+			_lastActiveSegment = null;
+
+			InitDefaultOverlays();
+
+			if (_cutEditWpfOverlayImage != null)
+			{
+				_cutEditWpfOverlayImage.Dispatcher.BeginInvoke(new Action(() =>
+				{
+					_cutEditWpfOverlayImage.Source = null;
+				}));
+			}
+
+			if (_cutEditEmptyPlaceholder != null) _cutEditEmptyPlaceholder.Visible = true;
+			if (_cutEditPreviewBox != null) _cutEditPreviewBox.Image = null;
+
+			RecalculateTimelineTotalDuration();
+			RefreshCutEditSegmentList();
+			RefreshOverlayCombo();
+			UpdateUndoRedoButtons();
+			UpdateDeliverSummary();
+			_cutEditTimelineCanvas?.Invalidate();
+		}
+		catch { }
 	}
 
 	private void UpdateCutEditTimeLabel()
@@ -6734,11 +7010,12 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			_cutEditPlayTimer?.Stop();
 
 			var activeSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
-			if (activeSeg != null && activeSeg.MediaType != "image" && (!(_cutEditRealtimePreviewCheckBox?.Checked == true) || !(_cutEditTitleEnabled?.Checked == true)))
+			if (activeSeg != null && activeSeg.MediaType != "image")
 			{
 				_cutEditPreviewBox.Visible = false;
 				_cutEditElementHost.Visible = true;
 				_cutEditElementHost.BringToFront();
+				UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
 			}
 			else
 			{
@@ -6833,30 +7110,19 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				_cutEditMediaElement.Volume = (_cutEditVolumeTrackBar?.Value ?? 100) / 100.0;
 				_cutEditMediaElement.IsMuted = _cutEditAudioMuted;
 
+				_cutEditPreviewBox.Visible = false;
+				_cutEditElementHost.Visible = true;
+				_cutEditElementHost.BringToFront();
+
 				if (_cutEditIsPlaying)
 				{
-					_cutEditPreviewBox.Visible = false;
-					_cutEditElementHost.Visible = true;
-					_cutEditElementHost.BringToFront();
 					_cutEditMediaElement.Play();
 				}
 				else
 				{
 					_cutEditMediaElement.Pause();
-					if (_cutEditRealtimePreviewCheckBox?.Checked == true && _cutEditTitleEnabled?.Checked == true)
-					{
-						_cutEditElementHost.Visible = false;
-						_cutEditPreviewBox.Visible = true;
-						_cutEditPreviewBox.BringToFront();
-						UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
-					}
-					else
-					{
-						_cutEditPreviewBox.Visible = false;
-						_cutEditElementHost.Visible = true;
-						_cutEditElementHost.BringToFront();
-					}
 				}
+				UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
 			}
 			catch
 			{
@@ -7618,6 +7884,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 
 		_cutEditTimelineCanvas?.Invalidate();
+		UpdateCutEditWpfOverlay(_selectedOverlay?.StartSeconds ?? _cutEditCurrentPos, forcePreviewSelected: true);
 		TriggerTitleLivePreview();
 		UpdateDeliverSummary();
 	}
@@ -8371,6 +8638,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				string finalV = curV;
 				if (exportOverlays.Count > 0)
 				{
+					double timelineOffset = kept.Count > 0 ? kept.Min(s => s.TimelineStartSeconds) : 0.0;
+
 					for (int oi = 0; oi < exportOverlays.Count; oi++)
 					{
 						var olItem = exportOverlays[oi];
@@ -8378,12 +8647,14 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 						if (string.IsNullOrEmpty(tempOlPng) || !File.Exists(tempOlPng)) continue;
 
 						int olInIdx = inputs.Count;
-						inputs.Add($"-i {QuoteArg(tempOlPng)}");
-						string startStr = olItem.StartSeconds.ToString("0.00", CultureInfo.InvariantCulture);
-						string endStr = (olItem.StartSeconds + olItem.Duration).ToString("0.00", CultureInfo.InvariantCulture);
+						inputs.Add($"-loop 1 -i {QuoteArg(tempOlPng)}");
+						double shiftedStart = Math.Max(0.0, olItem.StartSeconds - timelineOffset);
+						double shiftedEnd = Math.Max(shiftedStart + 0.1, (olItem.StartSeconds + olItem.Duration) - timelineOffset);
+						string startStr = shiftedStart.ToString("0.00", CultureInfo.InvariantCulture);
+						string endStr = shiftedEnd.ToString("0.00", CultureInfo.InvariantCulture);
 
 						fg.Append($"[{olInIdx}:v]format=rgba[ol_in_{oi}];");
-						fg.Append($"{curV}[ol_in_{oi}]overlay=0:0:enable='between(t,{startStr},{endStr})'[v_ol_{oi}];");
+						fg.Append($"{curV}[ol_in_{oi}]overlay=0:0:shortest=1:enable='between(t,{startStr},{endStr})'[v_ol_{oi}];");
 						curV = $"[v_ol_{oi}]";
 					}
 					finalV = curV;
@@ -8720,6 +8991,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			return;
 		}
 		UpdateDeliverTimeLabel();
+		UpdateDeliverWpfOverlay(_deliverCurrentPos);
 		SyncDeliverPlaybackSegment();
 	}
 
@@ -8747,6 +9019,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_deliverPlaybackStartPos = _deliverCurrentPos;
 		_deliverPlaybackSw.Restart();
 		UpdateDeliverTimeLabel();
+		UpdateDeliverWpfOverlay(_deliverCurrentPos);
 		if (_deliverIsPlaying)
 		{
 			SyncDeliverPlaybackSegment();
@@ -9022,45 +9295,6 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	private async void SendLatestSplitScreenToCutEditor()
 	{
-		string target = null;
-		// 1. Check direct composite cache folder first
-		string tempDir = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_DirectCut");
-		if (Directory.Exists(tempDir))
-		{
-			var directFiles = Directory.GetFiles(tempDir, "SplitProject_*.mp4")
-				.OrderByDescending(f => File.GetLastWriteTime(f)).ToList();
-			if (directFiles.Count > 0 && (DateTime.Now - File.GetLastWriteTime(directFiles[0])).TotalMinutes < 60)
-			{
-				target = directFiles[0];
-			}
-		}
-
-		if (string.IsNullOrEmpty(target) && !string.IsNullOrEmpty(_latestSplitScreenOutputFolder) && Directory.Exists(_latestSplitScreenOutputFolder))
-		{
-			var files = Directory.GetFiles(_latestSplitScreenOutputFolder, "*.mp4")
-				.OrderByDescending(f => File.GetLastWriteTime(f)).ToList();
-			if (files.Count > 0 && (DateTime.Now - File.GetLastWriteTime(files[0])).TotalMinutes < 45)
-			{
-				target = files[0];
-			}
-		}
-		if (string.IsNullOrEmpty(target) && !string.IsNullOrEmpty(_splitScreenOutputFolder.Text) && Directory.Exists(_splitScreenOutputFolder.Text))
-		{
-			var files = Directory.GetFiles(_splitScreenOutputFolder.Text, "*.mp4", SearchOption.AllDirectories)
-				.OrderByDescending(f => File.GetLastWriteTime(f)).ToList();
-			if (files.Count > 0 && (DateTime.Now - File.GetLastWriteTime(files[0])).TotalMinutes < 45)
-			{
-				target = files[0];
-			}
-		}
-		if (!string.IsNullOrEmpty(target) && File.Exists(target))
-		{
-			LoadVideoIntoCutEditor(target);
-			SwitchToWorkspace(5);
-			_splitScreenStatusLabel.Text = $"⚡ 已直接载入合成缓存成片: {Path.GetFileName(target)} (无需重复等待后台合成)";
-			return;
-		}
-
 		// Direct background synthesis of current preview configuration
 		string ffmpeg = FindFfmpeg();
 		if (string.IsNullOrWhiteSpace(ffmpeg))
@@ -9103,7 +9337,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		WatermarkProfile splitScreenWatermark = CaptureWatermarkProfile(_watermarkOnSplitScreen.Checked);
 		BgmPlan bgmPlan = CaptureBgmPlan(_splitScreenBgm);
 
-		tempDir = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_DirectCut");
+		string tempDir = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_DirectCut");
 		try { Directory.CreateDirectory(tempDir); } catch { }
 		string tempComposite = Path.Combine(tempDir, "SplitProject_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".mp4");
 
@@ -9151,7 +9385,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		if (ok && File.Exists(tempComposite))
 		{
 			_splitScreenStatusLabel.Text = "✅ 拼屏画面合成完毕，已直接载入视频剪辑工作台！";
-			LoadVideoIntoCutEditor(tempComposite);
+			LoadVideoIntoCutEditor(tempComposite, clearExisting: true);
 			SwitchToWorkspace(5);
 		}
 		else
