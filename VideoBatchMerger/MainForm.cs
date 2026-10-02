@@ -40,6 +40,8 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
+	public const string CurrentAppVersion = "8.1.0";
+	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
 
@@ -58,6 +60,8 @@ internal sealed class MainForm : Form
 	private System.Windows.Forms.Timer _cutEditPlayTimer;
 	private bool _cutEditIsPlaying;
 	private bool _cutEditIsDraggingScrubber;
+	private readonly System.Diagnostics.Stopwatch _cutEditPlaybackSw = new System.Diagnostics.Stopwatch();
+	private long _lastStopwatchMs;
 	private TrackBar _cutEditTimeScrubber;
 	private Label _cutEditTimeLabel;
 	private Button _cutEditPlayPauseButton;
@@ -71,10 +75,49 @@ internal sealed class MainForm : Form
 	private Button _cutEditSetInButton;
 	private Button _cutEditSetOutButton;
 	private Button _cutEditSplitButton;
-	private ListView _cutEditSegmentList;
+	private ListView _cutEditSegmentList = new ListView();
+	private Button _cutEditDeleteBtn;
 	private Button _cutEditToggleSegmentButton;
 	private Button _cutEditResetSegmentsButton;
 	private Label _cutEditEstimatedDurationLabel;
+
+	// Enhanced Multi-track & Media Pool fields
+	private readonly List<TimelineTrack> _cutEditTracks = new List<TimelineTrack>();
+	private int _cutEditSelectedSegmentIndex = -1;
+	private string _cutEditSelectedTrackId = "V1";
+	private double _cutEditTimelineZoom = 1.0;
+	private int _cutEditBaseTrackHeight = 36;
+	private TrackBar _cutEditZoomSlider;
+	private Label _cutEditZoomLabel;
+	private ComboBox _cutEditTrackHeightCombo;
+	private Button _cutEditAddTrackBtn;
+
+	// Dragging & Repositioning states
+	private enum TimelineDragMode { None, ScrubPlayhead, MoveClip, TrimIn, TrimOut }
+	private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
+	private int _dragSegmentIndex = -1;
+	private Point _dragStartMousePoint;
+	private double _dragOriginalTimelineStart;
+	private double _dragOriginalDuration;
+	private double _dragOriginalStartSec;
+	private double _dragOriginalEndSec;
+	private string _dragOriginalTrackId;
+	private CutSegment _lastActiveSegment = null;
+
+	// Media pool thumbnail & view modes
+	private ImageList _cutEditMediaPoolImageList;
+	private bool _cutEditMediaPoolIsThumbView = false;
+	private readonly Dictionary<string, Image> _cutEditMediaPoolThumbCache = new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
+	private readonly HashSet<string> _cutEditMediaPoolThumbsGenerating = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	private Button _cutEditMediaPoolViewListBtn;
+	private Button _cutEditMediaPoolViewThumbBtn;
+	private Button _cutEditMediaPoolAppendEndBtn;
+	private Button _cutEditMediaPoolInsertPlayheadBtn;
+	private Button _cutEditMediaPoolInsertStartBtn;
+
+	// Real audio waveform cache
+	private readonly Dictionary<string, Image> _cutEditWaveformCache = new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
+	private readonly HashSet<string> _cutEditWaveformsGenerating = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 	private CheckBox _cutEditTitleEnabled;
 	private RadioButton _cutEditTitleOverlayRadio;
@@ -82,25 +125,117 @@ internal sealed class MainForm : Form
 	private ComboBox _cutEditTitleStyle;
 	private TextBox _cutEditMainTitle;
 	private TextBox _cutEditSubtitle;
+	private NumericUpDown _cutEditTitleStartTime;
 	private NumericUpDown _cutEditTitleDuration;
-	private ComboBox _cutEditTitleFontSize;
+	private Rectangle _cachedT1Rect;
+	private TrackBar _cutEditTitleFontSizeSlider;
+	private Label _cutEditTitleFontSizeLabel;
+	private ComboBox _cutEditTitleTextColorCombo;
+	private ComboBox _cutEditTitleStrokeCombo;
+	private ComboBox _cutEditTitleBannerBgCombo;
+	private ComboBox _cutEditTitlePositionCombo;
+	private bool _updatingTitleTemplate;
 	private Button _cutEditTitlePreviewButton;
+	private TabControl _cutEditInspectorTabs;
+
+	// Multi-segment Text & Image Overlays (Phase 2)
+	private readonly List<CutOverlayItem> _cutEditOverlays = new List<CutOverlayItem>();
+	private CutOverlayItem _selectedOverlay = null;
+	private readonly Dictionary<string, Rectangle> _cachedOverlayRects = new Dictionary<string, Rectangle>(StringComparer.OrdinalIgnoreCase);
+	private readonly Dictionary<string, Image> _overlayImageCache = new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
+	private bool _isDraggingOverlay = false;
+	private int _overlayDragEdge = 0;
+	private int _overlayDragStartMouse;
+	private double _overlayDragOrigStart;
+	private double _overlayDragOrigDur;
+	private CutOverlayItem _draggedOverlayItem = null;
+	private bool _updatingOverlayInspector = false;
+
+	private ComboBox _overlayItemCombo;
+	private CheckBox _overlayItemEnabledCheckBox;
+	private Button _overlayAddTextBtn;
+	private Button _overlayAddImageBtn;
+	private Button _overlayDuplicateBtn;
+	private Button _overlayDeleteBtn;
+	private NumericUpDown _overlayStartTimeNum;
+	private NumericUpDown _overlayDurationNum;
+	private ComboBox _overlayPositionCombo;
+	private NumericUpDown _overlayOffsetXNum;
+	private NumericUpDown _overlayOffsetYNum;
+	private Panel _overlayTextPropsPanel;
+	private Panel _overlayImagePropsPanel;
+	private TextBox _overlayImagePathText;
+	private PictureBox _overlayImageThumbBox;
+	private TrackBar _overlayImageScaleSlider;
+	private Label _overlayImageScaleLabel;
+	private TrackBar _overlayImageOpacitySlider;
+	private Label _overlayImageOpacityLabel;
 
 	private int _cutEditPreviewSeq;
+
+	private sealed class CutEditProjectState
+	{
+		public List<CutSegment> Segments { get; set; }
+		public List<CutOverlayItem> Overlays { get; set; }
+		public double CurrentPos { get; set; }
+		public string SelectedOverlayId { get; set; }
+		public string Description { get; set; }
+	}
+
+	private Bitmap _cutEditCachedBaseFrame;
+	private string _cutEditCachedBaseFramePath;
+	private double _cutEditCachedBaseFrameTime = -999.0;
+	private readonly object _cutEditBaseFrameLock = new object();
+
+	private Bitmap _deliverCachedBaseFrame;
+	private string _deliverCachedBaseFramePath;
+	private double _deliverCachedBaseFrameTime = -999.0;
+	private readonly object _deliverBaseFrameLock = new object();
+
+	private SplitContainer _deliverRightSplit;
+	private Button _deliverPopoutBtn;
+	private Button _deliverExpandToggleBtn;
+	private DeliverPopoutPreviewForm _deliverPopoutForm;
+	private Panel _deliverMonitorBox;
+
+	private readonly Stack<CutEditProjectState> _cutEditUndoStack = new Stack<CutEditProjectState>();
+	private readonly Stack<CutEditProjectState> _cutEditRedoStack = new Stack<CutEditProjectState>();
+	private bool _isPerformingUndoRedo = false;
+	private Button _cutEditUndoButton;
+	private Button _cutEditRedoButton;
+	private Button _cutEditSaveProjectButton;
+	private string _cutEditCurrentProjectPath;
 
 	private readonly List<string> _cutEditMediaPool = new List<string>();
 	private ListView _cutEditMediaPoolList;
 	private Button _cutEditMediaPoolAddButton;
 	private Button _cutEditMediaPoolRemoveButton;
 	private Button _cutEditMediaPoolClearButton;
-	private Button _cutEditMediaPoolApplyButton;
-
 	private PictureBox _cutEditTimelineCanvas;
 	private CheckBox _cutEditAudioMuteCheckBox;
 	private TrackBar _cutEditAudioVolumeTrackBar;
 	private Label _cutEditAudioVolumeLabel;
 	private bool _cutEditAudioMuted;
 	private int _cutEditAudioVolume = 100;
+
+	internal double CutEditDuration => _cutEditDuration;
+	internal int CutEditSubtitleBottomOffset => _cutEditSubtitleBottomOffset;
+	private int _cutEditSubtitleBottomOffset = 407;
+	private CutEditPopoutPreviewForm _cutEditPopoutForm;
+	private TrackBar _cutEditSubtitlePosTrackBar;
+	private Label _cutEditSubtitlePosLabel;
+	private CheckBox _cutEditRealtimePreviewCheckBox;
+	private Button _cutEditPopoutPreviewBtn;
+	private Button _cutEditPopoutPreviewHeaderBtn;
+
+	// Audio quick mix fields for timeline toolbar
+	private CheckBox _cutEditKeepOriginalAudioCheckBox;
+	private TrackBar _cutEditBgmVolumeTrackBar;
+	private Label _cutEditBgmVolumeLabel;
+	private int _cutEditBgmVolume = 40;
+	private Button _cutEditFitWindowBtn;
+	private ComboBox _cutEditSpeedCombo;
+	private string _cutEditBgmPath = "";
 
 	private TextBox _deliverOutputFolder;
 	private TextBox _deliverOutputFileName;
@@ -120,6 +255,21 @@ internal sealed class MainForm : Form
 	private Button _deliverSendToMergeButton;
 	private Button _deliverSendBackToCutButton;
 	private string _deliverLastExportPath;
+	private PictureBox _deliverPreviewBox;
+	private Label _deliverEmptyPlaceholder;
+	private System.Windows.Forms.Integration.ElementHost _deliverElementHost;
+	private System.Windows.Controls.MediaElement _deliverMediaElement;
+	private Button _deliverPlayPauseButton;
+	private TrackBar _deliverTimeScrubber;
+	private Label _deliverTimeLabel;
+	private System.Windows.Forms.Timer _deliverPlayTimer;
+	private bool _deliverIsPlaying;
+	private double _deliverCurrentPos;
+	private double _deliverDuration;
+	private System.Diagnostics.Stopwatch _deliverPlaybackSw = new System.Diagnostics.Stopwatch();
+	private double _deliverPlaybackStartPos;
+	private int _deliverPreviewSeq;
+	private bool _deliverScrubberWasPlaying;
 
 	private static readonly object WatermarkFontLock = new object();
 
@@ -797,7 +947,8 @@ internal sealed class MainForm : Form
 
 	public MainForm()
 	{
-		Text = "视频批处理工具 V8.0";
+		InitCutEditTracks();
+		Text = $"视频批处理工具 V{CurrentAppVersion}";
 		base.StartPosition = FormStartPosition.CenterScreen;
 		MinimumSize = new Size(1180, 1040);
 		Rectangle rectangle = ((Screen.PrimaryScreen == null) ? new Rectangle(0, 0, 1366, 768) : Screen.PrimaryScreen.WorkingArea);
@@ -809,6 +960,15 @@ internal sealed class MainForm : Form
 		Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Regular, GraphicsUnit.Point);
 		BackColor = CanvasColor;
 		DoubleBuffered = true;
+
+		ThreadPool.QueueUserWorkItem(delegate
+		{
+			Thread.Sleep(3000);
+			if (!IsDisposed)
+			{
+				UpdateChecker.CheckForUpdatesAsync(this, CurrentAppVersion, isManual: false);
+			}
+		});
 		try
 		{
 			base.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -907,6 +1067,17 @@ internal sealed class MainForm : Form
 		navRight.Padding = new Padding(0, 7, 16, 7);
 		navRight.Margin = new Padding(0);
 
+		_checkUpdateButton = MakeButton("🔔 检查更新", 108);
+		_checkUpdateButton.Height = 36;
+		_checkUpdateButton.Margin = new Padding(0, 0, 8, 0);
+		_checkUpdateButton.Click += delegate
+		{
+			UpdateChecker.CheckForUpdatesAsync(this, CurrentAppVersion, isManual: true);
+		};
+		ToolTip updateTip = new ToolTip();
+		updateTip.SetToolTip(_checkUpdateButton, "检查最新版本与团队功能更新");
+		navRight.Controls.Add(_checkUpdateButton);
+
 		_themeToggleButton = MakeButton(_isDarkMode ? "🌙 暗黑模式" : "☀️ 日间模式", 112);
 		_themeToggleButton.Tag = "accent";
 		_themeToggleButton.Height = 36;
@@ -1000,6 +1171,7 @@ internal sealed class MainForm : Form
 		if (index == 6)
 		{
 			UpdateDeliverSummary();
+			InitOrRefreshDeliverPreview();
 		}
 		SaveUserSettings();
 	}
@@ -2191,7 +2363,13 @@ internal sealed class MainForm : Form
 			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Regular)
 		};
 		topBar.Controls.Add(_cutEditVideoInfoLabel);
-		tabPage.Controls.Add(topBar);
+		topBar.Paint += delegate(object s, PaintEventArgs e)
+		{
+			using (Pen p = new Pen(Color.FromArgb(40, 50, 68), 1f))
+			{
+				e.Graphics.DrawLine(p, 0, topBar.Height - 1, topBar.Width, topBar.Height - 1);
+			}
+		};
 
 		// SplitContainer: Top (Media Pool + Viewer + Title Inspector) & Bottom (Multi-track Timeline + Segments)
 		SplitContainer splitMain = new SplitContainer
@@ -2205,11 +2383,11 @@ internal sealed class MainForm : Form
 		splitMain.Panel2.BackColor = SurfaceColor;
 
 		// --- Panel1: Top section (Media Pool, Viewer, Title Inspector) ---
-		// Left: Media Pool
+		// Left: Media Pool (Width: 280px, supports Images, Thumbnails & Details view, Add to Timeline options)
 		Panel mediaPoolPanel = new Panel
 		{
 			Dock = DockStyle.Left,
-			Width = 260,
+			Width = 340,
 			BackColor = SurfaceColor,
 			Padding = new Padding(8, 6, 8, 6)
 		};
@@ -2226,30 +2404,31 @@ internal sealed class MainForm : Form
 
 		Label mpSub = new Label
 		{
-			Text = "拖入多个视频片段便于拼接",
-			Font = new Font("Microsoft YaHei UI", 8.5f),
+			Text = "拖入视频/图片素材，自由加入轨道",
+			Font = new Font("Microsoft YaHei UI", 8.25f),
 			ForeColor = MutedColor,
 			AutoSize = true,
 			Location = new Point(8, 28)
 		};
 		mediaPoolPanel.Controls.Add(mpSub);
 
-		FlowLayoutPanel mpBar = new FlowLayoutPanel
+		// Row 1: Import, Remove, Clear, and View mode toggle
+		FlowLayoutPanel mpBar1 = new FlowLayoutPanel
 		{
-			Location = new Point(6, 48),
-			Width = 248,
-			Height = 36,
+			Location = new Point(6, 46),
+			Width = 328,
+			Height = 32,
 			FlowDirection = FlowDirection.LeftToRight,
 			WrapContents = false
 		};
-		_cutEditMediaPoolAddButton = MakeButton("＋ 导入", 62);
-		_cutEditMediaPoolAddButton.Height = 30;
+		_cutEditMediaPoolAddButton = MakeButton("＋ 导入", 58);
+		_cutEditMediaPoolAddButton.Height = 28;
 		_cutEditMediaPoolAddButton.Click += delegate
 		{
 			using (OpenFileDialog ofd = new OpenFileDialog())
 			{
-				ofd.Title = "添加素材到媒体池";
-				ofd.Filter = "视频文件 (*.mp4;*.mov;*.mkv;*.flv;*.avi;*.wmv)|*.mp4;*.mov;*.mkv;*.flv;*.avi;*.wmv|所有文件 (*.*)|*.*";
+				ofd.Title = "添加素材到媒体池（支持视频与图片）";
+				ofd.Filter = "媒体文件 (*.mp4;*.mov;*.mkv;*.flv;*.avi;*.jpg;*.png;*.webp;*.bmp)|*.mp4;*.mov;*.mkv;*.flv;*.avi;*.jpg;*.jpeg;*.png;*.webp;*.bmp|视频文件 (*.mp4;*.mov;*.mkv;*.flv;*.avi;*.wmv)|*.mp4;*.mov;*.mkv;*.flv;*.avi;*.wmv|图片文件 (*.jpg;*.png;*.webp;*.bmp)|*.jpg;*.jpeg;*.png;*.webp;*.bmp|所有文件 (*.*)|*.*";
 				ofd.Multiselect = true;
 				if (ofd.ShowDialog(this) == DialogResult.OK)
 				{
@@ -2257,11 +2436,11 @@ internal sealed class MainForm : Form
 				}
 			}
 		};
-		mpBar.Controls.Add(_cutEditMediaPoolAddButton);
+		mpBar1.Controls.Add(_cutEditMediaPoolAddButton);
 
-		_cutEditMediaPoolRemoveButton = MakeButton("移除", 52);
-		_cutEditMediaPoolRemoveButton.Height = 30;
-		_cutEditMediaPoolRemoveButton.Margin = new Padding(4, 0, 0, 0);
+		_cutEditMediaPoolRemoveButton = MakeButton("移除", 46);
+		_cutEditMediaPoolRemoveButton.Height = 28;
+		_cutEditMediaPoolRemoveButton.Margin = new Padding(3, 0, 0, 0);
 		_cutEditMediaPoolRemoveButton.Click += delegate
 		{
 			if (_cutEditMediaPoolList.SelectedItems.Count > 0)
@@ -2274,33 +2453,79 @@ internal sealed class MainForm : Form
 				}
 			}
 		};
-		mpBar.Controls.Add(_cutEditMediaPoolRemoveButton);
+		mpBar1.Controls.Add(_cutEditMediaPoolRemoveButton);
 
-		_cutEditMediaPoolClearButton = MakeButton("清空", 52);
-		_cutEditMediaPoolClearButton.Height = 30;
-		_cutEditMediaPoolClearButton.Margin = new Padding(4, 0, 0, 0);
+		_cutEditMediaPoolClearButton = MakeButton("清空", 46);
+		_cutEditMediaPoolClearButton.Height = 28;
+		_cutEditMediaPoolClearButton.Margin = new Padding(3, 0, 0, 0);
 		_cutEditMediaPoolClearButton.Click += delegate
 		{
 			_cutEditMediaPool.Clear();
 			RefreshMediaPoolList();
 		};
-		mpBar.Controls.Add(_cutEditMediaPoolClearButton);
+		mpBar1.Controls.Add(_cutEditMediaPoolClearButton);
 
-		_cutEditMediaPoolApplyButton = MakeButton("载入", 58);
-		_cutEditMediaPoolApplyButton.Tag = "accent";
-		_cutEditMediaPoolApplyButton.Height = 30;
-		_cutEditMediaPoolApplyButton.Margin = new Padding(4, 0, 0, 0);
-		_cutEditMediaPoolApplyButton.Click += delegate
+		_cutEditMediaPoolViewListBtn = MakeButton("📋 列表", 70);
+		_cutEditMediaPoolViewListBtn.Height = 28;
+		_cutEditMediaPoolViewListBtn.Margin = new Padding(4, 0, 0, 0);
+		_cutEditMediaPoolViewListBtn.Tag = "accent";
+		_cutEditMediaPoolViewListBtn.Click += delegate { SwitchMediaPoolView(false); };
+		mpBar1.Controls.Add(_cutEditMediaPoolViewListBtn);
+
+		_cutEditMediaPoolViewThumbBtn = MakeButton("🖼 缩略图", 80);
+		_cutEditMediaPoolViewThumbBtn.Height = 28;
+		_cutEditMediaPoolViewThumbBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditMediaPoolViewThumbBtn.Click += delegate { SwitchMediaPoolView(true); };
+		mpBar1.Controls.Add(_cutEditMediaPoolViewThumbBtn);
+		mediaPoolPanel.Controls.Add(mpBar1);
+
+		// Row 2: Add to Timeline actions (Append, Insert Playhead, Insert Start)
+		FlowLayoutPanel mpBar2 = new FlowLayoutPanel
 		{
-			LoadMediaPoolSelectedToTimeline();
+			Location = new Point(6, 78),
+			Width = 328,
+			Height = 32,
+			FlowDirection = FlowDirection.LeftToRight,
+			WrapContents = false
 		};
-		mpBar.Controls.Add(_cutEditMediaPoolApplyButton);
-		mediaPoolPanel.Controls.Add(mpBar);
+		_cutEditMediaPoolAppendEndBtn = MakeButton("➕ 末尾追加", 102);
+		_cutEditMediaPoolAppendEndBtn.Tag = "accent";
+		_cutEditMediaPoolAppendEndBtn.Height = 28;
+		_cutEditMediaPoolAppendEndBtn.Click += delegate
+		{
+			InsertSelectedMediaPoolToTimeline(2); // 2: Append
+		};
+		mpBar2.Controls.Add(_cutEditMediaPoolAppendEndBtn);
+
+		_cutEditMediaPoolInsertPlayheadBtn = MakeButton("⬇ 插入指针", 102);
+		_cutEditMediaPoolInsertPlayheadBtn.Height = 28;
+		_cutEditMediaPoolInsertPlayheadBtn.Margin = new Padding(4, 0, 0, 0);
+		_cutEditMediaPoolInsertPlayheadBtn.Click += delegate
+		{
+			InsertSelectedMediaPoolToTimeline(1); // 1: At Playhead
+		};
+		mpBar2.Controls.Add(_cutEditMediaPoolInsertPlayheadBtn);
+
+		_cutEditMediaPoolInsertStartBtn = MakeButton("⬆ 插入最前", 102);
+		_cutEditMediaPoolInsertStartBtn.Height = 28;
+		_cutEditMediaPoolInsertStartBtn.Margin = new Padding(4, 0, 0, 0);
+		_cutEditMediaPoolInsertStartBtn.Click += delegate
+		{
+			InsertSelectedMediaPoolToTimeline(0); // 0: Start
+		};
+		mpBar2.Controls.Add(_cutEditMediaPoolInsertStartBtn);
+		mediaPoolPanel.Controls.Add(mpBar2);
+
+		_cutEditMediaPoolImageList = new ImageList
+		{
+			ImageSize = new Size(116, 88),
+			ColorDepth = ColorDepth.Depth32Bit
+		};
 
 		_cutEditMediaPoolList = new ListView
 		{
-			Location = new Point(8, 88),
-			Width = 244,
+			Location = new Point(8, 114),
+			Width = 324,
 			Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
 			View = View.Details,
 			FullRowSelect = true,
@@ -2311,17 +2536,104 @@ internal sealed class MainForm : Form
 			MultiSelect = false,
 			AllowDrop = true,
 			OwnerDraw = true,
+			LargeImageList = _cutEditMediaPoolImageList,
 			Font = new Font("Microsoft YaHei UI", 9f)
 		};
-		_cutEditMediaPoolList.Columns.Add("素材文件", 116);
-		_cutEditMediaPoolList.Columns.Add("时长", 60);
-		_cutEditMediaPoolList.Columns.Add("分辨率", 62);
+		_cutEditMediaPoolList.Columns.Add("素材文件", 146);
+		_cutEditMediaPoolList.Columns.Add("时长", 74);
+		_cutEditMediaPoolList.Columns.Add("分辨率", 84);
 		_cutEditMediaPoolList.DrawColumnHeader += DrawVideoListColumnHeader;
-		_cutEditMediaPoolList.DrawItem += delegate(object s, DrawListViewItemEventArgs e) { e.DrawDefault = true; };
-		_cutEditMediaPoolList.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs e) { e.DrawDefault = true; };
+		_cutEditMediaPoolList.DrawItem += delegate(object s, DrawListViewItemEventArgs e)
+		{
+			if (_cutEditMediaPoolList.View == View.Details)
+			{
+				e.DrawDefault = true;
+				return;
+			}
+
+			// Custom draw for LargeIcon Thumbnail view
+			var g = e.Graphics;
+			g.SmoothingMode = SmoothingMode.AntiAlias;
+			g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+
+			Rectangle r = e.Bounds;
+			r.Inflate(-2, -2);
+			bool isSelected = e.Item.Selected;
+
+			using (var bgBrush = new SolidBrush(isSelected ? Color.FromArgb(36, 52, 78) : Color.FromArgb(24, 28, 38)))
+			using (var borderPen = new Pen(isSelected ? Color.FromArgb(14, 165, 233) : Color.FromArgb(45, 52, 68), isSelected ? 2f : 1f))
+			{
+				g.FillRectangle(bgBrush, r);
+				g.DrawRectangle(borderPen, r);
+			}
+
+			string path = e.Item.Tag as string;
+			Rectangle thumbRect = new Rectangle(r.X + (r.Width - 96) / 2, r.Y + 6, 96, 64);
+			Image thumbImg = null;
+			lock (_cutEditMediaPoolThumbCache)
+			{
+				if (path != null && _cutEditMediaPoolThumbCache.TryGetValue(path, out var img))
+				{
+					thumbImg = img;
+				}
+			}
+
+			if (thumbImg != null)
+			{
+				g.DrawImage(thumbImg, thumbRect);
+			}
+			else
+			{
+				using (var ph = new SolidBrush(Color.FromArgb(14, 18, 25)))
+				{
+					g.FillRectangle(ph, thumbRect);
+				}
+				using (Pen phBorder = new Pen(Color.FromArgb(40, 48, 64), 1f))
+				{
+					g.DrawRectangle(phBorder, thumbRect);
+				}
+				TextRenderer.DrawText(g, IsImage(path) ? "🖼 图片" : "🎬 视频", this.Font, thumbRect, Color.Gray, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+			}
+
+			// Pill duration tag on bottom-right of thumbRect
+			if (e.Item.SubItems.Count > 1)
+			{
+				string dur = e.Item.SubItems[1].Text;
+				if (!string.IsNullOrEmpty(dur) && dur != "--:--")
+				{
+					Size sBadge = TextRenderer.MeasureText(dur, SystemFonts.SmallCaptionFont);
+					Rectangle bRect = new Rectangle(thumbRect.Right - sBadge.Width - 4, thumbRect.Bottom - sBadge.Height - 3, sBadge.Width + 4, sBadge.Height + 2);
+					using (var bBg = new SolidBrush(Color.FromArgb(210, 0, 0, 0)))
+					{
+						g.FillRectangle(bBg, bRect);
+					}
+					TextRenderer.DrawText(g, dur, SystemFonts.SmallCaptionFont, bRect, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+				}
+			}
+
+			// Text below thumbnail
+			Rectangle tRect = new Rectangle(r.X + 4, thumbRect.Bottom + 4, r.Width - 8, r.Bottom - thumbRect.Bottom - 6);
+			string name = Path.GetFileName(path ?? e.Item.Text);
+			TextRenderer.DrawText(g, name, this.Font, tRect, isSelected ? Color.White : Color.FromArgb(215, 222, 235), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
+		};
+		_cutEditMediaPoolList.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs e)
+		{
+			if (_cutEditMediaPoolList.View == View.Details) e.DrawDefault = true;
+		};
 		_cutEditMediaPoolList.DoubleClick += delegate
 		{
-			LoadMediaPoolSelectedToTimeline();
+			InsertSelectedMediaPoolToTimeline(2); // Double click appends to timeline
+		};
+		_cutEditMediaPoolList.ItemDrag += delegate(object s, ItemDragEventArgs e)
+		{
+			if (_cutEditMediaPoolList.SelectedItems.Count > 0)
+			{
+				string path = _cutEditMediaPoolList.SelectedItems[0].Tag as string;
+				if (!string.IsNullOrEmpty(path))
+				{
+					_cutEditMediaPoolList.DoDragDrop(path, DragDropEffects.Copy);
+				}
+			}
 		};
 		_cutEditMediaPoolList.DragEnter += delegate(object s, DragEventArgs e)
 		{
@@ -2337,167 +2649,853 @@ internal sealed class MainForm : Form
 		mediaPoolPanel.Controls.Add(_cutEditMediaPoolList);
 
 		// Right: Inspector / Title Designer
+		// Right: Inspector / Title Designer with Modern Tabs (Directly matching Fig 3 multi-tab toolbox)
 		Panel titlePanel = new Panel
 		{
 			Dock = DockStyle.Right,
 			Width = 340,
 			BackColor = SurfaceColor,
-			Padding = new Padding(8, 6, 8, 6),
-			AutoScroll = true
+			Padding = new Padding(4, 4, 4, 4)
 		};
 
-		GroupBox titleGroupBox = MakeGroupBox("片头设计与标题样式 (Title Designer)", 4, 4, 314, 400);
-		titleGroupBox.Dock = DockStyle.Fill;
-
-		_cutEditTitleEnabled = new CheckBox
+		TabControl inspectorTabs = new TabControl
 		{
-			Location = new Point(14, 24),
-			Text = "启用片头设计 (前5秒)",
+			Dock = DockStyle.Fill,
+			DrawMode = TabDrawMode.OwnerDrawFixed,
+			ItemSize = new Size(76, 28),
+			SizeMode = TabSizeMode.Fixed,
+			Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold)
+		};
+		_cutEditInspectorTabs = inspectorTabs;
+		inspectorTabs.DrawItem += delegate(object s, DrawItemEventArgs e)
+		{
+			bool isSel = (e.Index == inspectorTabs.SelectedIndex);
+			Color bg = isSel ? Color.FromArgb(37, 99, 235) : Color.FromArgb(24, 30, 42);
+			Color fg = isSel ? Color.White : Color.FromArgb(148, 163, 184);
+			using (Brush b = new SolidBrush(bg))
+			{
+				e.Graphics.FillRectangle(b, e.Bounds);
+			}
+			using (Brush bText = new SolidBrush(fg))
+			using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+			{
+				e.Graphics.DrawString(inspectorTabs.TabPages[e.Index].Text, e.Font, bText, e.Bounds, sf);
+			}
+		};
+
+		// Tab 1: 图文与贴片包装 (Text & Overlay Studio)
+		TabPage tabTitle = new TabPage("🏷️ 图文贴片");
+		tabTitle.BackColor = SurfaceColor;
+		tabTitle.AutoScroll = true;
+
+		// 1. Group: Overlay Item Management (List & Actions)
+		GroupBox overlayListGroup = MakeGroupBox("🏷️ 图文与贴片管理 (Overlay Studio)", 4, 4, 314, 86);
+		overlayListGroup.Dock = DockStyle.Top;
+
+		_overlayItemCombo = new ComboBox
+		{
+			Location = new Point(12, 22),
+			Width = 288,
+			DropDownStyle = ComboBoxStyle.DropDownList,
+			Font = new Font("Microsoft YaHei UI", 8.5f)
+		};
+		_overlayItemCombo.SelectedIndexChanged += delegate
+		{
+			if (_updatingOverlayInspector || _overlayItemCombo.SelectedIndex < 0) return;
+			if (_overlayItemCombo.SelectedIndex < _cutEditOverlays.Count)
+			{
+				_selectedOverlay = _cutEditOverlays[_overlayItemCombo.SelectedIndex];
+				SyncSelectedOverlayToControls();
+				_cutEditTimelineCanvas?.Invalidate();
+				TriggerTitleLivePreview();
+			}
+		};
+		overlayListGroup.Controls.Add(_overlayItemCombo);
+
+		FlowLayoutPanel overlayBtnFlow = new FlowLayoutPanel
+		{
+			Location = new Point(12, 52),
+			Width = 288,
+			Height = 28,
+			FlowDirection = FlowDirection.LeftToRight,
+			WrapContents = false
+		};
+
+		_overlayAddTextBtn = MakeButton("➕ 文案", 68);
+		_overlayAddTextBtn.Height = 25;
+		_overlayAddTextBtn.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
+		_overlayAddTextBtn.Click += delegate
+		{
+			PushCutEditUndoState("添加文案包装");
+			var newItem = new CutOverlayItem
+			{
+				Type = OverlayItemType.Text,
+				Name = $"文案 #{_cutEditOverlays.Count + 1}",
+				StartSeconds = Math.Max(0.0, _cutEditCurrentPos),
+				Duration = 5.0,
+				TextContent = "在此输入重点文字/联系方式",
+				SubtitleContent = "",
+				PositionPreset = "居中偏下",
+				FontSize = 42,
+				TextColorIndex = 0,
+				StrokeIndex = 0,
+				BannerBgIndex = 0
+			};
+			_cutEditOverlays.Add(newItem);
+			RefreshOverlayCombo(newItem);
+		};
+		overlayBtnFlow.Controls.Add(_overlayAddTextBtn);
+
+		_overlayAddImageBtn = MakeButton("🖼️ 贴图", 68);
+		_overlayAddImageBtn.Height = 25;
+		_overlayAddImageBtn.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
+		_overlayAddImageBtn.Margin = new Padding(4, 0, 0, 0);
+		_overlayAddImageBtn.Click += delegate
+		{
+			using (OpenFileDialog ofd = new OpenFileDialog())
+			{
+				ofd.Title = "选择要叠加的图片/贴图/二维码/Logo (PNG/JPG/BMP)";
+				ofd.Filter = "图片文件 (*.png;*.jpg;*.jpeg;*.bmp;*.webp)|*.png;*.jpg;*.jpeg;*.bmp;*.webp|所有文件 (*.*)|*.*";
+				if (ofd.ShowDialog(this) == DialogResult.OK)
+				{
+					PushCutEditUndoState("添加贴图包装");
+					var newItem = new CutOverlayItem
+					{
+						Type = OverlayItemType.Image,
+						Name = Path.GetFileNameWithoutExtension(ofd.FileName),
+						ImagePath = ofd.FileName,
+						StartSeconds = Math.Max(0.0, _cutEditCurrentPos),
+						Duration = 6.0,
+						PositionPreset = "右下角",
+						ScalePercent = 80,
+						OpacityPercent = 100
+					};
+					_cutEditOverlays.Add(newItem);
+					RefreshOverlayCombo(newItem);
+				}
+			}
+		};
+		overlayBtnFlow.Controls.Add(_overlayAddImageBtn);
+
+		_overlayDuplicateBtn = MakeButton("📋 复制", 68);
+		_overlayDuplicateBtn.Height = 25;
+		_overlayDuplicateBtn.Font = new Font("Microsoft YaHei UI", 8f);
+		_overlayDuplicateBtn.Margin = new Padding(4, 0, 0, 0);
+		_overlayDuplicateBtn.Click += delegate
+		{
+			if (_selectedOverlay != null)
+			{
+				PushCutEditUndoState("复制包装对象");
+				var cloned = _selectedOverlay.Clone();
+				_cutEditOverlays.Add(cloned);
+				RefreshOverlayCombo(cloned);
+			}
+		};
+		overlayBtnFlow.Controls.Add(_overlayDuplicateBtn);
+
+		_overlayDeleteBtn = MakeButton("🗑️ 删除", 68);
+		_overlayDeleteBtn.Height = 25;
+		_overlayDeleteBtn.Font = new Font("Microsoft YaHei UI", 8f);
+		_overlayDeleteBtn.Margin = new Padding(4, 0, 0, 0);
+		_overlayDeleteBtn.Click += delegate
+		{
+			if (_cutEditOverlays.Count > 1 && _selectedOverlay != null)
+			{
+				PushCutEditUndoState("删除包装对象");
+				int idx = _cutEditOverlays.IndexOf(_selectedOverlay);
+				_cutEditOverlays.Remove(_selectedOverlay);
+				int nextIdx = Math.Min(idx, _cutEditOverlays.Count - 1);
+				RefreshOverlayCombo(_cutEditOverlays[nextIdx]);
+			}
+			else if (_cutEditOverlays.Count == 1 && _selectedOverlay != null)
+			{
+				PushCutEditUndoState("关闭包装对象");
+				_selectedOverlay.Enabled = false;
+				SyncSelectedOverlayToControls();
+				_cutEditTimelineCanvas?.Invalidate();
+				TriggerTitleLivePreview();
+				UpdateDeliverSummary();
+			}
+		};
+		overlayBtnFlow.Controls.Add(_overlayDeleteBtn);
+		overlayListGroup.Controls.Add(overlayBtnFlow);
+
+		// 2. Group: Current Overlay Properties
+		GroupBox overlayPropsGroup = MakeGroupBox("⚙️ 当前选中对象属性配置", 4, 94, 314, 690);
+		overlayPropsGroup.Dock = DockStyle.Top;
+
+		_overlayItemEnabledCheckBox = new CheckBox
+		{
+			Location = new Point(14, 20),
+			Text = "启用此包装对象 (仅在设定时段内呈现)",
 			AutoSize = true,
 			Checked = true,
-			Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Bold)
+			Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold)
 		};
-		_cutEditTitleEnabled.CheckedChanged += delegate
+		_overlayItemEnabledCheckBox.CheckedChanged += delegate
 		{
-			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: false);
-			UpdateDeliverSummary();
+			SyncControlsToSelectedOverlay();
 		};
-		titleGroupBox.Controls.Add(_cutEditTitleEnabled);
+		_cutEditTitleEnabled = _overlayItemEnabledCheckBox;
+		overlayPropsGroup.Controls.Add(_overlayItemEnabledCheckBox);
 
-		titleGroupBox.Controls.Add(MakeLabel("设计模板样式:", 14, 52));
-		_cutEditTitleStyle = new ComboBox
+		overlayPropsGroup.Controls.Add(MakeLabel("时段: 起始:", 14, 46));
+		_overlayStartTimeNum = new NumericUpDown
+		{
+			Location = new Point(78, 44),
+			Width = 56,
+			Minimum = 0m,
+			Maximum = 3600m,
+			Value = 0m,
+			DecimalPlaces = 1
+		};
+		_overlayStartTimeNum.ValueChanged += delegate { SyncControlsToSelectedOverlay(); };
+		_cutEditTitleStartTime = _overlayStartTimeNum;
+		overlayPropsGroup.Controls.Add(_overlayStartTimeNum);
+
+		overlayPropsGroup.Controls.Add(MakeLabel("时长:", 140, 46));
+		_overlayDurationNum = new NumericUpDown
+		{
+			Location = new Point(174, 44),
+			Width = 56,
+			Minimum = 0.5m,
+			Maximum = 3600m,
+			Value = 5m,
+			DecimalPlaces = 1
+		};
+		_overlayDurationNum.ValueChanged += delegate { SyncControlsToSelectedOverlay(); };
+		_cutEditTitleDuration = _overlayDurationNum;
+		overlayPropsGroup.Controls.Add(_overlayDurationNum);
+
+		// Timing Presets
+		FlowLayoutPanel timingPresetsFlow = new FlowLayoutPanel
 		{
 			Location = new Point(14, 72),
+			Width = 286,
+			Height = 26,
+			FlowDirection = FlowDirection.LeftToRight,
+			WrapContents = false
+		};
+		Button btnHead = MakeButton("🎬片头0s", 66);
+		btnHead.Height = 22;
+		btnHead.Font = new Font("Microsoft YaHei UI", 8f);
+		btnHead.Click += delegate
+		{
+			_overlayStartTimeNum.Value = 0m;
+			SyncControlsToSelectedOverlay();
+		};
+		timingPresetsFlow.Controls.Add(btnHead);
+
+		Button btnMid = MakeButton("⚡片中居中", 72);
+		btnMid.Height = 22;
+		btnMid.Font = new Font("Microsoft YaHei UI", 8f);
+		btnMid.Margin = new Padding(3, 0, 0, 0);
+		btnMid.Click += delegate
+		{
+			double dur = Math.Max(1.0, _cutEditDuration);
+			double tDur = (double)_overlayDurationNum.Value;
+			double mid = Math.Max(0.0, (dur - tDur) / 2.0);
+			_overlayStartTimeNum.Value = (decimal)Math.Round(mid, 1);
+			SyncControlsToSelectedOverlay();
+		};
+		timingPresetsFlow.Controls.Add(btnMid);
+
+		Button btnTail = MakeButton("🏁片尾", 66);
+		btnTail.Height = 22;
+		btnTail.Font = new Font("Microsoft YaHei UI", 8f);
+		btnTail.Margin = new Padding(3, 0, 0, 0);
+		btnTail.Click += delegate
+		{
+			double dur = Math.Max(1.0, _cutEditDuration);
+			double tDur = (double)_overlayDurationNum.Value;
+			double tail = Math.Max(0.0, dur - tDur);
+			_overlayStartTimeNum.Value = (decimal)Math.Round(tail, 1);
+			SyncControlsToSelectedOverlay();
+		};
+		timingPresetsFlow.Controls.Add(btnTail);
+
+		Button btnAll = MakeButton("🌐全片", 66);
+		btnAll.Height = 22;
+		btnAll.Font = new Font("Microsoft YaHei UI", 8f);
+		btnAll.Margin = new Padding(3, 0, 0, 0);
+		btnAll.Click += delegate
+		{
+			_overlayStartTimeNum.Value = 0m;
+			_overlayDurationNum.Value = (decimal)Math.Max(1.0, _cutEditDuration);
+			SyncControlsToSelectedOverlay();
+		};
+		timingPresetsFlow.Controls.Add(btnAll);
+		overlayPropsGroup.Controls.Add(timingPresetsFlow);
+
+		// Layout & Position
+		overlayPropsGroup.Controls.Add(MakeLabel("位置:", 14, 104));
+		_overlayPositionCombo = new ComboBox
+		{
+			Location = new Point(48, 102),
+			Width = 100,
+			DropDownStyle = ComboBoxStyle.DropDownList
+		};
+		_overlayPositionCombo.Items.AddRange(new object[]
+		{
+			"居中偏下",
+			"居中偏上",
+			"画面居中",
+			"左上角",
+			"右上角",
+			"左下角",
+			"右下角",
+			"自定义坐标"
+		});
+		_overlayPositionCombo.SelectedIndex = 0;
+		_overlayPositionCombo.SelectedIndexChanged += delegate { SyncControlsToSelectedOverlay(); };
+		_cutEditTitlePositionCombo = _overlayPositionCombo;
+		overlayPropsGroup.Controls.Add(_overlayPositionCombo);
+
+		overlayPropsGroup.Controls.Add(MakeLabel("X:", 152, 104));
+		_overlayOffsetXNum = new NumericUpDown
+		{
+			Location = new Point(168, 102),
+			Width = 48,
+			Minimum = -1920m,
+			Maximum = 1920m,
+			Value = 0m
+		};
+		_overlayOffsetXNum.ValueChanged += delegate { SyncControlsToSelectedOverlay(); };
+		overlayPropsGroup.Controls.Add(_overlayOffsetXNum);
+
+		overlayPropsGroup.Controls.Add(MakeLabel("Y:", 220, 104));
+		_overlayOffsetYNum = new NumericUpDown
+		{
+			Location = new Point(236, 102),
+			Width = 48,
+			Minimum = -1080m,
+			Maximum = 1080m,
+			Value = 0m
+		};
+		_overlayOffsetYNum.ValueChanged += delegate { SyncControlsToSelectedOverlay(); };
+		overlayPropsGroup.Controls.Add(_overlayOffsetYNum);
+
+		// 3. Dynamic Panel: Text Overlay Properties
+		_overlayTextPropsPanel = new Panel
+		{
+			Location = new Point(8, 130),
+			Width = 298,
+			Height = 460,
+			BackColor = Color.Transparent
+		};
+
+		_overlayTextPropsPanel.Controls.Add(MakeLabel("设计模板样式 (一键套用):", 6, 4));
+		_cutEditTitleStyle = new ComboBox
+		{
+			Location = new Point(6, 24),
 			Width = 286,
 			DropDownStyle = ComboBoxStyle.DropDownList
 		};
 		_cutEditTitleStyle.Items.AddRange(new object[]
 		{
-			"🎬 电影宽银幕质感 (Cinematic Letterbox)",
-			"🔥 短视频醒目大字 (Punchy Social)",
-			"📰 纪实下三分之一条幅 (Lower Third)",
-			"📖 极简杂志文艺风 (Editorial Minimal)",
-			"⚡ 动感视觉重击 (Neon Cyber Highlight)"
+			"🎬 经典电影宽银幕 (Cinematic Letterbox)",
+			"🔥 抖音爆款醒目大字 (Punchy Social)",
+			"📕 小红书流行双色风 (Redbook Dual-Color)",
+			"🎤 综艺搞笑爆款大描边 (Variety Pop)",
+			"📰 深度科普访谈胶囊 (Knowledge Pill)",
+			"📱 手机短视频竖屏金句 (Social Quote)",
+			"🎞️ 港风复古胶片感 (Hong Kong Vintage)",
+			"⚡ 赛博电竞荧光霓虹 (Cyber Neon)",
+			"🏷️ 纪实资讯下三分之一 (Lower Third)",
+			"☕ 日系治愈极简杂志 (Japanese Minimal)",
+			"🚨 紧急高能预警红牌 (Alert High-Energy)",
+			"👑 商务演讲科技发布会 (Keynote Elite)"
 		});
 		_cutEditTitleStyle.SelectedIndex = 0;
 		_cutEditTitleStyle.SelectedIndexChanged += delegate
 		{
-			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
-			UpdateDeliverSummary();
+			if (_cutEditTitleStyle.SelectedIndex < 0) return;
+			_updatingTitleTemplate = true;
+			try
+			{
+				int idx = _cutEditTitleStyle.SelectedIndex;
+				switch (idx)
+				{
+					case 0: // 🎬 经典电影宽银幕
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 2;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 0;
+						SetTitleFontSize(52);
+						break;
+					case 1: // 🔥 抖音爆款醒目大字
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 1;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 0;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 2;
+						SetTitleFontSize(68);
+						break;
+					case 2: // 📕 小红书流行双色风
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 0;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 5;
+						SetTitleFontSize(60);
+						break;
+					case 3: // 🎤 综艺搞笑爆款大描边
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 1;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 1;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 1;
+						SetTitleFontSize(66);
+						break;
+					case 4: // 📰 深度科普访谈胶囊
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 4;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 2;
+						SetTitleFontSize(44);
+						break;
+					case 5: // 📱 手机短视频竖屏金句
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 2;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 0;
+						SetTitleFontSize(54);
+						break;
+					case 6: // 🎞️ 港风复古胶片感
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 4;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 0;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 0;
+						SetTitleFontSize(50);
+						break;
+					case 7: // ⚡ 赛博电竞荧光霓虹
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 2;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 0;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 3;
+						SetTitleFontSize(60);
+						break;
+					case 8: // 🏷️ 纪实资讯下三分之一
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 3;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 2;
+						SetTitleFontSize(40);
+						break;
+					case 9: // ☕ 日系治愈极简杂志
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 4;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 8;
+						SetTitleFontSize(44);
+						break;
+					case 10: // 🚨 紧急高能预警红牌
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 0;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 6;
+						SetTitleFontSize(64);
+						break;
+					case 11: // 👑 商务演讲科技发布会
+						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
+						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 3;
+						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 7;
+						SetTitleFontSize(46);
+						break;
+				}
+			}
+			finally
+			{
+				_updatingTitleTemplate = false;
+			}
+			SyncControlsToSelectedOverlay();
 		};
-		titleGroupBox.Controls.Add(_cutEditTitleStyle);
+		_overlayTextPropsPanel.Controls.Add(_cutEditTitleStyle);
 
-		titleGroupBox.Controls.Add(MakeLabel("主标题文字:", 14, 104));
+		_overlayTextPropsPanel.Controls.Add(MakeLabel("主标题文字 (支持多行/Enter换行):", 6, 52));
 		_cutEditMainTitle = new TextBox
 		{
-			Location = new Point(14, 124),
+			Location = new Point(6, 70),
 			Width = 286,
+			Height = 44,
+			Multiline = true,
+			ScrollBars = ScrollBars.Vertical,
 			Text = "CINEMATIC MOMENTS"
 		};
-		_cutEditMainTitle.TextChanged += delegate
-		{
-			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
-		};
-		titleGroupBox.Controls.Add(_cutEditMainTitle);
+		_cutEditMainTitle.TextChanged += delegate { SyncControlsToSelectedOverlay(); };
+		_overlayTextPropsPanel.Controls.Add(_cutEditMainTitle);
 
-		titleGroupBox.Controls.Add(MakeLabel("副标题 / 说明:", 14, 154));
+		_overlayTextPropsPanel.Controls.Add(MakeLabel("副标题 / 说明文字:", 6, 118));
 		_cutEditSubtitle = new TextBox
 		{
-			Location = new Point(14, 174),
+			Location = new Point(6, 136),
 			Width = 286,
 			Text = "A Story of Light and Motion"
 		};
-		_cutEditSubtitle.TextChanged += delegate
-		{
-			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
-		};
-		titleGroupBox.Controls.Add(_cutEditSubtitle);
+		_cutEditSubtitle.TextChanged += delegate { SyncControlsToSelectedOverlay(); };
+		_overlayTextPropsPanel.Controls.Add(_cutEditSubtitle);
 
-		titleGroupBox.Controls.Add(MakeLabel("持续秒数:", 14, 206));
-		_cutEditTitleDuration = new NumericUpDown
-		{
-			Location = new Point(80, 204),
-			Width = 60,
-			Minimum = 1m,
-			Maximum = 30m,
-			Value = 5m,
-			DecimalPlaces = 1
-		};
-		_cutEditTitleDuration.ValueChanged += delegate
-		{
-			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: false);
-			UpdateDeliverSummary();
-		};
-		titleGroupBox.Controls.Add(_cutEditTitleDuration);
+		_cutEditTitleFontSizeLabel = MakeLabel("字号大小: 52 px (⚡ 醒目大字)", 6, 166);
+		_cutEditTitleFontSizeLabel.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
+		_overlayTextPropsPanel.Controls.Add(_cutEditTitleFontSizeLabel);
 
-		titleGroupBox.Controls.Add(MakeLabel("字体比例:", 152, 206));
-		_cutEditTitleFontSize = new ComboBox
+		_cutEditTitleFontSizeSlider = new TrackBar
 		{
-			Location = new Point(216, 204),
+			Location = new Point(2, 184),
+			Width = 294,
+			Height = 28,
+			Minimum = 20,
+			Maximum = 110,
+			Value = 52,
+			TickFrequency = 10,
+			SmallChange = 2,
+			LargeChange = 10
+		};
+		_cutEditTitleFontSizeSlider.ValueChanged += delegate
+		{
+			int sz = _cutEditTitleFontSizeSlider.Value;
+			_cutEditTitleFontSizeLabel.Text = $"字号大小: {sz} px ({GetTitleSizeDescription(sz)})";
+			if (!_updatingTitleTemplate) SyncControlsToSelectedOverlay();
+		};
+		_overlayTextPropsPanel.Controls.Add(_cutEditTitleFontSizeSlider);
+
+		FlowLayoutPanel textQuickSizeFlow = new FlowLayoutPanel
+		{
+			Location = new Point(6, 214),
+			Width = 286,
+			Height = 26,
+			FlowDirection = FlowDirection.LeftToRight,
+			WrapContents = false
+		};
+		Button btnHuge = MakeButton("🔥巨大72", 68);
+		btnHuge.Height = 22;
+		btnHuge.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
+		btnHuge.Click += delegate { SetTitleFontSize(72); };
+		textQuickSizeFlow.Controls.Add(btnHuge);
+
+		Button btnLarge = MakeButton("⚡大号56", 68);
+		btnLarge.Height = 22;
+		btnLarge.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
+		btnLarge.Margin = new Padding(4, 0, 0, 0);
+		btnLarge.Click += delegate { SetTitleFontSize(56); };
+		textQuickSizeFlow.Controls.Add(btnLarge);
+
+		Button btnStandard = MakeButton("✨标准42", 68);
+		btnStandard.Height = 22;
+		btnStandard.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
+		btnStandard.Margin = new Padding(4, 0, 0, 0);
+		btnStandard.Click += delegate { SetTitleFontSize(42); };
+		textQuickSizeFlow.Controls.Add(btnStandard);
+
+		Button btnModest = MakeButton("📝适中30", 68);
+		btnModest.Height = 22;
+		btnModest.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
+		btnModest.Margin = new Padding(4, 0, 0, 0);
+		btnModest.Click += delegate { SetTitleFontSize(30); };
+		textQuickSizeFlow.Controls.Add(btnModest);
+		_overlayTextPropsPanel.Controls.Add(textQuickSizeFlow);
+
+		_overlayTextPropsPanel.Controls.Add(MakeLabel("字体主色:", 6, 246));
+		_cutEditTitleTextColorCombo = new ComboBox
+		{
+			Location = new Point(66, 244),
 			Width = 84,
 			DropDownStyle = ComboBoxStyle.DropDownList
 		};
-		_cutEditTitleFontSize.Items.AddRange(new object[] { "标准", "大号", "小号" });
-		_cutEditTitleFontSize.SelectedIndex = 0;
-		_cutEditTitleFontSize.SelectedIndexChanged += delegate
+		_cutEditTitleTextColorCombo.Items.AddRange(new object[]
 		{
-			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
+			"纯白高光",
+			"醒目亮黄",
+			"赛博电光青",
+			"炽热醒目红",
+			"尊贵暖金",
+			"荧光草绿",
+			"活力炫橙",
+			"珊瑚粉红"
+		});
+		_cutEditTitleTextColorCombo.SelectedIndex = 0;
+		_cutEditTitleTextColorCombo.SelectedIndexChanged += delegate { if (!_updatingTitleTemplate) SyncControlsToSelectedOverlay(); };
+		_overlayTextPropsPanel.Controls.Add(_cutEditTitleTextColorCombo);
+
+		_overlayTextPropsPanel.Controls.Add(MakeLabel("描边:", 156, 246));
+		_cutEditTitleStrokeCombo = new ComboBox
+		{
+			Location = new Point(194, 244),
+			Width = 98,
+			DropDownStyle = ComboBoxStyle.DropDownList
 		};
-		titleGroupBox.Controls.Add(_cutEditTitleFontSize);
+		_cutEditTitleStrokeCombo.Items.AddRange(new object[]
+		{
+			"粗黑描边 8px",
+			"重度超粗 12px",
+			"清晰描边 5px",
+			"精致描边 2px",
+			"无描边立体阴影"
+		});
+		_cutEditTitleStrokeCombo.SelectedIndex = 0;
+		_cutEditTitleStrokeCombo.SelectedIndexChanged += delegate { if (!_updatingTitleTemplate) SyncControlsToSelectedOverlay(); };
+		_overlayTextPropsPanel.Controls.Add(_cutEditTitleStrokeCombo);
+
+		_overlayTextPropsPanel.Controls.Add(MakeLabel("底板风格:", 6, 276));
+		_cutEditTitleBannerBgCombo = new ComboBox
+		{
+			Location = new Point(66, 274),
+			Width = 226,
+			DropDownStyle = ComboBoxStyle.DropDownList
+		};
+		_cutEditTitleBannerBgCombo.Items.AddRange(new object[]
+		{
+			"🎬 电影宽银幕暗影 (渐变暗角底栏)",
+			"🔥 亮黄高对比底牌 (短视频爆款)",
+			"💎 磨砂半透黑金卡片 (现代轻奢)",
+			"⚡ 赛博电光描边外框 (炫酷科技)",
+			"⬛ 纯黑全屏开场底板 (片头独立呈现)",
+			"📕 小红书磨砂胶囊 (双色流行风)",
+			"🚨 紧急高能红牌底板 (预警爆款)",
+			"🌊 科技深蓝商务渐变条 (发布会演讲)",
+			"🚫 无底板 (纯大字+立体描边)"
+		});
+		_cutEditTitleBannerBgCombo.SelectedIndex = 0;
+		_cutEditTitleBannerBgCombo.SelectedIndexChanged += delegate { if (!_updatingTitleTemplate) SyncControlsToSelectedOverlay(); };
+		_overlayTextPropsPanel.Controls.Add(_cutEditTitleBannerBgCombo);
 
 		_cutEditTitleOverlayRadio = new RadioButton
 		{
-			Location = new Point(14, 236),
+			Location = new Point(6, 306),
 			Text = "动态叠印在原视频画面上",
 			AutoSize = true,
 			Checked = true
 		};
-		_cutEditTitleOverlayRadio.CheckedChanged += delegate
-		{
-			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
-		};
-		titleGroupBox.Controls.Add(_cutEditTitleOverlayRadio);
+		_cutEditTitleOverlayRadio.CheckedChanged += delegate { if (_cutEditTitleOverlayRadio.Checked) SyncControlsToSelectedOverlay(); };
+		_overlayTextPropsPanel.Controls.Add(_cutEditTitleOverlayRadio);
 
 		_cutEditTitleCardRadio = new RadioButton
 		{
-			Location = new Point(14, 260),
+			Location = new Point(6, 328),
 			Text = "纯黑质感片头独立展示",
 			AutoSize = true,
 			Checked = false
 		};
-		titleGroupBox.Controls.Add(_cutEditTitleCardRadio);
+		_cutEditTitleCardRadio.CheckedChanged += delegate { if (_cutEditTitleCardRadio.Checked) SyncControlsToSelectedOverlay(); };
+		_overlayTextPropsPanel.Controls.Add(_cutEditTitleCardRadio);
+		overlayPropsGroup.Controls.Add(_overlayTextPropsPanel);
 
-		_cutEditTitlePreviewButton = MakeButton("👁️ 预览当前片头设计效果", 286);
-		_cutEditTitlePreviewButton.Location = new Point(14, 292);
-		_cutEditTitlePreviewButton.Height = 36;
+		// 4. Dynamic Panel: Image Overlay Properties
+		_overlayImagePropsPanel = new Panel
+		{
+			Location = new Point(8, 130),
+			Width = 298,
+			Height = 460,
+			BackColor = Color.Transparent,
+			Visible = false
+		};
+
+		_overlayImagePropsPanel.Controls.Add(MakeLabel("贴图/二维码图片文件:", 6, 4));
+		_overlayImagePathText = new TextBox
+		{
+			Location = new Point(6, 24),
+			Width = 208,
+			ReadOnly = true
+		};
+		_overlayImagePropsPanel.Controls.Add(_overlayImagePathText);
+
+		Button btnBrowseImg = MakeButton("浏览…", 70);
+		btnBrowseImg.Location = new Point(220, 22);
+		btnBrowseImg.Height = 26;
+		btnBrowseImg.Click += delegate
+		{
+			using (OpenFileDialog ofd = new OpenFileDialog())
+			{
+				ofd.Title = "选择贴图/二维码/Logo图片";
+				ofd.Filter = "图片文件 (*.png;*.jpg;*.jpeg;*.bmp;*.webp)|*.png;*.jpg;*.jpeg;*.bmp;*.webp|所有文件 (*.*)|*.*";
+				if (ofd.ShowDialog(this) == DialogResult.OK)
+				{
+					_overlayImagePathText.Text = ofd.FileName;
+					if (_selectedOverlay != null)
+					{
+						_selectedOverlay.ImagePath = ofd.FileName;
+						_selectedOverlay.Name = Path.GetFileNameWithoutExtension(ofd.FileName);
+					}
+					UpdateOverlayImageThumb(ofd.FileName);
+					SyncControlsToSelectedOverlay();
+				}
+			}
+		};
+		_overlayImagePropsPanel.Controls.Add(btnBrowseImg);
+
+		_overlayImageThumbBox = new PictureBox
+		{
+			Location = new Point(6, 56),
+			Size = new Size(64, 64),
+			SizeMode = PictureBoxSizeMode.Zoom,
+			BorderStyle = BorderStyle.FixedSingle,
+			BackColor = Color.FromArgb(16, 20, 28)
+		};
+		_overlayImagePropsPanel.Controls.Add(_overlayImageThumbBox);
+
+		_overlayImageScaleLabel = MakeLabel("缩放尺寸: 80%", 78, 56);
+		_overlayImageScaleLabel.ForeColor = AccentColor;
+		_overlayImageScaleLabel.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+		_overlayImagePropsPanel.Controls.Add(_overlayImageScaleLabel);
+
+		_overlayImageScaleSlider = new TrackBar
+		{
+			Location = new Point(74, 80),
+			Width = 218,
+			Height = 30,
+			Minimum = 10,
+			Maximum = 300,
+			Value = 80,
+			TickStyle = TickStyle.None
+		};
+		_overlayImageScaleSlider.ValueChanged += delegate
+		{
+			_overlayImageScaleLabel.Text = $"缩放尺寸: {_overlayImageScaleSlider.Value}%";
+			SyncControlsToSelectedOverlay();
+		};
+		_overlayImagePropsPanel.Controls.Add(_overlayImageScaleSlider);
+
+		FlowLayoutPanel imgScaleFlow = new FlowLayoutPanel
+		{
+			Location = new Point(6, 126),
+			Width = 286,
+			Height = 28,
+			FlowDirection = FlowDirection.LeftToRight,
+			WrapContents = false
+		};
+		int[] scalePresets = new int[] { 40, 70, 100, 150 };
+		string[] scaleLabels = new string[] { "角标40%", "卡片70%", "原图100%", "放大150%" };
+		for (int i = 0; i < scalePresets.Length; i++)
+		{
+			int sp = scalePresets[i];
+			Button btnSp = MakeButton(scaleLabels[i], 68);
+			btnSp.Height = 24;
+			btnSp.Font = new Font("Microsoft YaHei UI", 8f);
+			btnSp.Margin = new Padding(0, 0, 4, 0);
+			btnSp.Click += delegate { _overlayImageScaleSlider.Value = sp; };
+			imgScaleFlow.Controls.Add(btnSp);
+		}
+		_overlayImagePropsPanel.Controls.Add(imgScaleFlow);
+
+		_overlayImageOpacityLabel = MakeLabel("不透明度: 100%", 6, 160);
+		_overlayImagePropsPanel.Controls.Add(_overlayImageOpacityLabel);
+
+		_overlayImageOpacitySlider = new TrackBar
+		{
+			Location = new Point(4, 180),
+			Width = 288,
+			Height = 30,
+			Minimum = 10,
+			Maximum = 100,
+			Value = 100,
+			TickStyle = TickStyle.None
+		};
+		_overlayImageOpacitySlider.ValueChanged += delegate
+		{
+			_overlayImageOpacityLabel.Text = $"不透明度: {_overlayImageOpacitySlider.Value}%";
+			SyncControlsToSelectedOverlay();
+		};
+		_overlayImagePropsPanel.Controls.Add(_overlayImageOpacitySlider);
+
+		Label imgHint = MakeLabel("💡 支持 PNG 透明通道、JPG、WebP 等。\n可将二维码、联系方式名片或Logo置于画面任意角落，并自由调节大小与呈现时段。", 6, 222);
+		imgHint.Size = new Size(286, 60);
+		imgHint.ForeColor = MutedColor;
+		imgHint.Font = new Font("Microsoft YaHei UI", 8f);
+		_overlayImagePropsPanel.Controls.Add(imgHint);
+		overlayPropsGroup.Controls.Add(_overlayImagePropsPanel);
+
+		// Bottom Buttons in overlayPropsGroup
+		_cutEditTitlePreviewButton = MakeButton("👁️ 预览当前设计效果", 286);
+		_cutEditTitlePreviewButton.Location = new Point(14, 604);
+		_cutEditTitlePreviewButton.Height = 32;
+		_cutEditTitlePreviewButton.Tag = "accent";
 		_cutEditTitlePreviewButton.Click += delegate
 		{
-			if (string.IsNullOrEmpty(_cutEditSourcePath) || !File.Exists(_cutEditSourcePath)) return;
-			if (_cutEditIsPlaying && _cutEditMediaElement != null)
+			if (_cutEditSegments.Count == 0 && (string.IsNullOrEmpty(_cutEditSourcePath) || !File.Exists(_cutEditSourcePath)))
 			{
-				_cutEditMediaElement.Pause();
-				_cutEditIsPlaying = false;
-				if (_cutEditPlayPauseButton != null) _cutEditPlayPauseButton.Text = "▶ 播放 (空格)";
-				_cutEditPlayTimer?.Stop();
+				MessageBox.Show(this, "请先在左侧媒体池或轨道中添加素材！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+				return;
 			}
-			if (_cutEditPreviewBox != null)
+			if (_selectedOverlay != null)
 			{
-				_cutEditPreviewBox.Visible = true;
-				_cutEditPreviewBox.BringToFront();
+				_cutEditCurrentPos = _selectedOverlay.StartSeconds;
+				if (_cutEditTimeScrubber != null && _cutEditDuration > 0.0)
+				{
+					_cutEditTimeScrubber.Value = (int)((_cutEditCurrentPos / _cutEditDuration) * 1000);
+				}
+				UpdateCutEditTimeLabel();
+				_cutEditTimelineCanvas?.Invalidate();
+				TriggerTitleLivePreview();
 			}
-			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
 		};
-		titleGroupBox.Controls.Add(_cutEditTitlePreviewButton);
-		titlePanel.Controls.Add(titleGroupBox);
+		overlayPropsGroup.Controls.Add(_cutEditTitlePreviewButton);
 
-		// Audio track settings group in inspector
-		GroupBox audioGroupBox = MakeGroupBox("🔊 音频轨道与增益属性 (A1 Track)", 4, 355, 314, 110);
-		audioGroupBox.Dock = DockStyle.Top;
-		audioGroupBox.Height = 110;
+		Button btnPlaySeg = MakeButton("▶ 跳至此时段并播放", 286);
+		btnPlaySeg.Location = new Point(14, 642);
+		btnPlaySeg.Height = 28;
+		btnPlaySeg.Click += delegate
+		{
+			if (_selectedOverlay != null)
+			{
+				_cutEditCurrentPos = _selectedOverlay.StartSeconds;
+				SyncPlayerAtCurrentPos(forceReload: false);
+				if (!_cutEditIsPlaying) ToggleCutEditPlayPause();
+			}
+		};
+		overlayPropsGroup.Controls.Add(btnPlaySeg);
+
+		tabTitle.Controls.Add(overlayPropsGroup);
+		tabTitle.Controls.Add(overlayListGroup);
+		overlayListGroup.SendToBack();
+		inspectorTabs.TabPages.Add(tabTitle);
+
+		InitDefaultOverlays();
+		RefreshOverlayCombo();
+
+		// Tab 2: 样式特效
+		TabPage tabStyle = new TabPage("🎨 样式特效");
+		tabStyle.BackColor = SurfaceColor;
+		tabStyle.AutoScroll = true;
+		GroupBox styleGroup = MakeGroupBox("字幕字体、描边与发光视效", 4, 4, 314, 380);
+		styleGroup.Dock = DockStyle.Fill;
+		styleGroup.Controls.Add(MakeLabel("字幕字体族:", 14, 28));
+		ComboBox fontCombo = new ComboBox { Location = new Point(14, 48), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
+		fontCombo.Items.AddRange(new object[] { "微软雅黑 (系统标准推荐)", "思源黑体 (Source Han Sans)", "黑体 (SimHei Bold)", "Impact (流行醒目短视频大字)", "Arial (英文字幕高清)" });
+		fontCombo.SelectedIndex = 0;
+		styleGroup.Controls.Add(fontCombo);
+
+		styleGroup.Controls.Add(MakeLabel("字色基调与强调预设:", 14, 84));
+		FlowLayoutPanel colorFlow = new FlowLayoutPanel { Location = new Point(14, 104), Size = new Size(286, 36), WrapContents = false };
+		string[] colorNames = new[] { "纯白 #FFF", "明黄 #FE0", "青蓝 #0EF", "金橙 #FA0" };
+		foreach (var cn in colorNames)
+		{
+			Button btnC = MakeButton(cn, 66);
+			btnC.Height = 28;
+			btnC.Margin = new Padding(0, 0, 4, 0);
+			btnC.Click += delegate { UpdateCutEditPreviewFrame(_cutEditCurrentPos, true); };
+			colorFlow.Controls.Add(btnC);
+		}
+		styleGroup.Controls.Add(colorFlow);
+
+		styleGroup.Controls.Add(MakeLabel("描边与投影质感:", 14, 146));
+		ComboBox strokeCombo = new ComboBox { Location = new Point(14, 166), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
+		strokeCombo.Items.AddRange(new object[] { "纯黑强化描边 (高对比度, 推荐短视频)", "柔和环境投影 (Soft Shadow)", "荧光外发光 (Cyber Glow)", "无描边纯文字 (Minimal Clean)" });
+		strokeCombo.SelectedIndex = 0;
+		strokeCombo.SelectedIndexChanged += delegate { UpdateCutEditPreviewFrame(_cutEditCurrentPos, true); };
+		styleGroup.Controls.Add(strokeCombo);
+
+		styleGroup.Controls.Add(MakeLabel("字幕底衬条幅:", 14, 204));
+		ComboBox bgBoxCombo = new ComboBox { Location = new Point(14, 224), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
+		bgBoxCombo.Items.AddRange(new object[] { "无底衬 (浮于视频画面)", "半透明磨砂黑底条 (50% Black Banner)", "圆角胶囊强调框 (Pill Highlight Box)", "电影宽银幕上下遮幅 (Letterbox)" });
+		bgBoxCombo.SelectedIndex = 0;
+		bgBoxCombo.SelectedIndexChanged += delegate { UpdateCutEditPreviewFrame(_cutEditCurrentPos, true); };
+		styleGroup.Controls.Add(bgBoxCombo);
+
+		Button btnApplyStyle = MakeButton("✨ 应用样式并实时预览", 286);
+		btnApplyStyle.Location = new Point(14, 268);
+		btnApplyStyle.Height = 34;
+		btnApplyStyle.Tag = "accent";
+		btnApplyStyle.Click += delegate { UpdateCutEditPreviewFrame(_cutEditCurrentPos, true); };
+		styleGroup.Controls.Add(btnApplyStyle);
+		tabStyle.Controls.Add(styleGroup);
+		inspectorTabs.TabPages.Add(tabStyle);
+
+		// Tab 3: 视听混流
+		TabPage tabAudio = new TabPage("🔊 视听混流");
+		tabAudio.BackColor = SurfaceColor;
+		tabAudio.AutoScroll = true;
+		GroupBox audioGroup = MakeGroupBox("A1 原声与 A2 背景音乐多轨混流", 4, 4, 314, 380);
+		audioGroup.Dock = DockStyle.Fill;
 
 		_cutEditAudioMuteCheckBox = new CheckBox
 		{
-			Text = "🔇 静音 A1 音轨",
+			Text = "🔇 静音 A1 原声音轨",
 			AutoSize = true,
 			Checked = false,
 			Location = new Point(14, 26)
@@ -2513,11 +3511,11 @@ internal sealed class MainForm : Form
 			_cutEditTimelineCanvas?.Invalidate();
 			UpdateDeliverSummary();
 		};
-		audioGroupBox.Controls.Add(_cutEditAudioMuteCheckBox);
+		audioGroup.Controls.Add(_cutEditAudioMuteCheckBox);
 
-		audioGroupBox.Controls.Add(MakeLabel("A1 音量增益:", 14, 58));
-		_cutEditAudioVolumeLabel = MakeLabel("100%", 100, 58);
-		audioGroupBox.Controls.Add(_cutEditAudioVolumeLabel);
+		audioGroup.Controls.Add(MakeLabel("A1 原声音量增益:", 14, 56));
+		_cutEditAudioVolumeLabel = MakeLabel("100%", 130, 56);
+		audioGroup.Controls.Add(_cutEditAudioVolumeLabel);
 
 		_cutEditAudioVolumeTrackBar = new TrackBar
 		{
@@ -2540,10 +3538,91 @@ internal sealed class MainForm : Form
 			_cutEditTimelineCanvas?.Invalidate();
 			UpdateDeliverSummary();
 		};
-		audioGroupBox.Controls.Add(_cutEditAudioVolumeTrackBar);
-		titlePanel.Controls.Add(audioGroupBox);
+		audioGroup.Controls.Add(_cutEditAudioVolumeTrackBar);
 
-		// Center: Main Viewer (Hardware-accelerated WPF Player + Scrubber + DaVinci Transport)
+		audioGroup.Controls.Add(MakeLabel("A2 背景音乐 (BGM):", 14, 114));
+		Button btnPickBgm = MakeButton("🎵 选择BGM音频文件…", 286);
+		btnPickBgm.Location = new Point(14, 134);
+		btnPickBgm.Height = 32;
+		btnPickBgm.Click += delegate
+		{
+			using (OpenFileDialog ofd = new OpenFileDialog())
+			{
+				ofd.Title = "选择背景音乐音频";
+				ofd.Filter = "音频文件 (*.mp3;*.wav;*.aac;*.m4a;*.flac)|*.mp3;*.wav;*.aac;*.m4a;*.flac|所有文件 (*.*)|*.*";
+				if (ofd.ShowDialog(this) == DialogResult.OK)
+				{
+					_cutEditBgmPath = ofd.FileName;
+					MessageBox.Show(this, $"已载入配乐: {Path.GetFileName(_cutEditBgmPath)}", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+					_cutEditTimelineCanvas?.Invalidate();
+				}
+			}
+		};
+		audioGroup.Controls.Add(btnPickBgm);
+
+		audioGroup.Controls.Add(MakeLabel("A2 配乐音量伴奏比例: 40%", 14, 178));
+		TrackBar bgmVolSlider = new TrackBar { Location = new Point(14, 198), Width = 286, Height = 28, Minimum = 0, Maximum = 100, Value = 40, TickStyle = TickStyle.None };
+		bgmVolSlider.ValueChanged += delegate
+		{
+			_cutEditBgmVolume = bgmVolSlider.Value;
+			if (_cutEditBgmVolumeTrackBar != null) _cutEditBgmVolumeTrackBar.Value = _cutEditBgmVolume;
+			if (_cutEditBgmVolumeLabel != null) _cutEditBgmVolumeLabel.Text = $"BGM: {_cutEditBgmVolume}%";
+			_cutEditTimelineCanvas?.Invalidate();
+		};
+		audioGroup.Controls.Add(bgmVolSlider);
+
+		audioGroup.Controls.Add(MakeLabel("环境音效 / 混响衰减:", 14, 234));
+		TrackBar ambSlider = new TrackBar { Location = new Point(14, 254), Width = 286, Height = 28, Minimum = 0, Maximum = 100, Value = 0, TickStyle = TickStyle.None };
+		audioGroup.Controls.Add(ambSlider);
+
+		tabAudio.Controls.Add(audioGroup);
+		inspectorTabs.TabPages.Add(tabAudio);
+
+		// Tab 4: 镜头转场
+		TabPage tabCut = new TabPage("✂ 镜头转场");
+		tabCut.BackColor = SurfaceColor;
+		tabCut.AutoScroll = true;
+		GroupBox cutGroup = MakeGroupBox("转场切片与运镜变速", 4, 4, 314, 380);
+		cutGroup.Dock = DockStyle.Fill;
+		cutGroup.Controls.Add(MakeLabel("片段衔接过渡效果:", 14, 28));
+		ComboBox transCombo = new ComboBox { Location = new Point(14, 48), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
+		transCombo.Items.AddRange(new object[] { "直接硬切 (Direct Cut - 默认推荐)", "平滑淡入淡出 (Crossfade 0.5s)", "黑场过渡 (Dip to Black 0.3s)", "镜头推进重击 (Zoom Transition)" });
+		transCombo.SelectedIndex = 0;
+		cutGroup.Controls.Add(transCombo);
+
+		cutGroup.Controls.Add(MakeLabel("智能静音消除阈值:", 14, 86));
+		ComboBox muteThreshCombo = new ComboBox { Location = new Point(14, 106), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
+		muteThreshCombo.Items.AddRange(new object[] { "-35 dB (推荐短视频口播)", "-30 dB (较激进切除微弱停顿)", "-40 dB (较保守保留轻微呼吸声)", "不开启静音检测" });
+		muteThreshCombo.SelectedIndex = 0;
+		cutGroup.Controls.Add(muteThreshCombo);
+
+		cutGroup.Controls.Add(MakeLabel("片段前后安全保护时长:", 14, 144));
+		Label lblProtect = MakeLabel("前保护: 100 ms  |  后保护: 280 ms", 14, 168);
+		lblProtect.ForeColor = Color.FromArgb(56, 189, 248);
+		cutGroup.Controls.Add(lblProtect);
+
+		Button btnAddWatermark = MakeButton("🖼️ 载入台标/水印PNG徽标…", 286);
+		btnAddWatermark.Location = new Point(14, 210);
+		btnAddWatermark.Height = 34;
+		btnAddWatermark.Click += delegate
+		{
+			using (OpenFileDialog ofd = new OpenFileDialog())
+			{
+				ofd.Title = "选择透明PNG水印徽标";
+				ofd.Filter = "PNG图片 (*.png)|*.png|所有图片 (*.*)|*.*";
+				if (ofd.ShowDialog(this) == DialogResult.OK)
+				{
+					MessageBox.Show(this, $"已载入水印徽标: {Path.GetFileName(ofd.FileName)}", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+				}
+			}
+		};
+		cutGroup.Controls.Add(btnAddWatermark);
+		tabCut.Controls.Add(cutGroup);
+		inspectorTabs.TabPages.Add(tabCut);
+
+		titlePanel.Controls.Add(inspectorTabs);
+
+		// Center: Main Viewer (Hardware-accelerated WPF Player + Dual Preview + Fig 3 Transport & Subtitle Sliders)
 		Panel centerViewer = new Panel
 		{
 			Dock = DockStyle.Fill,
@@ -2551,7 +3630,127 @@ internal sealed class MainForm : Form
 			Padding = new Padding(4, 4, 4, 4)
 		};
 
-		// 1. Bottom: Transport Controls Bar (走带控制栏)
+		// 0. Top: Monitor Header Bar (工作预览区标题栏与弹出独立窗按钮)
+		Panel previewHeaderBar = new Panel
+		{
+			Dock = DockStyle.Top,
+			Height = 36,
+			BackColor = Color.FromArgb(18, 24, 34),
+			Padding = new Padding(10, 4, 10, 4)
+		};
+
+		Label previewHeaderTitle = new Label
+		{
+			Text = "🖥️ 工作预览区 · 实时预审与字幕设计",
+			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
+			ForeColor = Color.FromArgb(56, 189, 248),
+			AutoSize = true,
+			Location = new Point(10, 8)
+		};
+		previewHeaderBar.Controls.Add(previewHeaderTitle);
+
+		Label previewHeaderTip = new Label
+		{
+			Text = "双击画面：弹出独立预览窗口 | 实时音画与字幕对齐预审",
+			Font = new Font("Microsoft YaHei UI", 8.5f),
+			ForeColor = Color.FromArgb(148, 163, 184),
+			AutoSize = true,
+			Location = new Point(270, 9)
+		};
+		previewHeaderBar.Controls.Add(previewHeaderTip);
+
+		_cutEditPopoutPreviewHeaderBtn = MakeButton("🗗 弹出独立预览窗", 145);
+		_cutEditPopoutPreviewHeaderBtn.Tag = "accent";
+		_cutEditPopoutPreviewHeaderBtn.Height = 28;
+		_cutEditPopoutPreviewHeaderBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+		_cutEditPopoutPreviewHeaderBtn.Location = new Point(centerViewer.ClientSize.Width - 155, 4);
+		_cutEditPopoutPreviewHeaderBtn.Click += delegate { OpenCutEditPopoutPreview(); };
+		previewHeaderBar.Controls.Add(_cutEditPopoutPreviewHeaderBtn);
+		previewHeaderBar.Resize += delegate
+		{
+			_cutEditPopoutPreviewHeaderBtn.Location = new Point(previewHeaderBar.ClientSize.Width - _cutEditPopoutPreviewHeaderBtn.Width - 10, 4);
+		};
+
+		// 1. Bottom: Subtitle & Overlay Position Bar (Directly matching Fig 3)
+		Panel subtitlePosBar = new Panel
+		{
+			Dock = DockStyle.Bottom,
+			Height = 36,
+			BackColor = Color.FromArgb(16, 20, 28),
+			Padding = new Padding(10, 4, 10, 4)
+		};
+
+		Label subPosLbl = new Label
+		{
+			Text = "字幕上下位置: 低",
+			Font = new Font("Microsoft YaHei UI", 8.5f),
+			ForeColor = Color.FromArgb(203, 213, 225),
+			AutoSize = true,
+			Location = new Point(8, 9)
+		};
+		subtitlePosBar.Controls.Add(subPosLbl);
+
+		_cutEditSubtitlePosTrackBar = new TrackBar
+		{
+			Location = new Point(122, 4),
+			Width = 160,
+			Height = 26,
+			Minimum = 20,
+			Maximum = 800,
+			Value = _cutEditSubtitleBottomOffset,
+			TickStyle = TickStyle.None,
+			Cursor = Cursors.Hand
+		};
+		_cutEditSubtitlePosTrackBar.ValueChanged += delegate
+		{
+			SetCutEditSubtitleBottomOffset(_cutEditSubtitlePosTrackBar.Value);
+		};
+		subtitlePosBar.Controls.Add(_cutEditSubtitlePosTrackBar);
+
+		_cutEditSubtitlePosLabel = new Label
+		{
+			Text = $"高  距离底: {_cutEditSubtitleBottomOffset} px",
+			Font = new Font("Microsoft YaHei UI", 8.5f),
+			ForeColor = Color.FromArgb(56, 189, 248),
+			AutoSize = true,
+			Location = new Point(288, 9)
+		};
+		subtitlePosBar.Controls.Add(_cutEditSubtitlePosLabel);
+
+		_cutEditRealtimePreviewCheckBox = new CheckBox
+		{
+			Text = "☑ 实时显示效果 (音画同步/视效位置)",
+			Font = new Font("Microsoft YaHei UI", 8.5f),
+			ForeColor = Color.FromArgb(226, 232, 240),
+			AutoSize = true,
+			Checked = true,
+			Location = new Point(415, 8)
+		};
+		_cutEditRealtimePreviewCheckBox.CheckedChanged += delegate
+		{
+			UpdateCutEditPreviewFrame(_cutEditCurrentPos, _cutEditRealtimePreviewCheckBox.Checked);
+		};
+		subtitlePosBar.Controls.Add(_cutEditRealtimePreviewCheckBox);
+
+		Button resetSubPosBtn = MakeButton("↺ 还原位置", 82);
+		resetSubPosBtn.Height = 26;
+		resetSubPosBtn.Location = new Point(660, 4);
+		resetSubPosBtn.Click += delegate
+		{
+			SetCutEditSubtitleBottomOffset(407);
+		};
+		subtitlePosBar.Controls.Add(resetSubPosBtn);
+
+		Button refreshPreviewBtn = MakeButton("👁 刷新预审", 82);
+		refreshPreviewBtn.Height = 26;
+		refreshPreviewBtn.Location = new Point(748, 4);
+		refreshPreviewBtn.Click += delegate
+		{
+			UpdateCutEditPreviewFrame(_cutEditCurrentPos, true);
+		};
+		subtitlePosBar.Controls.Add(refreshPreviewBtn);
+
+		// 2. Transport Controls Bar
 		Panel transportBar = new Panel
 		{
 			Dock = DockStyle.Bottom,
@@ -2571,14 +3770,13 @@ internal sealed class MainForm : Form
 		};
 		transportBar.Controls.Add(_cutEditTimeLabel);
 
-		// Center of Transport: DaVinci Buttons Flow
 		FlowLayoutPanel transportBtnFlow = new FlowLayoutPanel
 		{
 			Height = 36,
 			AutoSize = true,
 			FlowDirection = FlowDirection.LeftToRight,
 			WrapContents = false,
-			Location = new Point(220, 4)
+			Location = new Point(190, 4)
 		};
 
 		_cutEditStepBack5Btn = MakeButton("⏪ -5s", 58);
@@ -2611,6 +3809,12 @@ internal sealed class MainForm : Form
 		_cutEditStepForward5Btn.Margin = new Padding(3, 0, 0, 0);
 		_cutEditStepForward5Btn.Click += delegate { StepCutEditTime(5.0); };
 		transportBtnFlow.Controls.Add(_cutEditStepForward5Btn);
+
+		_cutEditPopoutPreviewBtn = MakeButton("🗗 弹出工作区", 108);
+		_cutEditPopoutPreviewBtn.Height = 32;
+		_cutEditPopoutPreviewBtn.Margin = new Padding(4, 0, 0, 0);
+		_cutEditPopoutPreviewBtn.Click += delegate { OpenCutEditPopoutPreview(); };
+		transportBtnFlow.Controls.Add(_cutEditPopoutPreviewBtn);
 
 		transportBar.Controls.Add(transportBtnFlow);
 
@@ -2685,7 +3889,7 @@ internal sealed class MainForm : Form
 			transportBtnFlow.Location = new Point(Math.Max(_cutEditTimeLabel.Right + 10, mid), 4);
 		};
 
-		// 2. Scrubber Trackbar Bar (进度滑动条)
+		// 3. Scrubber Trackbar Bar
 		Panel scrubberPanel = new Panel
 		{
 			Dock = DockStyle.Bottom,
@@ -2718,18 +3922,12 @@ internal sealed class MainForm : Form
 		{
 			if (_cutEditDuration > 0.0)
 			{
-				_cutEditCurrentPos = (_cutEditTimeScrubber.Value / 1000.0) * _cutEditDuration;
-				UpdateCutEditTimeLabel();
-				if (!_cutEditIsPlaying && _cutEditMediaElement != null)
-				{
-					_cutEditMediaElement.Position = TimeSpan.FromSeconds(_cutEditCurrentPos);
-				}
-				_cutEditTimelineCanvas?.Invalidate();
+				SeekCutEditVideo((_cutEditTimeScrubber.Value / 1000.0) * _cutEditDuration);
 			}
 		};
 		scrubberPanel.Controls.Add(_cutEditTimeScrubber);
 
-		// 3. Center Video Host Panel (Dock Fill)
+		// 4. Center Video Host Panel
 		Panel videoHostPanel = new Panel
 		{
 			Dock = DockStyle.Fill,
@@ -2741,8 +3939,14 @@ internal sealed class MainForm : Form
 			Dock = DockStyle.Fill,
 			SizeMode = PictureBoxSizeMode.Zoom,
 			BackColor = Color.FromArgb(10, 14, 20),
-			Visible = false
+			Visible = false,
+			Cursor = Cursors.Hand
 		};
+		_cutEditPreviewBox.DoubleClick += delegate
+		{
+			OpenCutEditPopoutPreview();
+		};
+		typeof(PictureBox).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.SetValue(_cutEditPreviewBox, true);
 
 		_cutEditElementHost = new System.Windows.Forms.Integration.ElementHost
 		{
@@ -2774,7 +3978,7 @@ internal sealed class MainForm : Form
 		{
 			Dock = DockStyle.Fill,
 			TextAlign = ContentAlignment.MiddleCenter,
-			Text = "🎬 达芬奇全功能剪辑工作台\n\n请在左侧【素材媒体池】中拖拽或双击载入视频\n支持空格键播放/暂停、I / O 设置出入点、B 剃刀切割片段",
+			Text = "🎬 专业多轨剪辑工作台\n\n请在左侧【素材媒体池】中拖拽或双击载入视频\n支持空格键播放/暂停、I / O 设置出入点、B 剃刀切割片段",
 			ForeColor = Color.FromArgb(120, 136, 160),
 			Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Regular),
 			BackColor = Color.FromArgb(12, 16, 24)
@@ -2785,56 +3989,138 @@ internal sealed class MainForm : Form
 		videoHostPanel.Controls.Add(_cutEditEmptyPlaceholder);
 		_cutEditElementHost.Visible = false;
 
-		// Ensure controls are added in correct WinForms docking order:
-		// Fill first, then Bottom controls from top to bottom
 		centerViewer.Controls.Add(videoHostPanel);
 		centerViewer.Controls.Add(scrubberPanel);
 		centerViewer.Controls.Add(transportBar);
+		centerViewer.Controls.Add(subtitlePosBar);
+		centerViewer.Controls.Add(previewHeaderBar);
+		previewHeaderBar.SendToBack();
+		subtitlePosBar.SendToBack();
+		transportBar.SendToBack();
+		scrubberPanel.SendToBack();
 
-		// Critical docking order for splitMain.Panel1:
-		// Fill control MUST be added FIRST so Left and Right dock properly around it!
 		splitMain.Panel1.Controls.Add(centerViewer);
 		splitMain.Panel1.Controls.Add(mediaPoolPanel);
 		splitMain.Panel1.Controls.Add(titlePanel);
 
-		// Play Timer setup
-		_cutEditPlayTimer = new System.Windows.Forms.Timer { Interval = 60 };
+		// Play Timer setup - Master Clock Architecture for ultra-smooth playback
+		_cutEditPlayTimer = new System.Windows.Forms.Timer { Interval = 33 };
 		_cutEditPlayTimer.Tick += delegate
 		{
-			if (_cutEditIsPlaying && !_cutEditIsDraggingScrubber && _cutEditDuration > 0.0 && _cutEditMediaElement != null)
+			if (!_cutEditIsPlaying || _cutEditIsDraggingScrubber || _cutEditDuration <= 0.0)
+				return;
+
+			var activeSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
+
+			if (activeSeg != null && activeSeg.MediaType != "image")
 			{
-				_cutEditCurrentPos = _cutEditMediaElement.Position.TotalSeconds;
+				// Video track: WPF MediaElement is the MASTER CLOCK
+				if (_lastActiveSegment != activeSeg)
+				{
+					_lastActiveSegment = activeSeg;
+					SyncPlayerAtCurrentPos(forceReload: false);
+					return;
+				}
+
+				if (_cutEditMediaElement != null && _cutEditMediaElement.Source != null)
+				{
+					double mediaPos = _cutEditMediaElement.Position.TotalSeconds;
+					double segStartInSource = activeSeg.StartSeconds;
+					double inSourceElapsed = Math.Max(0.0, mediaPos - segStartInSource);
+					double currentTimelinePos = activeSeg.TimelineStartSeconds + inSourceElapsed;
+
+					double segEndTimeline = activeSeg.TimelineStartSeconds + activeSeg.Duration;
+					if (currentTimelinePos >= segEndTimeline || currentTimelinePos >= _cutEditDuration)
+					{
+						if (currentTimelinePos >= _cutEditDuration)
+						{
+							if (_cutEditLoopCheckBox?.Checked == true)
+							{
+								_cutEditCurrentPos = 0.0;
+								_lastActiveSegment = null;
+								SyncPlayerAtCurrentPos(forceReload: false);
+							}
+							else
+							{
+								_cutEditCurrentPos = _cutEditDuration;
+								ToggleCutEditPlayPause();
+								return;
+							}
+						}
+						else
+						{
+							// Current clip segment finished, transition to next segment
+							_cutEditCurrentPos = segEndTimeline;
+							var nextSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
+							_lastActiveSegment = nextSeg;
+							SyncPlayerAtCurrentPos(forceReload: false);
+						}
+					}
+					else
+					{
+						// Smooth continuous playback driven strictly by video decoder clock
+						_cutEditCurrentPos = currentTimelinePos;
+					}
+				}
+				else
+				{
+					_cutEditCurrentPos += 0.033;
+				}
+			}
+			else
+			{
+				// In Gap or Image: use high-precision stopwatch
+				long nowMs = _cutEditPlaybackSw.ElapsedMilliseconds;
+				double dt = Math.Max(0.005, (nowMs - _lastStopwatchMs) / 1000.0);
+				_lastStopwatchMs = nowMs;
+				_cutEditCurrentPos += dt;
+
 				if (_cutEditCurrentPos >= _cutEditDuration)
 				{
 					if (_cutEditLoopCheckBox?.Checked == true)
 					{
-						_cutEditMediaElement.Position = TimeSpan.Zero;
 						_cutEditCurrentPos = 0.0;
+						_lastActiveSegment = null;
+						SyncPlayerAtCurrentPos(forceReload: false);
 					}
 					else
 					{
-						_cutEditMediaElement.Pause();
-						_cutEditIsPlaying = false;
-						if (_cutEditPlayPauseButton != null) _cutEditPlayPauseButton.Text = "▶ 播放 (空格)";
-						_cutEditPlayTimer.Stop();
+						_cutEditCurrentPos = _cutEditDuration;
+						ToggleCutEditPlayPause();
+						return;
 					}
 				}
-				if (_cutEditTimeScrubber != null)
+				else
 				{
-					int scrubVal = (int)Math.Max(0, Math.Min(1000, (_cutEditCurrentPos / _cutEditDuration) * 1000.0));
+					var newSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
+					if (newSeg != _lastActiveSegment)
+					{
+						_lastActiveSegment = newSeg;
+						SyncPlayerAtCurrentPos(forceReload: false);
+					}
+				}
+			}
+
+			// Update Scrubber TrackBar only when position changed
+			if (_cutEditTimeScrubber != null && _cutEditDuration > 0.0)
+			{
+				int scrubVal = (int)Math.Max(0, Math.Min(1000, (_cutEditCurrentPos / _cutEditDuration) * 1000.0));
+				if (_cutEditTimeScrubber.Value != scrubVal)
+				{
 					_cutEditTimeScrubber.Value = scrubVal;
 				}
-				UpdateCutEditTimeLabel();
-				_cutEditTimelineCanvas?.Invalidate();
 			}
+
+			UpdateCutEditTimeLabel();
+			_cutEditTimelineCanvas?.Invalidate();
 		};
 
-		// --- Panel2: Bottom section (Multi-track Timeline & Segments) ---
+		// --- Panel2: Bottom section (Multi-track Timeline Canvas - Full Workspace) ---
 		Panel bottomTimelineHost = new Panel
 		{
 			Dock = DockStyle.Fill,
 			BackColor = SurfaceColor,
-			Padding = new Padding(8, 6, 8, 6)
+			Padding = new Padding(8, 4, 8, 4)
 		};
 
 		// Timeline Tools Bar
@@ -2850,153 +4136,227 @@ internal sealed class MainForm : Form
 			Dock = DockStyle.Left,
 			AutoSize = true,
 			FlowDirection = FlowDirection.LeftToRight,
-			WrapContents = false
+			WrapContents = false,
+			Padding = new Padding(0, 4, 0, 4)
 		};
 
-		_cutEditSetInButton = MakeButton("[ 设为入点 (I)", 98);
-		_cutEditSetInButton.Height = 32;
-		_cutEditSetInButton.Click += delegate { SetCutEditInPoint(); };
-		tlToolsLeft.Controls.Add(_cutEditSetInButton);
+		_cutEditAddTrackBtn = MakeButton("➕ 添加轨道 ▼", 100);
+		_cutEditAddTrackBtn.Height = 30;
+		_cutEditAddTrackBtn.Click += delegate
+		{
+			ContextMenuStrip cms = new ContextMenuStrip();
+			cms.Items.Add("📹 添加视频轨道 (Video Track)", null, delegate { AddCutEditTrack(TrackType.Video); });
+			cms.Items.Add("🎵 添加音频轨道 (Audio Track)", null, delegate { AddCutEditTrack(TrackType.Audio); });
+			cms.Items.Add("📝 添加字幕轨道 (Subtitle Track)", null, delegate { AddCutEditTrack(TrackType.Subtitle); });
+			cms.Show(_cutEditAddTrackBtn, new Point(0, _cutEditAddTrackBtn.Height));
+		};
+		tlToolsLeft.Controls.Add(_cutEditAddTrackBtn);
 
-		_cutEditSetOutButton = MakeButton("] 设为出点 (O)", 98);
-		_cutEditSetOutButton.Height = 32;
-		_cutEditSetOutButton.Margin = new Padding(4, 0, 0, 0);
-		_cutEditSetOutButton.Click += delegate { SetCutEditOutPoint(); };
-		tlToolsLeft.Controls.Add(_cutEditSetOutButton);
-
-		_cutEditSplitButton = MakeButton("✂️ 剃刀切割 (B)", 98);
-		_cutEditSplitButton.Height = 32;
-		_cutEditSplitButton.Margin = new Padding(4, 0, 0, 0);
+		_cutEditSplitButton = MakeButton("✂️ 剃刀切片 (B)", 100);
+		_cutEditSplitButton.Height = 30;
+		_cutEditSplitButton.Margin = new Padding(3, 0, 0, 0);
 		_cutEditSplitButton.Click += delegate { SplitCutEditCurrentPosition(); };
 		tlToolsLeft.Controls.Add(_cutEditSplitButton);
 
-		_cutEditToggleSegmentButton = MakeButton("🗑️ 剔除/保留选中段", 136);
-		_cutEditToggleSegmentButton.Height = 32;
-		_cutEditToggleSegmentButton.Margin = new Padding(4, 0, 0, 0);
+		_cutEditDeleteBtn = MakeButton("🗑️ 一键删除 (Del)", 116);
+		_cutEditDeleteBtn.Height = 30;
+		_cutEditDeleteBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditDeleteBtn.ForeColor = Color.FromArgb(248, 113, 113);
+		_cutEditDeleteBtn.Click += delegate { DeleteSelectedCutSegment(); };
+		tlToolsLeft.Controls.Add(_cutEditDeleteBtn);
+
+		_cutEditToggleSegmentButton = MakeButton("🚫 剔除/保留", 90);
+		_cutEditToggleSegmentButton.Height = 30;
+		_cutEditToggleSegmentButton.Margin = new Padding(3, 0, 0, 0);
 		_cutEditToggleSegmentButton.Click += delegate { ToggleSelectedSegmentKept(); };
 		tlToolsLeft.Controls.Add(_cutEditToggleSegmentButton);
 
-		_cutEditResetSegmentsButton = MakeButton("↺ 恢复全部", 84);
-		_cutEditResetSegmentsButton.Height = 32;
-		_cutEditResetSegmentsButton.Margin = new Padding(4, 0, 0, 0);
+		_cutEditResetSegmentsButton = MakeButton("↺ 恢复全部", 78);
+		_cutEditResetSegmentsButton.Height = 30;
+		_cutEditResetSegmentsButton.Margin = new Padding(3, 0, 0, 0);
 		_cutEditResetSegmentsButton.Click += delegate { ResetCutEditSegments(); };
 		tlToolsLeft.Controls.Add(_cutEditResetSegmentsButton);
 
+		_cutEditUndoButton = MakeButton("↶ 撤销 (Ctrl+Z)", 105);
+		_cutEditUndoButton.Height = 30;
+		_cutEditUndoButton.Margin = new Padding(4, 0, 0, 0);
+		_cutEditUndoButton.Enabled = false;
+		_cutEditUndoButton.Click += delegate { UndoCutEditAction(); };
+		tlToolsLeft.Controls.Add(_cutEditUndoButton);
+
+		_cutEditRedoButton = MakeButton("↷ 重做 (Ctrl+Y)", 105);
+		_cutEditRedoButton.Height = 30;
+		_cutEditRedoButton.Margin = new Padding(3, 0, 0, 0);
+		_cutEditRedoButton.Enabled = false;
+		_cutEditRedoButton.Click += delegate { RedoCutEditAction(); };
+		tlToolsLeft.Controls.Add(_cutEditRedoButton);
+
+		_cutEditSaveProjectButton = MakeButton("💾 保存 (Ctrl+S)", 110);
+		_cutEditSaveProjectButton.Height = 30;
+		_cutEditSaveProjectButton.Margin = new Padding(4, 0, 0, 0);
+		_cutEditSaveProjectButton.Click += delegate { SaveCutEditProject(); };
+		tlToolsLeft.Controls.Add(_cutEditSaveProjectButton);
+
+		_cutEditSetInButton = MakeButton("[ 设入点 (I)", 84);
+		_cutEditSetInButton.Height = 30;
+		_cutEditSetInButton.Margin = new Padding(3, 0, 0, 0);
+		_cutEditSetInButton.Click += delegate { SetCutEditInPoint(); };
+		tlToolsLeft.Controls.Add(_cutEditSetInButton);
+
+		_cutEditSetOutButton = MakeButton("] 设出点 (O)", 84);
+		_cutEditSetOutButton.Height = 30;
+		_cutEditSetOutButton.Margin = new Padding(3, 0, 0, 0);
+		_cutEditSetOutButton.Click += delegate { SetCutEditOutPoint(); };
+		tlToolsLeft.Controls.Add(_cutEditSetOutButton);
+
 		timelineTools.Controls.Add(tlToolsLeft);
+
+		// Right Audio mixing & Timeline Zoom controls
+		FlowLayoutPanel tlToolsRight = new FlowLayoutPanel
+		{
+			Dock = DockStyle.Right,
+			AutoSize = true,
+			FlowDirection = FlowDirection.LeftToRight,
+			WrapContents = false,
+			Padding = new Padding(0, 4, 4, 4)
+		};
+
+		Label lblSpd = new Label { Text = "速度:", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(2, 6, 0, 0) };
+		tlToolsRight.Controls.Add(lblSpd);
+
+		_cutEditSpeedCombo = new ComboBox { Width = 66, Height = 26, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Microsoft YaHei UI", 8.5f) };
+		_cutEditSpeedCombo.Items.AddRange(new object[] { "1.00x", "0.50x", "0.75x", "1.25x", "1.50x", "2.00x" });
+		_cutEditSpeedCombo.SelectedIndex = 0;
+		tlToolsRight.Controls.Add(_cutEditSpeedCombo);
+
+		_cutEditKeepOriginalAudioCheckBox = new CheckBox { Text = "保留原声", AutoSize = true, Checked = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 4, 0, 0) };
+		_cutEditKeepOriginalAudioCheckBox.CheckedChanged += delegate
+		{
+			_cutEditAudioMuted = !_cutEditKeepOriginalAudioCheckBox.Checked;
+			if (_cutEditAudioMuteCheckBox != null) _cutEditAudioMuteCheckBox.Checked = _cutEditAudioMuted;
+			_cutEditTimelineCanvas?.Invalidate();
+		};
+		tlToolsRight.Controls.Add(_cutEditKeepOriginalAudioCheckBox);
+
+		_cutEditBgmVolumeLabel = new Label { Text = "BGM: 40%", AutoSize = true, ForeColor = Color.FromArgb(192, 132, 252), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 5, 0, 0) };
+		tlToolsRight.Controls.Add(_cutEditBgmVolumeLabel);
+
+		_cutEditBgmVolumeTrackBar = new TrackBar { Width = 56, Height = 24, Minimum = 0, Maximum = 100, Value = _cutEditBgmVolume, TickStyle = TickStyle.None };
+		_cutEditBgmVolumeTrackBar.ValueChanged += delegate
+		{
+			_cutEditBgmVolume = _cutEditBgmVolumeTrackBar.Value;
+			_cutEditBgmVolumeLabel.Text = $"BGM: {_cutEditBgmVolume}%";
+			_cutEditTimelineCanvas?.Invalidate();
+		};
+		tlToolsRight.Controls.Add(_cutEditBgmVolumeTrackBar);
+
+		// Zoom controls
+		_cutEditZoomLabel = new Label { Text = "🔍 100%", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 5, 0, 0) };
+		tlToolsRight.Controls.Add(_cutEditZoomLabel);
+
+		_cutEditZoomSlider = new TrackBar { Width = 64, Height = 24, Minimum = 30, Maximum = 300, Value = 100, TickStyle = TickStyle.None };
+		_cutEditZoomSlider.ValueChanged += delegate
+		{
+			_cutEditTimelineZoom = _cutEditZoomSlider.Value / 100.0;
+			_cutEditZoomLabel.Text = $"🔍 {_cutEditZoomSlider.Value}%";
+			_cutEditTimelineCanvas?.Invalidate();
+		};
+		tlToolsRight.Controls.Add(_cutEditZoomSlider);
+
+		// Track Height selector
+		_cutEditTrackHeightCombo = new ComboBox { Width = 84, Height = 26, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Microsoft YaHei UI", 8.5f) };
+		_cutEditTrackHeightCombo.Items.AddRange(new object[] { "高度:标准", "高度:紧凑", "高度:宽大", "高度:超大" });
+		_cutEditTrackHeightCombo.SelectedIndex = 0;
+		_cutEditTrackHeightCombo.SelectedIndexChanged += delegate
+		{
+			int h = _cutEditTrackHeightCombo.SelectedIndex switch
+			{
+				1 => 26,
+				2 => 50,
+				3 => 68,
+				_ => 36
+			};
+			_cutEditBaseTrackHeight = h;
+			foreach (var trk in _cutEditTracks)
+			{
+				trk.Height = (trk.Type == TrackType.Subtitle) ? Math.Max(22, h - 8) : h;
+			}
+			_cutEditTimelineCanvas?.Invalidate();
+		};
+		tlToolsRight.Controls.Add(_cutEditTrackHeightCombo);
+
+		_cutEditFitWindowBtn = MakeButton("⛶ 适合窗口", 80);
+		_cutEditFitWindowBtn.Height = 28;
+		_cutEditFitWindowBtn.Margin = new Padding(4, 0, 0, 0);
+		_cutEditFitWindowBtn.Click += delegate
+		{
+			_cutEditTimelineZoom = 1.0;
+			if (_cutEditZoomSlider != null) _cutEditZoomSlider.Value = 100;
+			_cutEditTimelineCanvas?.Invalidate();
+		};
+		tlToolsRight.Controls.Add(_cutEditFitWindowBtn);
 
 		_cutEditEstimatedDurationLabel = new Label
 		{
-			Dock = DockStyle.Right,
-			AutoSize = false,
-			Width = 360,
-			TextAlign = ContentAlignment.MiddleRight,
-			Text = "剪辑后预计总时长: 00:00.0 (共 1 段)",
+			AutoSize = true,
+			TextAlign = ContentAlignment.MiddleLeft,
+			Text = "预计时长: 00:00.0",
 			ForeColor = MutedColor,
-			Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Regular)
+			Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Regular),
+			Margin = new Padding(8, 7, 4, 0)
 		};
-		timelineTools.Controls.Add(_cutEditEstimatedDurationLabel);
+		tlToolsLeft.Controls.Add(_cutEditEstimatedDurationLabel);
+		timelineTools.Controls.Add(tlToolsRight);
 		bottomTimelineHost.Controls.Add(timelineTools);
 
-		// Dual-Track Timeline Canvas
+		// Multi-Track Timeline Canvas (DockStyle.Fill - fully occupying bottom panel)
 		_cutEditTimelineCanvas = new PictureBox
 		{
-			Dock = DockStyle.Top,
-			Height = 76,
-			BackColor = Color.FromArgb(24, 28, 38),
-			Cursor = Cursors.Hand
+			Dock = DockStyle.Fill,
+			BackColor = Color.FromArgb(16, 20, 28),
+			Cursor = Cursors.Hand,
+			AllowDrop = true
 		};
+		typeof(PictureBox).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.SetValue(_cutEditTimelineCanvas, true);
 		_cutEditTimelineCanvas.Paint += delegate(object s, PaintEventArgs e)
 		{
 			PaintTimelineCanvas(e.Graphics, _cutEditTimelineCanvas.ClientRectangle);
 		};
-		void HandleTimelineSeek(MouseEventArgs e)
-		{
-			if (_cutEditDuration > 0.0)
-			{
-				int trackX0 = 56;
-				int trackWidth = Math.Max(10, _cutEditTimelineCanvas.ClientSize.Width - 64);
-				double ratio = Math.Max(0.0, Math.Min(1.0, (double)(e.X - trackX0) / trackWidth));
-				double seekTime = ratio * _cutEditDuration;
-				SeekCutEditVideo(seekTime);
-				if (_cutEditTimeScrubber != null)
-				{
-					_cutEditTimeScrubber.Value = (int)Math.Max(0, Math.Min(1000, ratio * 1000.0));
-				}
-			}
-		}
 		_cutEditTimelineCanvas.MouseDown += delegate(object s, MouseEventArgs e)
 		{
-			if (e.Button == MouseButtons.Left) HandleTimelineSeek(e);
+			HandleTimelineMouseDown(e);
 		};
 		_cutEditTimelineCanvas.MouseMove += delegate(object s, MouseEventArgs e)
 		{
-			if (e.Button == MouseButtons.Left) HandleTimelineSeek(e);
+			HandleTimelineMouseMove(e);
+		};
+		_cutEditTimelineCanvas.MouseUp += delegate(object s, MouseEventArgs e)
+		{
+			HandleTimelineMouseUp(e);
+		};
+		_cutEditTimelineCanvas.DragEnter += delegate(object s, DragEventArgs e)
+		{
+			HandleTimelineDragEnter(e);
+		};
+		_cutEditTimelineCanvas.DragOver += delegate(object s, DragEventArgs e)
+		{
+			HandleTimelineDragOver(e);
+		};
+		_cutEditTimelineCanvas.DragDrop += delegate(object s, DragEventArgs e)
+		{
+			HandleTimelineDragDrop(e);
 		};
 		_cutEditTimelineCanvas.Resize += delegate
 		{
 			_cutEditTimelineCanvas.Invalidate();
 		};
 		bottomTimelineHost.Controls.Add(_cutEditTimelineCanvas);
-
-		// Segment list table (No harsh white gridlines!)
-		_cutEditSegmentList = new ListView
-		{
-			Dock = DockStyle.Fill,
-			View = View.Details,
-			FullRowSelect = true,
-			GridLines = false,
-			BorderStyle = BorderStyle.None,
-			BackColor = Color.FromArgb(16, 20, 28),
-			ForeColor = Color.FromArgb(226, 232, 240),
-			OwnerDraw = true,
-			Font = new Font("Microsoft YaHei UI", 9f)
-		};
-		_cutEditSegmentList.Columns.Add("状态", 80);
-		_cutEditSegmentList.Columns.Add("分段序号", 80);
-		_cutEditSegmentList.Columns.Add("入点时间", 80);
-		_cutEditSegmentList.Columns.Add("出点时间", 80);
-		_cutEditSegmentList.Columns.Add("分段时长", 80);
-		_cutEditSegmentList.Columns.Add("处理说明与音画轨道", 280);
-		_cutEditSegmentList.DrawColumnHeader += DrawVideoListColumnHeader;
-		_cutEditSegmentList.DrawItem += delegate(object s, DrawListViewItemEventArgs e) { e.DrawDefault = true; };
-		_cutEditSegmentList.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs e) { e.DrawDefault = true; };
-		_cutEditSegmentList.DoubleClick += delegate
-		{
-			ToggleSelectedSegmentKept();
-		};
-		_cutEditSegmentList.SelectedIndexChanged += delegate
-		{
-			if (_cutEditSegmentList.SelectedIndices.Count > 0)
-			{
-				int idx = _cutEditSegmentList.SelectedIndices[0];
-				if (idx >= 0 && idx < _cutEditSegments.Count)
-				{
-					_cutEditCurrentPos = _cutEditSegments[idx].StartSeconds;
-					SeekCutEditVideo(_cutEditCurrentPos);
-					if (_cutEditDuration > 0.0 && _cutEditTimeScrubber != null)
-					{
-						_cutEditTimeScrubber.Value = (int)Math.Max(0, Math.Min(1000, (_cutEditCurrentPos / _cutEditDuration) * 1000.0));
-					}
-				}
-			}
-		};
-		bottomTimelineHost.Controls.Add(_cutEditSegmentList);
-		_cutEditSegmentList.BringToFront();
-
-		void AutoFitSegmentColumns()
-		{
-			if (_cutEditSegmentList.Columns.Count >= 6 && _cutEditSegmentList.ClientSize.Width > 500)
-			{
-				int fixedW = 80 + 80 + 80 + 80 + 80;
-				_cutEditSegmentList.Columns[5].Width = Math.Max(280, _cutEditSegmentList.ClientSize.Width - fixedW - 4);
-			}
-		}
-		_cutEditSegmentList.Resize += delegate { AutoFitSegmentColumns(); };
-		base.Shown += delegate { AutoFitSegmentColumns(); };
-		AutoFitSegmentColumns();
-
-		splitMain.Panel2.Controls.Add(bottomTimelineHost);
+		_cutEditTimelineCanvas.BringToFront();
+		
+splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		tabPage.Controls.Add(splitMain);
+		tabPage.Controls.Add(topBar);
+		topBar.SendToBack();
 
 		tabPage.Resize += delegate
 		{
@@ -3046,7 +4406,13 @@ internal sealed class MainForm : Form
 			Location = new Point(14, 29)
 		};
 		topBar.Controls.Add(deliverSub);
-		tabPage.Controls.Add(topBar);
+		topBar.Paint += delegate(object s, PaintEventArgs e)
+		{
+			using (Pen p = new Pen(Color.FromArgb(40, 50, 68), 1f))
+			{
+				e.Graphics.DrawLine(p, 0, topBar.Height - 1, topBar.Width, topBar.Height - 1);
+			}
+		};
 
 		SplitContainer split = new SplitContainer
 		{
@@ -3063,7 +4429,7 @@ internal sealed class MainForm : Form
 		{
 			Dock = DockStyle.Fill,
 			AutoScroll = true,
-			Padding = new Padding(12, 10, 12, 10)
+			Padding = new Padding(16, 14, 16, 14)
 		};
 
 		// Group 1: Output Destination
@@ -3249,38 +4615,177 @@ internal sealed class MainForm : Form
 
 		split.Panel1.Controls.Add(leftScroll);
 
-		// --- Right Panel: Render Monitor & Delivered Library ---
-		Panel rightScroll = new Panel
+		// --- Right Panel: SplitContainer between Master Review Player and Lower Monitors ---
+		_deliverRightSplit = new SplitContainer
 		{
 			Dock = DockStyle.Fill,
-			Padding = new Padding(12, 10, 12, 10)
+			Orientation = Orientation.Horizontal,
+			SplitterDistance = 460, // Default generous height for clear HD details
+			SplitterWidth = 8,
+			BackColor = Color.FromArgb(30, 41, 59)
 		};
 
-		GroupBox monGroup = MakeGroupBox("🖥️ 渲染监视器 (Render Monitor)", 0, 0, 520, 110);
+		// Group 0: Master Review Player (Expands dynamically to fill Panel1)
+		GroupBox masterPlayerGroup = MakeGroupBox("🎬 最终成片终审播放监视器 (Master Review Player)", 0, 0, 520, 360);
+		masterPlayerGroup.Dock = DockStyle.Fill;
+		masterPlayerGroup.Padding = new Padding(12, 22, 12, 8);
+
+		Panel monitorBox = new Panel
+		{
+			Dock = DockStyle.Fill,
+			BackColor = Color.FromArgb(10, 14, 20)
+		};
+		_deliverMonitorBox = monitorBox;
+
+		_deliverPreviewBox = new PictureBox
+		{
+			Dock = DockStyle.Fill,
+			SizeMode = PictureBoxSizeMode.Zoom,
+			BackColor = Color.Black,
+			Cursor = Cursors.Hand
+		};
+		typeof(PictureBox).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.SetValue(_deliverPreviewBox, true);
+		_deliverPreviewBox.DoubleClick += delegate { OpenDeliverPopoutPreview(); };
+
+		_deliverEmptyPlaceholder = new Label
+		{
+			Dock = DockStyle.Fill,
+			Text = "🎬 暂无待交付工程画面\n请先在【视频剪辑】中载入素材或通过【视频拼屏】一键直通剪辑",
+			TextAlign = ContentAlignment.MiddleCenter,
+			ForeColor = MutedColor,
+			Font = new Font("Microsoft YaHei UI", 9.5f)
+		};
+
+		_deliverElementHost = new System.Windows.Forms.Integration.ElementHost
+		{
+			Dock = DockStyle.Fill,
+			BackColor = Color.FromArgb(10, 14, 20),
+			Visible = false
+		};
+
+		_deliverMediaElement = new System.Windows.Controls.MediaElement
+		{
+			LoadedBehavior = System.Windows.Controls.MediaState.Manual,
+			UnloadedBehavior = System.Windows.Controls.MediaState.Manual,
+			Stretch = System.Windows.Media.Stretch.Uniform,
+			ScrubbingEnabled = true
+		};
+		_deliverMediaElement.MediaOpened += DeliverMediaElement_MediaOpened;
+		_deliverMediaElement.MediaEnded += DeliverMediaElement_MediaEnded;
+		_deliverMediaElement.MediaFailed += DeliverMediaElement_MediaFailed;
+		_deliverElementHost.Child = _deliverMediaElement;
+
+		monitorBox.Controls.Add(_deliverPreviewBox);
+		monitorBox.Controls.Add(_deliverEmptyPlaceholder);
+		monitorBox.Controls.Add(_deliverElementHost);
+		Panel ctrlBar = new Panel
+		{
+			Dock = DockStyle.Bottom,
+			Height = 84,
+			BackColor = Color.FromArgb(16, 22, 32),
+			Padding = new Padding(6, 4, 6, 6)
+		};
+
+		_deliverPlayPauseButton = MakeButton("▶ 播放 (空格)", 100);
+		_deliverPlayPauseButton.Location = new Point(6, 6);
+		_deliverPlayPauseButton.Height = 30;
+		_deliverPlayPauseButton.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+		_deliverPlayPauseButton.Click += delegate { ToggleDeliverPlayPause(); };
+		ctrlBar.Controls.Add(_deliverPlayPauseButton);
+
+		_deliverTimeScrubber = new TrackBar
+		{
+			Location = new Point(112, 6),
+			Width = 260,
+			Height = 28,
+			Minimum = 0,
+			Maximum = 1000,
+			TickStyle = TickStyle.None,
+			BackColor = Color.FromArgb(16, 22, 32),
+			Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+		};
+		_deliverTimeScrubber.Scroll += DeliverTimeScrubber_Scroll;
+		_deliverTimeScrubber.MouseDown += DeliverTimeScrubber_MouseDown;
+		_deliverTimeScrubber.MouseUp += DeliverTimeScrubber_MouseUp;
+		ctrlBar.Controls.Add(_deliverTimeScrubber);
+
+		_deliverTimeLabel = MakeLabel("00:00.0 / 00:00.0", 374, 11);
+		_deliverTimeLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+		_deliverTimeLabel.Width = 135;
+		_deliverTimeLabel.ForeColor = AccentColor;
+		_deliverTimeLabel.Font = new Font("Consolas", 9f, FontStyle.Bold);
+		_deliverTimeLabel.TextAlign = ContentAlignment.MiddleRight;
+		ctrlBar.Controls.Add(_deliverTimeLabel);
+
+		Button btnDeliverRefresh = MakeButton("🔄 刷新监视器", 100);
+		btnDeliverRefresh.Location = new Point(6, 44);
+		btnDeliverRefresh.Height = 30;
+		btnDeliverRefresh.Font = new Font("Microsoft YaHei UI", 8.5f);
+		btnDeliverRefresh.Click += delegate { InitOrRefreshDeliverPreview(forceReload: true); };
+		ctrlBar.Controls.Add(btnDeliverRefresh);
+
+		_deliverPopoutBtn = MakeButton("🗖 弹出独立大窗", 120);
+		_deliverPopoutBtn.Location = new Point(112, 44);
+		_deliverPopoutBtn.Height = 30;
+		_deliverPopoutBtn.BackColor = Color.FromArgb(14, 116, 144);
+		_deliverPopoutBtn.ForeColor = Color.White;
+		_deliverPopoutBtn.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
+		_deliverPopoutBtn.Click += delegate { OpenDeliverPopoutPreview(); };
+		ctrlBar.Controls.Add(_deliverPopoutBtn);
+
+		_deliverExpandToggleBtn = MakeButton("↕ 放大/还原视窗", 120);
+		_deliverExpandToggleBtn.Location = new Point(238, 44);
+		_deliverExpandToggleBtn.Height = 30;
+		_deliverExpandToggleBtn.Font = new Font("Microsoft YaHei UI", 8.5f);
+		_deliverExpandToggleBtn.Click += delegate
+		{
+			if (_deliverRightSplit != null)
+			{
+				if (_deliverRightSplit.SplitterDistance < 560)
+				{
+					_deliverRightSplit.SplitterDistance = Math.Min(680, _deliverRightSplit.Height - 140);
+				}
+				else
+				{
+					_deliverRightSplit.SplitterDistance = 420;
+				}
+			}
+		};
+		ctrlBar.Controls.Add(_deliverExpandToggleBtn);
+
+		Label deliverHint = MakeLabel("💡 终审播放器可直接拽着下边缘拖拽缩放，双击或点击上方按钮可弹出独立大窗！", 366, 51);
+		deliverHint.Font = new Font("Microsoft YaHei UI", 8.5f);
+		deliverHint.ForeColor = MutedColor;
+		ctrlBar.Controls.Add(deliverHint);
+
+		masterPlayerGroup.Controls.Add(monitorBox);
+		masterPlayerGroup.Controls.Add(ctrlBar);
+		_deliverRightSplit.Panel1.Controls.Add(masterPlayerGroup);
+
+		GroupBox monGroup = MakeGroupBox("🖥️ 渲染监视器 (Render Monitor)", 0, 370, 520, 95);
 		monGroup.Dock = DockStyle.Top;
-		monGroup.Height = 110;
+		monGroup.Height = 95;
 
 		_deliverProgressBar = new ProgressBar
 		{
-			Location = new Point(16, 28),
+			Location = new Point(16, 26),
 			Width = 490,
-			Height = 22,
+			Height = 20,
 			Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
 		};
 		monGroup.Controls.Add(_deliverProgressBar);
 
 		_deliverStatusLabel = new Label
 		{
-			Location = new Point(16, 58),
+			Location = new Point(16, 52),
 			Width = 490,
-			Height = 40,
+			Height = 35,
 			Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
 			ForeColor = MutedColor,
 			Font = new Font("Microsoft YaHei UI", 9.25f),
-			Text = "就绪。选择好参数后点击左侧【开始渲染并交付成片】。"
+			Text = "就绪。点击左侧【开始渲染并交付成片】。"
 		};
 		monGroup.Controls.Add(_deliverStatusLabel);
-		rightScroll.Controls.Add(monGroup);
 
 		GroupBox histGroup = MakeGroupBox("📦 交付成片库与跨模块联动 (Delivered Outputs & Linkages)", 0, 118, 520, 480);
 		histGroup.Dock = DockStyle.Fill;
@@ -3430,12 +4935,20 @@ internal sealed class MainForm : Form
 		histBtnRow.Controls.Add(_deliverSendBackToCutButton);
 
 		histGroup.Controls.Add(histBtnRow);
-		rightScroll.Controls.Add(histGroup);
-		monGroup.BringToFront();
-		histGroup.BringToFront();
+		Panel rightLowerPanel = new Panel
+		{
+			Dock = DockStyle.Fill,
+			AutoScroll = true,
+			Padding = new Padding(12, 6, 12, 10)
+		};
+		rightLowerPanel.Controls.Add(histGroup);
+		rightLowerPanel.Controls.Add(monGroup);
+		_deliverRightSplit.Panel2.Controls.Add(rightLowerPanel);
 
-		split.Panel2.Controls.Add(rightScroll);
+		split.Panel2.Controls.Add(_deliverRightSplit);
 		tabPage.Controls.Add(split);
+		tabPage.Controls.Add(topBar);
+		topBar.SendToBack();
 
 		tabPage.Resize += delegate
 		{
@@ -3478,168 +4991,1031 @@ internal sealed class MainForm : Form
 		}
 	}
 
-	private void PaintTimelineCanvas(Graphics g, Rectangle bounds)
+	private static void DrawTrackBadge(Graphics g, Rectangle rect, string text, Color color)
 	{
-		g.SmoothingMode = SmoothingMode.AntiAlias;
-		g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-		g.Clear(Color.FromArgb(24, 28, 38));
-
-		int headerW = 54;
-		int padR = 10;
-		int trackW = Math.Max(10, bounds.Width - headerW - padR);
-
-		// Track Header Badges
-		Rectangle v1Badge = new Rectangle(6, 16, 42, 24);
-		using (GraphicsPath path = CreateRoundedRectanglePath(v1Badge, 4))
-		using (Brush b = new SolidBrush(Color.FromArgb(14, 116, 144)))
+		using (GraphicsPath path = CreateRoundedRectanglePath(rect, 4))
+		using (Brush b = new SolidBrush(color))
 		{
 			g.FillPath(b, path);
 		}
-		using (Font f = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold))
+		using (Font f = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold))
 		using (Brush b = new SolidBrush(Color.White))
 		using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
 		{
-			g.DrawString("V1 画面", f, b, v1Badge, sf);
+			g.DrawString(text, f, b, rect, sf);
 		}
+	}
 
-		Rectangle a1Badge = new Rectangle(6, 46, 42, 24);
-		using (GraphicsPath path = CreateRoundedRectanglePath(a1Badge, 4))
-		using (Brush b = new SolidBrush(_cutEditAudioMuted ? Color.FromArgb(71, 85, 105) : Color.FromArgb(16, 120, 80)))
-		{
-			g.FillPath(b, path);
-		}
-		using (Font f = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold))
-		using (Brush b = new SolidBrush(Color.White))
-		using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-		{
-			g.DrawString(_cutEditAudioMuted ? "A1 静音" : "A1 声音", f, b, a1Badge, sf);
-		}
+	private void InitCutEditTracks()
+	{
+		_cutEditTracks.Clear();
+		_cutEditTracks.Add(new TimelineTrack { Id = "V2", Name = "V2 画面", Type = TrackType.Video, Height = _cutEditBaseTrackHeight });
+		_cutEditTracks.Add(new TimelineTrack { Id = "V1", Name = "V1 画面", Type = TrackType.Video, Height = _cutEditBaseTrackHeight });
+		_cutEditTracks.Add(new TimelineTrack { Id = "T1", Name = "T1 字幕", Type = TrackType.Subtitle, Height = Math.Max(22, _cutEditBaseTrackHeight - 8) });
+		_cutEditTracks.Add(new TimelineTrack { Id = "A1", Name = "A1 原声", Type = TrackType.Audio, Height = _cutEditBaseTrackHeight });
+		_cutEditTracks.Add(new TimelineTrack { Id = "A2", Name = "A2 配乐", Type = TrackType.Audio, Height = Math.Max(24, _cutEditBaseTrackHeight - 4) });
+	}
 
-		// Divider line
-		using (Pen p = new Pen(Color.FromArgb(51, 65, 85), 1f))
+	internal void AddCutEditTrack(TrackType type)
+	{
+		string prefix = type switch { TrackType.Video => "V", TrackType.Audio => "A", _ => "T" };
+		string typeName = type switch { TrackType.Video => "画面", TrackType.Audio => "音频", _ => "字幕" };
+		int num = 1;
+		while (_cutEditTracks.Any(t => t.Id == $"{prefix}{num}")) num++;
+		string id = $"{prefix}{num}";
+		int h = (type == TrackType.Subtitle) ? Math.Max(22, _cutEditBaseTrackHeight - 8) : _cutEditBaseTrackHeight;
+		
+		int insertIdx = _cutEditTracks.Count;
+		if (type == TrackType.Video)
 		{
-			g.DrawLine(p, headerW, 0, headerW, bounds.Height);
+			insertIdx = 0;
 		}
-
-		// Track lanes background
-		Rectangle v1Lane = new Rectangle(headerW + 2, 16, trackW, 24);
-		Rectangle a1Lane = new Rectangle(headerW + 2, 46, trackW, 24);
-		using (Brush laneBrush = new SolidBrush(Color.FromArgb(15, 20, 30)))
+		_cutEditTracks.Insert(insertIdx, new TimelineTrack
 		{
-			g.FillRectangle(laneBrush, v1Lane);
-			g.FillRectangle(laneBrush, a1Lane);
+			Id = id,
+			Name = $"{id} {typeName}",
+			Type = type,
+			Height = h
+		});
+		_cutEditTimelineCanvas?.Invalidate();
+	}
+
+	private TimelineTrack GetTrackAtY(int y)
+	{
+		int curY = 26;
+		foreach (var trk in _cutEditTracks)
+		{
+			if (y >= curY && y < curY + trk.Height)
+			{
+				return trk;
+			}
+			curY += trk.Height + 2;
 		}
+		return _cutEditTracks.FirstOrDefault(t => t.Id == "V1") ?? _cutEditTracks.FirstOrDefault();
+	}
 
-		// Segments drawing
-		if (_cutEditDuration > 0.0 && _cutEditSegments.Count > 0)
+	private int GetSegmentAtPoint(Point pt, out int hitEdge)
+	{
+		hitEdge = 0;
+		int headerW = 92;
+		if (pt.X < headerW || _cutEditDuration <= 0.0) return -1;
+
+		int padR = 14;
+		int trackW = Math.Max(10, (int)((_cutEditTimelineCanvas.ClientSize.Width - headerW - padR) * _cutEditTimelineZoom));
+		double dur = Math.Max(0.1, _cutEditDuration);
+
+		int curY = 26;
+		foreach (var trk in _cutEditTracks)
 		{
-			using (Font f = new Font("Microsoft YaHei UI", 8f, FontStyle.Regular))
-			using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter })
+			if (pt.Y >= curY && pt.Y < curY + trk.Height)
 			{
 				for (int i = 0; i < _cutEditSegments.Count; i++)
 				{
 					var seg = _cutEditSegments[i];
-					int sx = headerW + 2 + (int)((seg.StartSeconds / _cutEditDuration) * trackW);
-					int ex = headerW + 2 + (int)((seg.EndSeconds / _cutEditDuration) * trackW);
-					int sw = Math.Max(3, ex - sx);
+					bool matchTrack = (seg.TrackId == trk.Id) || (trk.Id == "A1" && seg.TrackId == "V1" && trk.Type == TrackType.Audio);
+					if (!matchTrack) continue;
 
-					Rectangle segV1 = new Rectangle(sx, 17, sw, 22);
-					Rectangle segA1 = new Rectangle(sx, 47, sw, 22);
+					int sx = headerW + 2 + (int)((seg.TimelineStartSeconds / dur) * trackW);
+					int ex = headerW + 2 + (int)(((seg.TimelineStartSeconds + seg.Duration) / dur) * trackW);
+					int sw = Math.Max(6, ex - sx);
 
-					if (seg.IsKept)
+					if (pt.X >= sx - 4 && pt.X <= sx + sw + 4)
 					{
-						// V1 Kept
-						using (LinearGradientBrush lgb = new LinearGradientBrush(segV1, Color.FromArgb(37, 99, 235), Color.FromArgb(30, 64, 175), LinearGradientMode.Vertical))
-						{
-							g.FillRectangle(lgb, segV1);
-						}
-						using (Pen p = new Pen(Color.FromArgb(96, 165, 250), 1f))
-						{
-							g.DrawRectangle(p, segV1);
-						}
-						if (sw >= 36)
-						{
-							using (Brush txtBrush = new SolidBrush(Color.White))
-							{
-								g.DrawString($"#{i + 1} {FormatDuration(seg.Duration)}", f, txtBrush, segV1, sf);
-							}
-						}
+						if (Math.Abs(pt.X - sx) <= 6) hitEdge = -1; // Trim in
+						else if (Math.Abs(pt.X - (sx + sw)) <= 6) hitEdge = 1; // Trim out
+						else hitEdge = 0; // Move body
+						return i;
+					}
+				}
+				break;
+			}
+			curY += trk.Height + 2;
+		}
 
-						// A1 Kept
-						if (_cutEditAudioMuted)
+		return -1;
+	}
+
+	private void HandleTimelineMouseDown(MouseEventArgs e)
+	{
+		int headerW = 92;
+		if (e.X < headerW)
+		{
+			int curY = 26;
+			foreach (var trk in _cutEditTracks)
+			{
+				if (e.Y >= curY && e.Y < curY + trk.Height)
+				{
+					_cutEditSelectedTrackId = trk.Id;
+					if (e.X >= 42 && e.X <= 64)
+					{
+						trk.IsLocked = !trk.IsLocked;
+						_cutEditTimelineCanvas?.Invalidate();
+						return;
+					}
+					else if (e.X >= 66 && e.X <= 88)
+					{
+						if (trk.Type == TrackType.Audio)
 						{
-							using (HatchBrush hb = new HatchBrush(HatchStyle.WideUpwardDiagonal, Color.FromArgb(100, 116, 139), Color.FromArgb(30, 41, 59)))
+							trk.IsMuted = !trk.IsMuted;
+							if (trk.Id == "A1")
 							{
-								g.FillRectangle(hb, segA1);
-							}
-							using (Pen p = new Pen(Color.FromArgb(100, 116, 139), 1f))
-							{
-								g.DrawRectangle(p, segA1);
-							}
-							if (sw >= 36)
-							{
-								using (Brush txtBrush = new SolidBrush(Color.FromArgb(203, 213, 225)))
-								{
-									g.DrawString("[已静音]", f, txtBrush, segA1, sf);
-								}
+								_cutEditAudioMuted = trk.IsMuted;
+								if (_cutEditAudioMuteCheckBox != null) _cutEditAudioMuteCheckBox.Checked = _cutEditAudioMuted;
+								if (_cutEditMediaElement != null) _cutEditMediaElement.IsMuted = _cutEditAudioMuted;
 							}
 						}
 						else
 						{
-							using (LinearGradientBrush lgb = new LinearGradientBrush(segA1, Color.FromArgb(16, 185, 129), Color.FromArgb(5, 150, 105), LinearGradientMode.Vertical))
+							trk.IsVisible = !trk.IsVisible;
+						}
+						_cutEditTimelineCanvas?.Invalidate();
+						return;
+					}
+					_cutEditTimelineCanvas?.Invalidate();
+					break;
+				}
+				curY += trk.Height + 2;
+			}
+			return;
+		}
+
+		if (e.Button == MouseButtons.Right)
+		{
+			int hitEdge;
+			int segIdx = GetSegmentAtPoint(e.Location, out hitEdge);
+			if (segIdx >= 0)
+			{
+				_cutEditSelectedSegmentIndex = segIdx;
+				_cutEditSelectedTrackId = _cutEditSegments[segIdx].TrackId;
+				_cutEditTimelineCanvas?.Invalidate();
+				ShowSegmentContextMenu(e.Location);
+			}
+			return;
+		}
+
+		if (e.Button == MouseButtons.Left)
+		{
+			// Check if clicked any overlay item on T1 track
+			CutOverlayItem hitItem = null;
+			Rectangle hitRect = Rectangle.Empty;
+			int hitEdgeOl = 0;
+			foreach (var kvp in _cachedOverlayRects)
+			{
+				if (kvp.Value.Contains(e.Location))
+				{
+					hitItem = _cutEditOverlays.FirstOrDefault(o => o.Id == kvp.Key);
+					hitRect = kvp.Value;
+					break;
+				}
+			}
+
+			if (hitItem != null)
+			{
+				_cutEditSelectedSegmentIndex = -1;
+				_cutEditSelectedTrackId = "T1";
+				SelectOverlayItem(hitItem);
+				_isDraggingOverlay = true;
+				_draggedOverlayItem = hitItem;
+				_overlayDragStartMouse = e.X;
+				_overlayDragOrigStart = hitItem.StartSeconds;
+				_overlayDragOrigDur = hitItem.Duration;
+
+				if (e.X <= hitRect.Left + 8) hitEdgeOl = -1;
+				else if (e.X >= hitRect.Right - 8) hitEdgeOl = 1;
+				else hitEdgeOl = 0;
+				_overlayDragEdge = hitEdgeOl;
+
+				if (_cutEditInspectorTabs != null && _cutEditInspectorTabs.TabPages.Count > 0)
+				{
+					_cutEditInspectorTabs.SelectedIndex = 0;
+				}
+				_cutEditTimelineCanvas?.Invalidate();
+				return;
+			}
+
+			int hitEdge;
+			int segIdx = GetSegmentAtPoint(e.Location, out hitEdge);
+			if (segIdx >= 0)
+			{
+				var seg = _cutEditSegments[segIdx];
+				var trk = _cutEditTracks.FirstOrDefault(t => t.Id == seg.TrackId);
+				_cutEditSelectedSegmentIndex = segIdx;
+				_cutEditSelectedTrackId = seg.TrackId;
+
+				if (trk?.IsLocked == true)
+				{
+					_timelineDragMode = TimelineDragMode.None;
+					_cutEditTimelineCanvas?.Invalidate();
+					return;
+				}
+
+				_dragSegmentIndex = segIdx;
+				_dragStartMousePoint = e.Location;
+				_dragOriginalTimelineStart = seg.TimelineStartSeconds;
+				_dragOriginalDuration = seg.Duration;
+				_dragOriginalStartSec = seg.StartSeconds;
+				_dragOriginalEndSec = seg.EndSeconds;
+				_dragOriginalTrackId = seg.TrackId;
+
+				if (hitEdge == -1) _timelineDragMode = TimelineDragMode.TrimIn;
+				else if (hitEdge == 1) _timelineDragMode = TimelineDragMode.TrimOut;
+				else _timelineDragMode = TimelineDragMode.MoveClip;
+
+				_cutEditTimelineCanvas?.Invalidate();
+			}
+			else
+			{
+				_cutEditSelectedSegmentIndex = -1;
+				var trk = GetTrackAtY(e.Y);
+				if (trk != null)
+				{
+					_cutEditSelectedTrackId = trk.Id;
+					if (trk.Id == "T1")
+					{
+						if (_cutEditInspectorTabs != null && _cutEditInspectorTabs.TabPages.Count > 0)
+						{
+							_cutEditInspectorTabs.SelectedIndex = 0;
+						}
+						_cutEditMainTitle?.Focus();
+						_cutEditMainTitle?.SelectAll();
+					}
+				}
+				_timelineDragMode = TimelineDragMode.ScrubPlayhead;
+				HandleTimelineSeek(e);
+			}
+		}
+	}
+
+	private void HandleTimelineMouseMove(MouseEventArgs e)
+	{
+		if (e.Button == MouseButtons.None)
+		{
+			if (e.X >= 92)
+			{
+				bool hoveredOl = false;
+				foreach (var kvp in _cachedOverlayRects)
+				{
+					if (kvp.Value.Contains(e.Location))
+					{
+						hoveredOl = true;
+						if (e.X <= kvp.Value.Left + 6 || e.X >= kvp.Value.Right - 6)
+						{
+							_cutEditTimelineCanvas.Cursor = Cursors.SizeWE;
+						}
+						else
+						{
+							_cutEditTimelineCanvas.Cursor = Cursors.SizeAll;
+						}
+						break;
+					}
+				}
+				if (hoveredOl) return;
+
+				int hitEdge;
+				int segIdx = GetSegmentAtPoint(e.Location, out hitEdge);
+				if (segIdx >= 0)
+				{
+					var seg = _cutEditSegments[segIdx];
+					var trk = _cutEditTracks.FirstOrDefault(t => t.Id == seg.TrackId);
+					if (trk?.IsLocked == true)
+					{
+						_cutEditTimelineCanvas.Cursor = Cursors.No;
+					}
+					else if (hitEdge != 0)
+					{
+						_cutEditTimelineCanvas.Cursor = Cursors.SizeWE;
+					}
+					else
+					{
+						_cutEditTimelineCanvas.Cursor = Cursors.SizeAll;
+					}
+				}
+				else
+				{
+					_cutEditTimelineCanvas.Cursor = Cursors.Default;
+				}
+			}
+			else
+			{
+				_cutEditTimelineCanvas.Cursor = Cursors.Hand;
+			}
+			return;
+		}
+
+		if (e.Button == MouseButtons.Left)
+		{
+			int headerW = 92;
+			int padR = 14;
+			int trackW = Math.Max(10, (int)((_cutEditTimelineCanvas.ClientSize.Width - headerW - padR) * _cutEditTimelineZoom));
+			double dur = Math.Max(0.1, _cutEditDuration);
+
+			if (_isDraggingOverlay && _draggedOverlayItem != null)
+			{
+				double dt = (double)(e.X - _overlayDragStartMouse) / trackW * dur;
+				if (_overlayDragEdge == 0)
+				{
+					double maxStart = Math.Max(0.0, dur - _overlayDragOrigDur);
+					double newStart = Math.Max(0.0, Math.Min(dur - 0.2, _overlayDragOrigStart + dt));
+					_draggedOverlayItem.StartSeconds = Math.Round(newStart, 1);
+				}
+				else if (_overlayDragEdge == -1)
+				{
+					double newStart = Math.Max(0.0, Math.Min(_overlayDragOrigStart + _overlayDragOrigDur - 0.5, _overlayDragOrigStart + dt));
+					double newDur = Math.Max(0.5, (_overlayDragOrigStart + _overlayDragOrigDur) - newStart);
+					_draggedOverlayItem.StartSeconds = Math.Round(newStart, 1);
+					_draggedOverlayItem.Duration = Math.Round(newDur, 1);
+				}
+				else if (_overlayDragEdge == 1)
+				{
+					double newDur = Math.Max(0.5, Math.Min(dur - _draggedOverlayItem.StartSeconds, _overlayDragOrigDur + dt));
+					_draggedOverlayItem.Duration = Math.Round(newDur, 1);
+				}
+
+				SyncSelectedOverlayToControls();
+				_cutEditTimelineCanvas?.Invalidate();
+				TriggerTitleLivePreview();
+				UpdateDeliverSummary();
+				return;
+			}
+
+			if (_timelineDragMode == TimelineDragMode.ScrubPlayhead)
+			{
+				HandleTimelineSeek(e);
+			}
+			else if (_timelineDragMode == TimelineDragMode.MoveClip && _dragSegmentIndex >= 0 && _dragSegmentIndex < _cutEditSegments.Count)
+			{
+				var seg = _cutEditSegments[_dragSegmentIndex];
+				int dx = e.X - _dragStartMousePoint.X;
+				double timeDelta = (double)dx / trackW * dur;
+				double newStart = Math.Max(0.0, _dragOriginalTimelineStart + timeDelta);
+
+				// Snapping to 0s, playhead, and adjacent clip edges
+				if (newStart < 0.25) newStart = 0.0;
+				if (Math.Abs(newStart - _cutEditCurrentPos) < 0.25) newStart = _cutEditCurrentPos;
+				foreach (var other in _cutEditSegments)
+				{
+					if (other == seg) continue;
+					double otherEnd = other.TimelineStartSeconds + other.Duration;
+					if (Math.Abs(newStart - otherEnd) < 0.3)
+					{
+						newStart = otherEnd;
+						break;
+					}
+					if (Math.Abs((newStart + seg.Duration) - other.TimelineStartSeconds) < 0.3)
+					{
+						newStart = Math.Max(0.0, other.TimelineStartSeconds - seg.Duration);
+						break;
+					}
+				}
+				seg.TimelineStartSeconds = newStart;
+
+				// Track changes vertically
+				var trk = GetTrackAtY(e.Y);
+				if (trk != null && !trk.IsLocked)
+				{
+					if (trk.Type == TrackType.Video && (seg.MediaType == "video" || seg.MediaType == "image"))
+					{
+						seg.TrackId = trk.Id;
+						_cutEditSelectedTrackId = trk.Id;
+					}
+					else if (trk.Type == TrackType.Audio && seg.MediaType == "audio")
+					{
+						seg.TrackId = trk.Id;
+						_cutEditSelectedTrackId = trk.Id;
+					}
+				}
+
+				RecalculateTimelineTotalDuration();
+				_cutEditTimelineCanvas?.Invalidate();
+			}
+			else if (_timelineDragMode == TimelineDragMode.TrimIn && _dragSegmentIndex >= 0 && _dragSegmentIndex < _cutEditSegments.Count)
+			{
+				var seg = _cutEditSegments[_dragSegmentIndex];
+				int dx = e.X - _dragStartMousePoint.X;
+				double timeDelta = (double)dx / trackW * dur;
+				double maxDelta = _dragOriginalDuration - 0.2;
+				double actualDelta = Math.Max(-_dragOriginalStartSec, Math.Min(maxDelta, timeDelta));
+				seg.StartSeconds = _dragOriginalStartSec + actualDelta;
+				seg.TimelineStartSeconds = Math.Max(0.0, _dragOriginalTimelineStart + actualDelta);
+				RecalculateTimelineTotalDuration();
+				_cutEditTimelineCanvas?.Invalidate();
+			}
+			else if (_timelineDragMode == TimelineDragMode.TrimOut && _dragSegmentIndex >= 0 && _dragSegmentIndex < _cutEditSegments.Count)
+			{
+				var seg = _cutEditSegments[_dragSegmentIndex];
+				int dx = e.X - _dragStartMousePoint.X;
+				double timeDelta = (double)dx / trackW * dur;
+				double newDur = Math.Max(0.2, _dragOriginalDuration + timeDelta);
+				seg.EndSeconds = seg.StartSeconds + newDur;
+				RecalculateTimelineTotalDuration();
+				_cutEditTimelineCanvas?.Invalidate();
+			}
+		}
+	}
+
+	private void HandleTimelineMouseUp(MouseEventArgs e)
+	{
+		if (_isDraggingOverlay)
+		{
+			_isDraggingOverlay = false;
+			_draggedOverlayItem = null;
+			_cutEditTimelineCanvas.Cursor = Cursors.Default;
+			TriggerTitleLivePreview();
+			UpdateDeliverSummary();
+			_cutEditTimelineCanvas?.Invalidate();
+			return;
+		}
+
+		if (_timelineDragMode != TimelineDragMode.None)
+		{
+			_timelineDragMode = TimelineDragMode.None;
+			_dragSegmentIndex = -1;
+			RecalculateTimelineTotalDuration();
+			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
+			_cutEditTimelineCanvas?.Invalidate();
+		}
+	}
+
+	private void HandleTimelineDragEnter(DragEventArgs e)
+	{
+		if (e.Data.GetDataPresent(DataFormats.StringFormat) || e.Data.GetDataPresent(DataFormats.FileDrop))
+		{
+			e.Effect = DragDropEffects.Copy;
+		}
+	}
+
+	private void HandleTimelineDragOver(DragEventArgs e)
+	{
+		if (e.Data.GetDataPresent(DataFormats.StringFormat) || e.Data.GetDataPresent(DataFormats.FileDrop))
+		{
+			Point cp = _cutEditTimelineCanvas.PointToClient(new Point(e.X, e.Y));
+			var trk = GetTrackAtY(cp.Y);
+			if (trk != null && trk.IsLocked)
+			{
+				e.Effect = DragDropEffects.None;
+			}
+			else
+			{
+				e.Effect = DragDropEffects.Copy;
+			}
+		}
+	}
+
+	private void HandleTimelineDragDrop(DragEventArgs e)
+	{
+		string dropped = null;
+		if (e.Data.GetDataPresent(DataFormats.StringFormat))
+		{
+			dropped = e.Data.GetData(DataFormats.StringFormat) as string;
+		}
+		else if (e.Data.GetDataPresent(DataFormats.FileDrop))
+		{
+			string[] fls = e.Data.GetData(DataFormats.FileDrop) as string[];
+			if (fls != null && fls.Length > 0) dropped = fls[0];
+		}
+		if (!string.IsNullOrEmpty(dropped))
+		{
+			Point cp = _cutEditTimelineCanvas.PointToClient(new Point(e.X, e.Y));
+			InsertMediaIntoTimelineAtPoint(dropped, cp);
+		}
+	}
+
+	private void ShowSegmentContextMenu(Point canvasPt)
+	{
+		if (_cutEditSelectedSegmentIndex < 0 || _cutEditSelectedSegmentIndex >= _cutEditSegments.Count) return;
+		var seg = _cutEditSegments[_cutEditSelectedSegmentIndex];
+		ContextMenuStrip cms = new ContextMenuStrip();
+
+		var itemDel = cms.Items.Add("🗑️ 一键删除此片段 (Delete)", null, delegate { DeleteSelectedCutSegment(); });
+		itemDel.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+
+		cms.Items.Add(new ToolStripSeparator());
+
+		cms.Items.Add("✂️ 在当前播放指针处切割 (B)", null, delegate { SplitCutEditCurrentPosition(); });
+		cms.Items.Add(seg.IsKept ? "🚫 标记为剔除" : "✅ 恢复为保留", null, delegate { ToggleSelectedSegmentKept(); });
+
+		cms.Items.Add(new ToolStripSeparator());
+
+		var videoTracks = _cutEditTracks.Where(t => t.Type == TrackType.Video).ToList();
+		if (videoTracks.Count > 1)
+		{
+			ToolStripMenuItem moveTrackMenu = new ToolStripMenuItem("↕️ 转移到指定轨道");
+			foreach (var vt in videoTracks)
+			{
+				string tid = vt.Id;
+				var mi = moveTrackMenu.DropDownItems.Add($"{vt.Name} ({tid})", null, delegate
+				{
+					if (vt.IsLocked)
+					{
+						MessageBox.Show(this, $"轨道【{vt.Name}】已锁定！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+						return;
+					}
+					seg.TrackId = tid;
+					_cutEditSelectedTrackId = tid;
+					_cutEditTimelineCanvas?.Invalidate();
+				});
+				if (seg.TrackId == tid) mi.Font = new Font(mi.Font, FontStyle.Bold);
+			}
+			cms.Items.Add(moveTrackMenu);
+		}
+
+		cms.Show(_cutEditTimelineCanvas, canvasPt);
+	}
+
+	private void DeleteSelectedCutSegment()
+	{
+		if (_cutEditSelectedSegmentIndex < 0 || _cutEditSelectedSegmentIndex >= _cutEditSegments.Count)
+		{
+			// Check if playhead is over a segment on selected track
+			for (int i = 0; i < _cutEditSegments.Count; i++)
+			{
+				var s = _cutEditSegments[i];
+				if (s.TrackId == _cutEditSelectedTrackId && _cutEditCurrentPos >= s.TimelineStartSeconds && _cutEditCurrentPos <= s.TimelineStartSeconds + s.Duration)
+				{
+					_cutEditSelectedSegmentIndex = i;
+					break;
+				}
+			}
+		}
+
+		if (_cutEditSelectedSegmentIndex < 0 || _cutEditSelectedSegmentIndex >= _cutEditSegments.Count)
+		{
+			// Check if playhead is over ANY segment
+			for (int i = 0; i < _cutEditSegments.Count; i++)
+			{
+				var s = _cutEditSegments[i];
+				if (_cutEditCurrentPos >= s.TimelineStartSeconds && _cutEditCurrentPos <= s.TimelineStartSeconds + s.Duration)
+				{
+					_cutEditSelectedSegmentIndex = i;
+					break;
+				}
+			}
+		}
+
+		if (_cutEditSelectedSegmentIndex >= 0 && _cutEditSelectedSegmentIndex < _cutEditSegments.Count)
+		{
+			var seg = _cutEditSegments[_cutEditSelectedSegmentIndex];
+			var trk = _cutEditTracks.FirstOrDefault(t => t.Id == seg.TrackId);
+			if (trk?.IsLocked == true)
+			{
+				MessageBox.Show(this, $"轨道【{trk.Name}】已锁定，无法删除其中的片段！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
+			}
+
+			_cutEditSegments.RemoveAt(_cutEditSelectedSegmentIndex);
+			_cutEditSelectedSegmentIndex = -1;
+
+			RecalculateTimelineTotalDuration();
+
+			if (_cutEditSegments.Count == 0)
+			{
+				_cutEditDuration = 0.0;
+				_cutEditCurrentPos = 0.0;
+				if (_cutEditEmptyPlaceholder != null) _cutEditEmptyPlaceholder.Visible = true;
+				if (_cutEditPreviewBox != null) _cutEditPreviewBox.Image = null;
+				if (_cutEditMediaElement != null)
+				{
+					try { _cutEditMediaElement.Source = null; } catch { }
+				}
+			}
+			else
+			{
+				_cutEditCurrentPos = Math.Min(_cutEditCurrentPos, _cutEditDuration);
+				UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
+			}
+
+			_cutEditTimelineCanvas?.Invalidate();
+			UpdateDeliverSummary();
+		}
+	}
+
+	private void HandleTimelineSeek(MouseEventArgs e)
+	{
+		int headerW = 92;
+		int padR = 14;
+		int trackW = Math.Max(10, (int)((_cutEditTimelineCanvas.ClientSize.Width - headerW - padR) * _cutEditTimelineZoom));
+		if (_cutEditDuration <= 0.0) return;
+
+		double ratio = Math.Max(0.0, Math.Min(1.0, (double)(e.X - headerW) / trackW));
+		double seekTime = ratio * _cutEditDuration;
+		_cutEditCurrentPos = seekTime;
+		SeekCutEditVideo(seekTime);
+		if (_cutEditTimeScrubber != null)
+		{
+			_cutEditTimeScrubber.Value = (int)Math.Max(0, Math.Min(1000, ratio * 1000.0));
+		}
+		UpdateCutEditTimeLabel();
+	}
+
+	private void PaintTimelineCanvas(Graphics g, Rectangle bounds)
+	{
+		g.SmoothingMode = SmoothingMode.AntiAlias;
+		g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+		g.Clear(Color.FromArgb(16, 20, 28));
+
+		int headerW = 92;
+		int padR = 14;
+		int trackW = Math.Max(10, (int)((bounds.Width - headerW - padR) * _cutEditTimelineZoom));
+		double dur = Math.Max(0.1, _cutEditDuration);
+
+		// 1. Top Time Ruler (Y: 0..24)
+		Rectangle rulerRect = new Rectangle(0, 0, bounds.Width, 24);
+		using (Brush rulerBg = new SolidBrush(Color.FromArgb(12, 15, 22)))
+		{
+			g.FillRectangle(rulerBg, rulerRect);
+		}
+		using (Pen rulerBorder = new Pen(Color.FromArgb(40, 50, 68), 1f))
+		{
+			g.DrawLine(rulerBorder, 0, 24, bounds.Width, 24);
+		}
+
+		using (Font fRuler = new Font("Consolas", 8f, FontStyle.Regular))
+		using (Brush bRuler = new SolidBrush(Color.FromArgb(148, 163, 184)))
+		using (Pen pTickMajor = new Pen(Color.FromArgb(94, 110, 134), 1f))
+		using (Pen pTickMinor = new Pen(Color.FromArgb(51, 65, 85), 1f))
+		{
+			double stepSec = (dur <= 30.0) ? 5.0 : ((dur <= 90.0) ? 10.0 : ((dur <= 300.0) ? 30.0 : 60.0));
+			double minorStep = stepSec / 5.0;
+
+			for (double mt = 0; mt <= dur; mt += minorStep)
+			{
+				int tx = headerW + 2 + (int)((mt / dur) * trackW);
+				if (tx > bounds.Width) break;
+				g.DrawLine(pTickMinor, tx, 18, tx, 24);
+			}
+
+			for (double t = 0; t <= dur; t += stepSec)
+			{
+				int tx = headerW + 2 + (int)((t / dur) * trackW);
+				if (tx > bounds.Width) break;
+				g.DrawLine(pTickMajor, tx, 12, tx, 24);
+				string timeStr = FormatDuration(t).Split('.')[0];
+				g.DrawString(timeStr, fRuler, bRuler, tx - 14, 2);
+			}
+		}
+
+		// Vertical divider line between header and lanes
+		using (Pen p = new Pen(Color.FromArgb(40, 50, 68), 1.5f))
+		{
+			g.DrawLine(p, headerW, 0, headerW, bounds.Height);
+		}
+
+		// 2. Track Lanes and Headers
+		int curY = 26;
+		using (Font badgeFont = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold))
+		using (Font iconFont = new Font("Segoe UI Emoji", 8.5f, FontStyle.Regular))
+		using (Font segFont = new Font("Microsoft YaHei UI", 8f, FontStyle.Regular))
+		using (StringFormat sfCenter = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter })
+		{
+			foreach (var trk in _cutEditTracks)
+			{
+				int th = trk.Height;
+				Rectangle headerRect = new Rectangle(0, curY, headerW, th);
+				Rectangle laneRect = new Rectangle(headerW + 2, curY, trackW, th);
+
+				// Draw Header background
+				using (Brush hBg = new SolidBrush(Color.FromArgb(18, 24, 34)))
+				{
+					g.FillRectangle(hBg, headerRect);
+				}
+
+				// If this track is selected, draw active indicator bar
+				if (trk.Id == _cutEditSelectedTrackId)
+				{
+					using (Brush bSel = new SolidBrush(Color.FromArgb(14, 165, 233)))
+					{
+						g.FillRectangle(bSel, 0, curY, 3, th);
+					}
+				}
+
+				// Draw Track Badge (Pill)
+				Rectangle badgeRect = new Rectangle(4, curY + (th - 22) / 2, 38, 22);
+				using (GraphicsPath bp = CreateRoundedRectanglePath(badgeRect, 4))
+				using (Brush bBrush = new SolidBrush(trk.GetBadgeColor()))
+				using (Brush wBrush = new SolidBrush(Color.White))
+				{
+					g.FillPath(bBrush, bp);
+					g.DrawString(trk.Id, badgeFont, wBrush, badgeRect, sfCenter);
+				}
+
+				// Draw Lock Button icon
+				Rectangle lockRect = new Rectangle(44, curY + (th - 20) / 2, 20, 20);
+				string lockIcon = trk.IsLocked ? "🔒" : "🔓";
+				Color lockColor = trk.IsLocked ? Color.FromArgb(245, 158, 11) : Color.FromArgb(100, 116, 139);
+				if (trk.IsLocked)
+				{
+					using (Brush lkBg = new SolidBrush(Color.FromArgb(50, 245, 158, 11)))
+					{
+						g.FillRectangle(lkBg, lockRect);
+					}
+				}
+				using (Brush lkBrush = new SolidBrush(lockColor))
+				{
+					g.DrawString(lockIcon, iconFont, lkBrush, lockRect, sfCenter);
+				}
+
+				// Draw Mute / Eye icon
+				Rectangle muteRect = new Rectangle(68, curY + (th - 20) / 2, 20, 20);
+				string actIcon = (trk.Type == TrackType.Audio)
+					? (trk.IsMuted ? "🔇" : "🔊")
+					: (trk.IsVisible ? "👁" : "🚫");
+				Color actColor = (trk.Type == TrackType.Audio && trk.IsMuted) || (!trk.IsVisible)
+					? Color.FromArgb(239, 68, 68)
+					: Color.FromArgb(148, 163, 184);
+				using (Brush actBrush = new SolidBrush(actColor))
+				{
+					g.DrawString(actIcon, iconFont, actBrush, muteRect, sfCenter);
+				}
+
+				// Draw Lane background
+				using (Brush laneBrush = new SolidBrush(Color.FromArgb(12, 16, 24)))
+				{
+					g.FillRectangle(laneBrush, laneRect);
+				}
+				using (Pen laneBorder = new Pen(Color.FromArgb(28, 36, 50), 1f))
+				{
+					g.DrawLine(laneBorder, headerW, curY + th, bounds.Width, curY + th);
+				}
+
+				// --- Paint Segments on this Track ---
+				if (_cutEditSegments.Count == 0)
+				{
+					if (trk.Id == "V1")
+					{
+						using (Brush emptyTxt = new SolidBrush(Color.FromArgb(100, 116, 139)))
+						{
+							g.DrawString("📽️ 轨道当前为空 | 请在左侧媒体池选择素材点击【➕ 添加到轨道】或直接拖拽素材到此处", segFont, emptyTxt, laneRect, sfCenter);
+						}
+					}
+				}
+				else
+				{
+					for (int i = 0; i < _cutEditSegments.Count; i++)
+					{
+						var seg = _cutEditSegments[i];
+						bool matchTrack = (seg.TrackId == trk.Id) || (trk.Id == "A1" && seg.TrackId == "V1" && trk.Type == TrackType.Audio);
+						if (!matchTrack) continue;
+
+						int sx = headerW + 2 + (int)((seg.TimelineStartSeconds / dur) * trackW);
+						int ex = headerW + 2 + (int)(((seg.TimelineStartSeconds + seg.Duration) / dur) * trackW);
+						int sw = Math.Max(6, ex - sx);
+						Rectangle segRect = new Rectangle(sx, curY + 2, sw, th - 4);
+						bool isSelected = (_cutEditSelectedSegmentIndex == i);
+
+						if (trk.Type == TrackType.Video)
+						{
+							bool isImg = (seg.MediaType == "image") || IsImage(seg.SourcePath);
+							Color c1 = isImg ? Color.FromArgb(99, 102, 241) : Color.FromArgb(37, 99, 235);
+							Color c2 = isImg ? Color.FromArgb(67, 56, 202) : Color.FromArgb(30, 64, 175);
+
+							if (seg.IsKept)
 							{
-								g.FillRectangle(lgb, segA1);
-							}
-							using (Pen p = new Pen(Color.FromArgb(52, 211, 153), 1f))
-							{
-								g.DrawRectangle(p, segA1);
-							}
-							if (sw >= 36)
-							{
-								using (Brush txtBrush = new SolidBrush(Color.White))
+								using (LinearGradientBrush lgb = new LinearGradientBrush(segRect, c1, c2, LinearGradientMode.Vertical))
 								{
-									string volTxt = (_cutEditAudioVolume == 100) ? "A1 音频" : $"A1 {_cutEditAudioVolume}%";
-									g.DrawString(volTxt, f, txtBrush, segA1, sf);
+									g.FillRectangle(lgb, segRect);
+								}
+								using (Pen p = new Pen(isSelected ? Color.FromArgb(234, 179, 8) : Color.FromArgb(96, 165, 250), isSelected ? 2.5f : 1f))
+								{
+									g.DrawRectangle(p, segRect);
+								}
+
+								// Golden trim handles on selected segment
+								if (isSelected && sw >= 16)
+								{
+									using (Pen pHandle = new Pen(Color.FromArgb(253, 224, 71), 2.5f))
+									{
+										g.DrawLine(pHandle, sx + 4, curY + 4, sx + 1, curY + 4);
+										g.DrawLine(pHandle, sx + 1, curY + 4, sx + 1, curY + th - 6);
+										g.DrawLine(pHandle, sx + 1, curY + th - 6, sx + 4, curY + th - 6);
+
+										g.DrawLine(pHandle, sx + sw - 5, curY + 4, sx + sw - 2, curY + 4);
+										g.DrawLine(pHandle, sx + sw - 2, curY + 4, sx + sw - 2, curY + th - 6);
+										g.DrawLine(pHandle, sx + sw - 2, curY + th - 6, sx + sw - 5, curY + th - 6);
+									}
+								}
+
+								if (sw >= 28)
+								{
+									string typePrefix = isImg ? "🖼️ " : "🎬 ";
+									string label = string.IsNullOrEmpty(seg.Title) ? $"{typePrefix}#{i + 1} {FormatDuration(seg.Duration)}" : $"{typePrefix}#{i + 1} {seg.Title}";
+									using (Brush txtBrush = new SolidBrush(Color.White))
+									{
+										g.DrawString(label, segFont, txtBrush, segRect, sfCenter);
+									}
+								}
+							}
+							else
+							{
+								using (HatchBrush hb = new HatchBrush(HatchStyle.LightUpwardDiagonal, Color.FromArgb(220, 38, 38), Color.FromArgb(69, 10, 10)))
+								{
+									g.FillRectangle(hb, segRect);
+								}
+								using (Pen p = new Pen(isSelected ? Color.FromArgb(234, 179, 8) : Color.FromArgb(239, 68, 68), isSelected ? 2f : 1f))
+								{
+									g.DrawRectangle(p, segRect);
+								}
+								if (sw >= 28)
+								{
+									using (Brush txtBrush = new SolidBrush(Color.FromArgb(254, 202, 202)))
+									{
+										g.DrawString("[已剔除]", segFont, txtBrush, segRect, sfCenter);
+									}
+								}
+							}
+						}
+						else if (trk.Type == TrackType.Audio)
+						{
+							// Audio Track
+							if (seg.IsKept)
+							{
+								if (trk.IsMuted || _cutEditAudioMuted)
+								{
+									using (HatchBrush hb = new HatchBrush(HatchStyle.WideUpwardDiagonal, Color.FromArgb(71, 85, 105), Color.FromArgb(20, 26, 38)))
+									{
+										g.FillRectangle(hb, segRect);
+									}
+								}
+								else
+								{
+									using (LinearGradientBrush lgb = new LinearGradientBrush(segRect, Color.FromArgb(16, 120, 80), Color.FromArgb(6, 78, 54), LinearGradientMode.Vertical))
+									{
+										g.FillRectangle(lgb, segRect);
+									}
+
+									// Real Waveform
+									if (!string.IsNullOrEmpty(seg.SourcePath) && _cutEditWaveformCache.TryGetValue(seg.SourcePath, out Image waveImg))
+									{
+										double mediaDur = GetMediaDuration(seg.SourcePath);
+										if (mediaDur <= 0.0) mediaDur = seg.Duration;
+										float srcX1 = (float)(seg.StartSeconds / Math.Max(0.1, mediaDur)) * waveImg.Width;
+										float srcX2 = (float)(seg.EndSeconds / Math.Max(0.1, mediaDur)) * waveImg.Width;
+										float srcW = Math.Max(1f, srcX2 - srcX1);
+										RectangleF srcRect = new RectangleF(srcX1, 0, srcW, waveImg.Height);
+										g.DrawImage(waveImg, segRect, srcRect, GraphicsUnit.Pixel);
+									}
+									else if (!string.IsNullOrEmpty(seg.SourcePath))
+									{
+										RequestRealAudioWaveform(seg.SourcePath, Color.FromArgb(34, 197, 94));
+										int midY = segRect.Y + segRect.Height / 2;
+										using (Pen pWave = new Pen(Color.FromArgb(52, 211, 153), 1f))
+										{
+											for (int wx = sx + 2; wx < sx + sw - 2; wx += 4)
+											{
+												int wh = ((wx * 5 + i * 11) % (segRect.Height / 2 - 2)) + 2;
+												g.DrawLine(pWave, wx, midY - wh, wx, midY + wh);
+											}
+										}
+									}
+								}
+
+								using (Pen p = new Pen(isSelected ? Color.FromArgb(234, 179, 8) : Color.FromArgb(52, 211, 153), isSelected ? 2.5f : 1f))
+								{
+									g.DrawRectangle(p, segRect);
+								}
+							}
+							else
+							{
+								using (HatchBrush hb = new HatchBrush(HatchStyle.LightUpwardDiagonal, Color.FromArgb(220, 38, 38), Color.FromArgb(69, 10, 10)))
+								{
+									g.FillRectangle(hb, segRect);
 								}
 							}
 						}
 					}
-					else
+				}
+
+				// Subtitle & Overlay Track T1
+				if (trk.Id == "T1")
+				{
+					_cachedOverlayRects.Clear();
+					_cachedT1Rect = Rectangle.Empty;
+
+					if (_cutEditDuration > 0.0 && _cutEditOverlays.Count > 0)
 					{
-						// Excluded segment
-						using (HatchBrush hb = new HatchBrush(HatchStyle.LightUpwardDiagonal, Color.FromArgb(220, 38, 38), Color.FromArgb(69, 10, 10)))
+						for (int oi = 0; oi < _cutEditOverlays.Count; oi++)
 						{
-							g.FillRectangle(hb, segV1);
-							g.FillRectangle(hb, segA1);
-						}
-						using (Pen p = new Pen(Color.FromArgb(239, 68, 68), 1f))
-						{
-							g.DrawRectangle(p, segV1);
-							g.DrawRectangle(p, segA1);
-						}
-						if (sw >= 36)
-						{
-							using (Brush txtBrush = new SolidBrush(Color.FromArgb(254, 202, 202)))
+							var olItem = _cutEditOverlays[oi];
+							if (!olItem.Enabled) continue;
+
+							double tStart = Math.Max(0.0, Math.Min(dur - 0.2, olItem.StartSeconds));
+							double tDur = Math.Max(0.5, olItem.Duration);
+							int tx1 = headerW + 2 + (int)((tStart / dur) * trackW);
+							int tx2 = headerW + 2 + (int)(((tStart + tDur) / dur) * trackW);
+							int tw = Math.Max(16, tx2 - tx1);
+							Rectangle olRect = new Rectangle(tx1, curY + 2, tw, th - 4);
+							_cachedOverlayRects[olItem.Id] = olRect;
+							if (_selectedOverlay == olItem) _cachedT1Rect = olRect;
+
+							bool isThisSel = (_selectedOverlay == olItem);
+							Color cGrad1 = (olItem.Type == OverlayItemType.Image) ? Color.FromArgb(168, 85, 247) : Color.FromArgb(14, 165, 233);
+							Color cGrad2 = (olItem.Type == OverlayItemType.Image) ? Color.FromArgb(126, 34, 206) : Color.FromArgb(2, 132, 199);
+							Color cBorder = isThisSel ? Color.FromArgb(234, 179, 8) : ((olItem.Type == OverlayItemType.Image) ? Color.FromArgb(216, 180, 254) : Color.FromArgb(125, 211, 252));
+
+							using (LinearGradientBrush lgb = new LinearGradientBrush(olRect, cGrad1, cGrad2, LinearGradientMode.Vertical))
 							{
-								g.DrawString("[已剔除]", f, txtBrush, segV1, sf);
-								g.DrawString("[已剔除]", f, txtBrush, segA1, sf);
+								g.FillRectangle(lgb, olRect);
+							}
+							using (Pen p = new Pen(cBorder, isThisSel ? 2.5f : 1f))
+							{
+								g.DrawRectangle(p, olRect);
+							}
+
+							using (Brush handleB = new SolidBrush(isThisSel ? Color.FromArgb(253, 224, 71) : Color.FromArgb(224, 242, 254)))
+							{
+								g.FillRectangle(handleB, tx1 + 1, curY + 4, 3, th - 8);
+								g.FillRectangle(handleB, tx1 + tw - 4, curY + 4, 3, th - 8);
+							}
+
+							string label = olItem.GetDisplayName();
+							using (Brush bTxt = new SolidBrush(Color.White))
+							{
+								g.DrawString(label, segFont, bTxt, olRect, sfCenter);
 							}
 						}
 					}
 				}
-			}
 
-			// Playhead Needle
-			int px = headerW + 2 + (int)(Math.Max(0.0, Math.Min(1.0, _cutEditCurrentPos / _cutEditDuration)) * trackW);
-			using (Pen redPen = new Pen(Color.FromArgb(239, 68, 68), 2f))
+				// BGM Track A2
+				if (trk.Id == "A2" && _cutEditBgmVolume > 0 && _cutEditDuration > 0.0)
+				{
+					Rectangle a2Rect = new Rectangle(headerW + 2, curY + 2, trackW, th - 4);
+					using (LinearGradientBrush lgb = new LinearGradientBrush(a2Rect, Color.FromArgb(139, 92, 246), Color.FromArgb(109, 40, 217), LinearGradientMode.Vertical))
+					{
+						g.FillRectangle(lgb, a2Rect);
+					}
+					using (Pen p = new Pen(Color.FromArgb(196, 181, 253), 1f))
+					{
+						g.DrawRectangle(p, a2Rect);
+					}
+					string a2Text = $"♫ BGM 背景配乐轨 (音量 {_cutEditBgmVolume}%)";
+					using (Brush bA2 = new SolidBrush(Color.White))
+					{
+						g.DrawString(a2Text, segFont, bA2, a2Rect, sfCenter);
+					}
+				}
+
+				// If track is locked, paint hatched warning overlay across the ENTIRE lane
+				if (trk.IsLocked)
+				{
+					using (HatchBrush lkHatch = new HatchBrush(HatchStyle.LightDownwardDiagonal, Color.FromArgb(90, 245, 158, 11), Color.FromArgb(25, 245, 158, 11)))
+					{
+						g.FillRectangle(lkHatch, laneRect);
+					}
+					using (Pen lkBorder = new Pen(Color.FromArgb(234, 179, 8), 1.5f))
+					{
+						g.DrawRectangle(lkBorder, laneRect);
+					}
+					using (Font fLk = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold))
+					using (Brush bBg = new SolidBrush(Color.FromArgb(220, 30, 22, 0)))
+					using (Brush bLk = new SolidBrush(Color.FromArgb(253, 224, 71)))
+					{
+						Rectangle lkBadge = new Rectangle(bounds.Width - 116, curY + (th - 22) / 2, 102, 22);
+						g.FillRectangle(bBg, lkBadge);
+						g.DrawRectangle(Pens.Goldenrod, lkBadge);
+						g.DrawString("🔒 轨道已锁定", fLk, bLk, lkBadge, sfCenter);
+					}
+				}
+
+				curY += th + 2;
+			}
+		}
+
+		// Floating drag badge
+		if (_timelineDragMode == TimelineDragMode.MoveClip && _dragSegmentIndex >= 0 && _dragSegmentIndex < _cutEditSegments.Count)
+		{
+			var dragSeg = _cutEditSegments[_dragSegmentIndex];
+			string badgeText = $"⏱️ {FormatDuration(dragSeg.TimelineStartSeconds)} - {FormatDuration(dragSeg.TimelineStartSeconds + dragSeg.Duration)}  |  轨道: {dragSeg.TrackId}";
+			using (Font fBadge = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold))
 			{
-				g.DrawLine(redPen, px, 4, px, bounds.Height - 4);
+				Size bSize = TextRenderer.MeasureText(badgeText, fBadge);
+				int bx = Math.Max(headerW + 10, Math.Min(bounds.Width - bSize.Width - 20, _dragStartMousePoint.X - bSize.Width / 2));
+				int by = Math.Max(28, _dragStartMousePoint.Y - 36);
+				Rectangle bRect = new Rectangle(bx, by, bSize.Width + 16, bSize.Height + 6);
+				using (Brush bBg = new SolidBrush(Color.FromArgb(235, 15, 23, 42)))
+				using (Pen pBorder = new Pen(Color.FromArgb(234, 179, 8), 1.5f))
+				using (Brush bTxt = new SolidBrush(Color.FromArgb(254, 240, 138)))
+				using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+				{
+					g.FillRectangle(bBg, bRect);
+					g.DrawRectangle(pBorder, bRect);
+					g.DrawString(badgeText, fBadge, bTxt, bRect, sf);
+				}
+			}
+		}
+
+		// 3. Playhead (Red needle with top triangle head)
+		if (_cutEditDuration > 0.0)
+		{
+			int px = headerW + 2 + (int)((_cutEditCurrentPos / dur) * trackW);
+			using (Pen pHead = new Pen(Color.FromArgb(239, 68, 68), 2f))
+			{
+				g.DrawLine(pHead, px, 0, px, curY);
 			}
 			Point[] cursorPoints = new Point[]
 			{
-				new Point(px - 5, 2),
-				new Point(px + 5, 2),
-				new Point(px, 12)
+				new Point(px - 6, 0),
+				new Point(px + 6, 0),
+				new Point(px, 14)
 			};
 			using (Brush b = new SolidBrush(Color.FromArgb(239, 68, 68)))
 			{
@@ -3648,21 +6024,121 @@ internal sealed class MainForm : Form
 		}
 	}
 
-	private void AddVideoToMediaPool(string path)
+	private double GetMediaDuration(string path)
 	{
-		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
-		if (!_cutEditMediaPool.Contains(path, StringComparer.OrdinalIgnoreCase))
+		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return 0.0;
+		try
 		{
-			_cutEditMediaPool.Add(path);
-			RefreshMediaPoolList();
+			if (IsImage(path)) return 5.0;
+			string ffmpeg = FindFfmpeg();
+			if (!string.IsNullOrEmpty(ffmpeg))
+			{
+				var info = Probe(ffmpeg, path);
+				return info.DurationSeconds;
+			}
 		}
-		if (string.IsNullOrEmpty(_cutEditSourcePath))
+		catch { }
+		return 0.0;
+	}
+
+	private void RequestRealAudioWaveform(string mediaPath, Color waveColor)
+	{
+		if (string.IsNullOrEmpty(mediaPath) || !File.Exists(mediaPath) || IsImage(mediaPath)) return;
+		lock (_cutEditWaveformCache)
 		{
-			LoadVideoIntoCutEditor(path);
+			if (_cutEditWaveformCache.ContainsKey(mediaPath)) return;
+		}
+		lock (_cutEditWaveformsGenerating)
+		{
+			if (_cutEditWaveformsGenerating.Contains(mediaPath)) return;
+			_cutEditWaveformsGenerating.Add(mediaPath);
+		}
+
+		Task.Run(() =>
+		{
+			try
+			{
+				string ffmpeg = FindFfmpeg();
+				if (string.IsNullOrEmpty(ffmpeg) || !File.Exists(ffmpeg)) return;
+
+				string tempWavePng = Path.Combine(Path.GetTempPath(), $"wave_{Guid.NewGuid():N}.png");
+				string hexColor = $"0x{waveColor.R:X2}{waveColor.G:X2}{waveColor.B:X2}";
+				string args = "-y -i \"" + mediaPath + "\" -filter_complex \"aformat=channel_layouts=mono,showwavespic=s=1600x64:colors=" + hexColor + "\" -frames:v 1 -update 1 \"" + tempWavePng + "\"";
+
+				ProcessStartInfo psi = new ProcessStartInfo(ffmpeg, args)
+				{
+					CreateNoWindow = true,
+					UseShellExecute = false,
+					RedirectStandardError = true
+				};
+				using (var proc = Process.Start(psi))
+				{
+					proc.WaitForExit(6000);
+				}
+
+				if (File.Exists(tempWavePng))
+				{
+					using (var fs = new FileStream(tempWavePng, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+					{
+						using (var srcBmp = new Bitmap(fs))
+						{
+							var cachedBmp = new Bitmap(srcBmp);
+							lock (_cutEditWaveformCache)
+							{
+								_cutEditWaveformCache[mediaPath] = cachedBmp;
+							}
+						}
+					}
+					TryDelete(tempWavePng);
+
+					BeginInvoke((MethodInvoker)delegate
+					{
+						_cutEditTimelineCanvas?.Invalidate();
+					});
+				}
+			}
+			catch { }
+			finally
+			{
+				lock (_cutEditWaveformsGenerating)
+				{
+					_cutEditWaveformsGenerating.Remove(mediaPath);
+				}
+			}
+		});
+	}
+
+	internal void SwitchMediaPoolView(bool isThumbView)
+	{
+		_cutEditMediaPoolIsThumbView = isThumbView;
+		if (_cutEditMediaPoolViewListBtn != null)
+		{
+			_cutEditMediaPoolViewListBtn.Tag = isThumbView ? "btn" : "accent";
+			_cutEditMediaPoolViewListBtn.BackColor = isThumbView ? SurfaceColor : AccentColor;
+			_cutEditMediaPoolViewListBtn.ForeColor = isThumbView ? InkColor : Color.White;
+		}
+		if (_cutEditMediaPoolViewThumbBtn != null)
+		{
+			_cutEditMediaPoolViewThumbBtn.Tag = isThumbView ? "accent" : "btn";
+			_cutEditMediaPoolViewThumbBtn.BackColor = isThumbView ? AccentColor : SurfaceColor;
+			_cutEditMediaPoolViewThumbBtn.ForeColor = isThumbView ? Color.White : InkColor;
+		}
+		if (_cutEditMediaPoolList != null)
+		{
+			_cutEditMediaPoolList.View = isThumbView ? View.LargeIcon : View.Details;
+			RefreshMediaPoolList();
+			if (isThumbView)
+			{
+				foreach (var p in _cutEditMediaPool)
+				{
+					GenerateMediaPoolThumbnailAsync(p);
+				}
+			}
+			_cutEditMediaPoolList.Invalidate();
 		}
 	}
 
-	private void AddCutEditMediaPoolPaths(string[] paths)
+	internal void AddCutEditMediaPoolPaths(string[] paths)
 	{
 		if (paths == null || paths.Length == 0) return;
 		List<string> toAdd = new List<string>();
@@ -3674,16 +6150,22 @@ internal sealed class MainForm : Form
 				{
 					toAdd.AddRange(Directory.GetFiles(p, "*" + ext, SearchOption.AllDirectories));
 				}
+				foreach (string ext in ImageExtensions)
+				{
+					toAdd.AddRange(Directory.GetFiles(p, "*" + ext, SearchOption.AllDirectories));
+				}
 			}
 			else if (File.Exists(p))
 			{
 				string ext = Path.GetExtension(p);
-				if (VideoExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)))
+				if (VideoExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)) ||
+				    ImageExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)))
 				{
 					toAdd.Add(p);
 				}
 			}
 		}
+
 		bool added = false;
 		foreach (string f in toAdd)
 		{
@@ -3691,16 +6173,98 @@ internal sealed class MainForm : Form
 			{
 				_cutEditMediaPool.Add(f);
 				added = true;
+				GenerateMediaPoolThumbnailAsync(f);
 			}
 		}
 		if (added)
 		{
 			RefreshMediaPoolList();
 		}
-		if (string.IsNullOrEmpty(_cutEditSourcePath) && _cutEditMediaPool.Count > 0)
+	}
+
+	private void GenerateMediaPoolThumbnailAsync(string path)
+	{
+		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+		lock (_cutEditMediaPoolThumbCache)
 		{
-			LoadVideoIntoCutEditor(_cutEditMediaPool[0]);
+			if (_cutEditMediaPoolThumbCache.ContainsKey(path)) return;
 		}
+		lock (_cutEditMediaPoolThumbsGenerating)
+		{
+			if (_cutEditMediaPoolThumbsGenerating.Contains(path)) return;
+			_cutEditMediaPoolThumbsGenerating.Add(path);
+		}
+
+		Task.Run(() =>
+		{
+			try
+			{
+				Bitmap thumbBmp = new Bitmap(96, 64);
+				if (IsImage(path))
+				{
+					using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+					using (var src = Image.FromStream(fs))
+					using (Graphics g = Graphics.FromImage(thumbBmp))
+					{
+						g.Clear(Color.FromArgb(12, 16, 24));
+						g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+						float scale = Math.Min(96f / src.Width, 64f / src.Height);
+						int dw = (int)(src.Width * scale);
+						int dh = (int)(src.Height * scale);
+						g.DrawImage(src, (96 - dw) / 2, (64 - dh) / 2, dw, dh);
+					}
+				}
+				else
+				{
+					string ffmpeg = FindFfmpeg();
+					if (!string.IsNullOrEmpty(ffmpeg))
+					{
+						string tempJpg = Path.Combine(Path.GetTempPath(), $"thumb_{Guid.NewGuid():N}.jpg");
+						string args = "-y -ss 00:00:01 -i \"" + path + "\" -vframes 1 -vf \"scale=96:64:force_original_aspect_ratio=decrease,pad=96:64:(ow-iw)/2:(oh-ih)/2:black\" -update 1 \"" + tempJpg + "\"";
+						ProcessStartInfo psi = new ProcessStartInfo(ffmpeg, args) { CreateNoWindow = true, UseShellExecute = false };
+						using (var proc = Process.Start(psi)) proc.WaitForExit(4000);
+						if (File.Exists(tempJpg))
+						{
+							using (var fs = new FileStream(tempJpg, FileMode.Open, FileAccess.Read))
+							using (var loaded = new Bitmap(fs))
+							using (Graphics g = Graphics.FromImage(thumbBmp))
+							{
+								g.DrawImage(loaded, 0, 0, 96, 64);
+							}
+							TryDelete(tempJpg);
+						}
+					}
+				}
+
+				lock (_cutEditMediaPoolThumbCache)
+				{
+					_cutEditMediaPoolThumbCache[path] = thumbBmp;
+				}
+
+				BeginInvoke((MethodInvoker)delegate
+				{
+					if (_cutEditMediaPoolImageList != null)
+					{
+						if (!_cutEditMediaPoolImageList.Images.ContainsKey(path))
+						{
+							_cutEditMediaPoolImageList.Images.Add(path, thumbBmp);
+						}
+					}
+					if (_cutEditMediaPoolIsThumbView)
+					{
+						RefreshMediaPoolList();
+					}
+				});
+			}
+			catch { }
+			finally
+			{
+				lock (_cutEditMediaPoolThumbsGenerating)
+				{
+					_cutEditMediaPoolThumbsGenerating.Remove(path);
+				}
+			}
+		});
 	}
 
 	private void RefreshMediaPoolList()
@@ -3717,7 +6281,16 @@ internal sealed class MainForm : Form
 			string resStr = "---";
 			try
 			{
-				if (!string.IsNullOrEmpty(ffmpeg) && File.Exists(ffmpeg))
+				if (IsImage(path))
+				{
+					durStr = "5.0s";
+					using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+					using (var img = Image.FromStream(fs))
+					{
+						resStr = $"{img.Width}x{img.Height}";
+					}
+				}
+				else if (!string.IsNullOrEmpty(ffmpeg) && File.Exists(ffmpeg))
 				{
 					var info = Probe(ffmpeg, path);
 					if (info.HasVideo)
@@ -3733,185 +6306,336 @@ internal sealed class MainForm : Form
 			lvi.SubItems.Add(durStr);
 			lvi.SubItems.Add(resStr);
 			lvi.Tag = path;
-			if (string.Equals(path, _cutEditSourcePath, StringComparison.OrdinalIgnoreCase))
+			lvi.ImageKey = path;
+
+			if (_cutEditMediaPoolIsThumbView)
 			{
-				lvi.ForeColor = Color.FromArgb(59, 130, 246);
-				lvi.Font = new Font(_cutEditMediaPoolList.Font, FontStyle.Bold);
+				lvi.Text = $"{name}\n[{durStr}]";
 			}
+
 			_cutEditMediaPoolList.Items.Add(lvi);
 		}
 		_cutEditMediaPoolList.EndUpdate();
 	}
 
-	private void LoadMediaPoolSelectedToTimeline()
+	private void InsertSelectedMediaPoolToTimeline(int mode)
 	{
+		string path = null;
 		if (_cutEditMediaPoolList != null && _cutEditMediaPoolList.SelectedItems.Count > 0)
 		{
-			string path = _cutEditMediaPoolList.SelectedItems[0].Tag as string;
-			if (!string.IsNullOrEmpty(path) && File.Exists(path))
-			{
-				LoadVideoIntoCutEditor(path);
-			}
+			path = _cutEditMediaPoolList.SelectedItems[0].Tag as string;
+		}
+		else if (_cutEditMediaPool.Count > 0)
+		{
+			path = _cutEditMediaPool[0];
+		}
+
+		if (!string.IsNullOrEmpty(path) && File.Exists(path))
+		{
+			InsertMediaIntoTimeline(path, mode);
 		}
 	}
 
-	private void LoadVideoIntoCutEditor(string path)
+	private void InsertMediaIntoTimelineAtPoint(string path, Point canvasPt)
 	{
 		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+		var targetTrack = GetTrackAtY(canvasPt.Y);
+		if (targetTrack == null)
+		{
+			targetTrack = _cutEditTracks.FirstOrDefault(t => t.Id == "V1") ?? _cutEditTracks.FirstOrDefault();
+		}
+		if (targetTrack != null && targetTrack.IsLocked)
+		{
+			MessageBox.Show(this, $"轨道【{targetTrack.Name}】已被锁定，无法添加素材！请先解锁该轨道。", "轨道已锁定", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			return;
+		}
+
+		int headerW = 92;
+		int padR = 14;
+		int trackW = Math.Max(10, (int)((_cutEditTimelineCanvas.ClientSize.Width - headerW - padR) * _cutEditTimelineZoom));
+		double dur = Math.Max(1.0, _cutEditDuration);
+
+		double dropTime = 0.0;
+		if (canvasPt.X > headerW && _cutEditDuration > 0.0)
+		{
+			dropTime = Math.Max(0.0, (double)(canvasPt.X - headerW) / trackW * _cutEditDuration);
+			if (dropTime < 0.25) dropTime = 0.0;
+		}
+		else if (_cutEditDuration == 0.0)
+		{
+			dropTime = 0.0;
+		}
+
+		InsertMediaIntoTrackAtTime(path, targetTrack?.Id ?? "V1", dropTime);
+	}
+
+	internal void InsertMediaIntoTrackAtTime(string path, string targetTrackId, double targetTime)
+	{
 		try
 		{
-			string ffmpeg = FindFfmpeg();
-			if (string.IsNullOrEmpty(ffmpeg))
+			var trk = _cutEditTracks.FirstOrDefault(t => t.Id == targetTrackId);
+			if (trk != null && trk.IsLocked)
 			{
-				MessageBox.Show(this, "未找到 FFmpeg 核心组件，无法解析视频！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Hand);
-				return;
-			}
-			VideoInfo info = Probe(ffmpeg, path);
-			if (!info.HasVideo || info.DurationSeconds <= 0.0)
-			{
-				MessageBox.Show(this, "未能识别该视频文件或视频时长为 0！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				MessageBox.Show(this, $"轨道【{trk.Name}】已被锁定，无法添加素材！请先解锁该轨道。", "轨道已锁定", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 				return;
 			}
 
-			_cutEditSourcePath = path;
-			_cutEditDuration = info.DurationSeconds;
-			_cutEditWidth = info.Width;
-			_cutEditHeight = info.Height;
-			_cutEditCurrentPos = 0.0;
+			double itemDur = 5.0;
+			int w = 1920, h = 1080;
+			string mediaType = "video";
 
-			if (!_cutEditMediaPool.Contains(path, StringComparer.OrdinalIgnoreCase))
+			if (IsImage(path))
 			{
-				_cutEditMediaPool.Add(path);
+				mediaType = "image";
+				using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+				using (var img = Image.FromStream(fs))
+				{
+					w = img.Width;
+					h = img.Height;
+				}
 			}
-			RefreshMediaPoolList();
+			else
+			{
+				string ffmpeg = FindFfmpeg();
+				if (!string.IsNullOrEmpty(ffmpeg))
+				{
+					var info = Probe(ffmpeg, path);
+					if (info.DurationSeconds > 0) itemDur = info.DurationSeconds;
+					if (info.Width > 0) w = info.Width;
+					if (info.Height > 0) h = info.Height;
+					if (info.HasAudio && !info.HasVideo) mediaType = "audio";
+				}
+			}
 
-			_cutEditVideoInfoLabel.Text = $"当前素材: {Path.GetFileName(path)} | 分辨率: {info.Width}x{info.Height} | 总时长: {FormatDuration(_cutEditDuration)}";
-			_cutEditVideoInfoLabel.ForeColor = InkColor;
-
-			_cutEditSegments.Clear();
-			_cutEditSegments.Add(new CutSegment
+			CutSegment newSeg = new CutSegment
 			{
 				SourcePath = path,
 				StartSeconds = 0.0,
-				EndSeconds = _cutEditDuration,
-				IsKept = true
-			});
+				EndSeconds = itemDur,
+				TimelineStartSeconds = Math.Max(0.0, targetTime),
+				IsKept = true,
+				TrackId = targetTrackId ?? "V1",
+				MediaType = mediaType,
+				Title = Path.GetFileName(path)
+			};
 
-			if (_deliverOutputFolder != null && string.IsNullOrEmpty(_deliverOutputFolder.Text))
-			{
-				_deliverOutputFolder.Text = Path.GetDirectoryName(path);
-			}
+			_cutEditSegments.Add(newSeg);
+			_cutEditSelectedSegmentIndex = _cutEditSegments.Count - 1;
+			_cutEditSelectedTrackId = newSeg.TrackId;
 
-			_cutEditTimeScrubber.Value = 0;
-			UpdateCutEditTimeLabel();
-			RefreshCutEditSegmentList();
-			if (_cutEditMediaElement != null)
+			if (string.IsNullOrEmpty(_cutEditSourcePath) || _cutEditSegments.Count == 1)
 			{
-				try
+				_cutEditSourcePath = path;
+				_cutEditWidth = w;
+				_cutEditHeight = h;
+				if (mediaType == "video" && _cutEditMediaElement != null)
 				{
-					_cutEditMediaElement.Source = new Uri(Path.GetFullPath(path));
-					_cutEditMediaElement.Play();
-					_cutEditMediaElement.Pause();
-					_cutEditMediaElement.Position = TimeSpan.Zero;
-					_cutEditIsPlaying = false;
-					if (_cutEditPlayPauseButton != null) _cutEditPlayPauseButton.Text = "▶ 播放 (空格)";
-					if (_cutEditPreviewBox != null) _cutEditPreviewBox.Visible = false;
-					if (_cutEditEmptyPlaceholder != null) _cutEditEmptyPlaceholder.Visible = false;
-					_cutEditElementHost?.BringToFront();
+					try { _cutEditMediaElement.Source = new Uri(path); } catch { }
 				}
-				catch { }
 			}
-			UpdateCutEditPreviewFrame(0.0, withTitlePreview: false);
+
+			if (_cutEditEmptyPlaceholder != null) _cutEditEmptyPlaceholder.Visible = false;
+			if (_cutEditPreviewBox != null)
+			{
+				_cutEditPreviewBox.Visible = true;
+				_cutEditPreviewBox.BringToFront();
+			}
+
+			RecalculateTimelineTotalDuration();
+
+			if (mediaType == "video" || mediaType == "audio")
+			{
+				RequestRealAudioWaveform(path, Color.FromArgb(34, 197, 94));
+			}
+
+			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
 			_cutEditTimelineCanvas?.Invalidate();
 			UpdateDeliverSummary();
 		}
 		catch (Exception ex)
 		{
-			MessageBox.Show(this, "载入视频失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+			MessageBox.Show(this, "加入轨道失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Hand);
 		}
+	}
+
+	internal void InsertMediaIntoTimeline(string path, int mode)
+	{
+		double targetTime = 0.0;
+		if (mode == 0) // Start
+		{
+			targetTime = 0.0;
+		}
+		else if (mode == 1) // Playhead
+		{
+			targetTime = _cutEditCurrentPos;
+		}
+		else // 2: End
+		{
+			double maxEndOnTrack = _cutEditSegments
+				.Where(s => s.TrackId == _cutEditSelectedTrackId && s.IsKept)
+				.Select(s => s.TimelineStartSeconds + s.Duration)
+				.DefaultIfEmpty(0.0)
+				.Max();
+			targetTime = (maxEndOnTrack > 0.0) ? maxEndOnTrack : _cutEditDuration;
+		}
+
+		InsertMediaIntoTrackAtTime(path, _cutEditSelectedTrackId ?? "V1", targetTime);
+	}
+
+	private void RecalculateTimelineTotalDuration()
+	{
+		double maxEnd = 0.0;
+		int keptCount = 0;
+		int excludedCount = 0;
+		foreach (var s in _cutEditSegments)
+		{
+			if (s.IsKept)
+			{
+				keptCount++;
+				double end = s.TimelineStartSeconds + s.Duration;
+				if (end > maxEnd) maxEnd = end;
+			}
+			else
+			{
+				excludedCount++;
+			}
+		}
+		_cutEditDuration = maxEnd;
+		if (_cutEditEstimatedDurationLabel != null)
+		{
+			_cutEditEstimatedDurationLabel.Text = $"剪辑后总时长: {FormatDuration(_cutEditDuration)} (共 {_cutEditSegments.Count} 段，保留 {keptCount} 段，剔除 {excludedCount} 段)";
+		}
+		UpdateCutEditTimeLabel();
+	}
+
+	private void LoadMediaPoolSelectedToTimeline()
+	{
+		InsertSelectedMediaPoolToTimeline(2);
+	}
+
+	private void LoadVideoIntoCutEditor(string path)
+	{
+		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+		InsertMediaIntoTrackAtTime(path, "V1", _cutEditDuration);
 	}
 
 	private void UpdateCutEditTimeLabel()
 	{
-		_cutEditTimeLabel.Text = $"{FormatDuration(_cutEditCurrentPos)} / {FormatDuration(_cutEditDuration)}";
+		if (_cutEditTimeLabel != null)
+		{
+			_cutEditTimeLabel.Text = $"{FormatDuration(_cutEditCurrentPos)} / {FormatDuration(_cutEditDuration)}";
+		}
 	}
 
 	private void RefreshCutEditSegmentList()
 	{
-		_cutEditSegmentList.BeginUpdate();
-		_cutEditSegmentList.Items.Clear();
-
-		for (int i = 0; i < _cutEditSegments.Count; i++)
-		{
-			var seg = _cutEditSegments[i];
-			ListViewItem lvi = new ListViewItem(seg.IsKept ? "✅ 保留" : "❌ 已剔除");
-			lvi.ForeColor = seg.IsKept ? (_isDarkMode ? Color.White : Color.Black) : Color.FromArgb(239, 68, 68);
-			lvi.SubItems.Add($"片段 #{i + 1}");
-			lvi.SubItems.Add(FormatDuration(seg.StartSeconds));
-			lvi.SubItems.Add(FormatDuration(seg.EndSeconds));
-			lvi.SubItems.Add($"{seg.Duration:0.0} 秒");
-			string audioStatus = _cutEditAudioMuted ? "A1 音频已静音" : $"A1 音量 {_cutEditAudioVolume}%";
-			lvi.SubItems.Add(seg.IsKept ? $"V1 画面正常参与导出 | {audioStatus}" : "已跳过不导出 (波纹闭合)");
-			lvi.Tag = seg;
-			_cutEditSegmentList.Items.Add(lvi);
-		}
-		_cutEditSegmentList.EndUpdate();
-
-		double totalKept = _cutEditSegments.Where(s => s.IsKept).Sum(s => s.Duration);
-		int excluded = _cutEditSegments.Count(s => !s.IsKept);
-		_cutEditEstimatedDurationLabel.Text = $"剪辑后预计总时长: {FormatDuration(totalKept)} (共 {_cutEditSegments.Count} 段，已剔除 {excluded} 段)";
+		RecalculateTimelineTotalDuration();
 		_cutEditTimelineCanvas?.Invalidate();
 		UpdateDeliverSummary();
 	}
 
 	private void SplitCutEditCurrentPosition()
 	{
-		if (string.IsNullOrEmpty(_cutEditSourcePath) || _cutEditDuration <= 0.0) return;
+		if (_cutEditDuration <= 0.0 || _cutEditSegments.Count == 0) return;
 		double pos = _cutEditCurrentPos;
-		if (pos <= 0.1 || pos >= _cutEditDuration - 0.1) return;
 
-		for (int i = 0; i < _cutEditSegments.Count; i++)
+		CutSegment targetSeg = null;
+		int segIdx = -1;
+
+		if (_cutEditSelectedSegmentIndex >= 0 && _cutEditSelectedSegmentIndex < _cutEditSegments.Count)
 		{
-			var seg = _cutEditSegments[i];
-			if (pos > seg.StartSeconds + 0.1 && pos < seg.EndSeconds - 0.1)
+			var s = _cutEditSegments[_cutEditSelectedSegmentIndex];
+			if (pos > s.TimelineStartSeconds + 0.05 && pos < s.TimelineStartSeconds + s.Duration - 0.05)
 			{
-				CutSegment seg1 = new CutSegment
-				{
-					SourcePath = _cutEditSourcePath,
-					StartSeconds = seg.StartSeconds,
-					EndSeconds = pos,
-					IsKept = seg.IsKept
-				};
-				CutSegment seg2 = new CutSegment
-				{
-					SourcePath = _cutEditSourcePath,
-					StartSeconds = pos,
-					EndSeconds = seg.EndSeconds,
-					IsKept = seg.IsKept
-				};
-				_cutEditSegments.RemoveAt(i);
-				_cutEditSegments.Insert(i, seg2);
-				_cutEditSegments.Insert(i, seg1);
-				RefreshCutEditSegmentList();
-				if (i + 1 < _cutEditSegmentList.Items.Count)
-				{
-					_cutEditSegmentList.Items[i + 1].Selected = true;
-				}
-				break;
+				targetSeg = s;
+				segIdx = _cutEditSelectedSegmentIndex;
 			}
+		}
+
+		if (targetSeg == null)
+		{
+			for (int i = 0; i < _cutEditSegments.Count; i++)
+			{
+				var s = _cutEditSegments[i];
+				if (s.TrackId == _cutEditSelectedTrackId && pos > s.TimelineStartSeconds + 0.05 && pos < s.TimelineStartSeconds + s.Duration - 0.05)
+				{
+					targetSeg = s;
+					segIdx = i;
+					break;
+				}
+			}
+		}
+
+		if (targetSeg == null)
+		{
+			for (int i = 0; i < _cutEditSegments.Count; i++)
+			{
+				var s = _cutEditSegments[i];
+				if (pos > s.TimelineStartSeconds + 0.05 && pos < s.TimelineStartSeconds + s.Duration - 0.05)
+				{
+					targetSeg = s;
+					segIdx = i;
+					break;
+				}
+			}
+		}
+
+		if (targetSeg != null && segIdx >= 0)
+		{
+			var trk = _cutEditTracks.FirstOrDefault(t => t.Id == targetSeg.TrackId);
+			if (trk?.IsLocked == true)
+			{
+				MessageBox.Show(this, $"轨道【{trk.Name}】已锁定，无法切割！", "轨道已锁定", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
+			}
+
+			double offsetInSeg = pos - targetSeg.TimelineStartSeconds;
+			CutSegment seg1 = new CutSegment
+			{
+				SourcePath = targetSeg.SourcePath,
+				StartSeconds = targetSeg.StartSeconds,
+				EndSeconds = targetSeg.StartSeconds + offsetInSeg,
+				TimelineStartSeconds = targetSeg.TimelineStartSeconds,
+				IsKept = targetSeg.IsKept,
+				TrackId = targetSeg.TrackId,
+				MediaType = targetSeg.MediaType,
+				Title = targetSeg.Title
+			};
+			CutSegment seg2 = new CutSegment
+			{
+				SourcePath = targetSeg.SourcePath,
+				StartSeconds = targetSeg.StartSeconds + offsetInSeg,
+				EndSeconds = targetSeg.EndSeconds,
+				TimelineStartSeconds = targetSeg.TimelineStartSeconds + offsetInSeg,
+				IsKept = targetSeg.IsKept,
+				TrackId = targetSeg.TrackId,
+				MediaType = targetSeg.MediaType,
+				Title = targetSeg.Title
+			};
+
+			_cutEditSegments.RemoveAt(segIdx);
+			_cutEditSegments.Insert(segIdx, seg2);
+			_cutEditSegments.Insert(segIdx, seg1);
+			_cutEditSelectedSegmentIndex = segIdx + 1; // select right piece so Del key immediately removes unwanted tail!
+			RefreshCutEditSegmentList();
 		}
 	}
 
 	private void SetCutEditInPoint()
 	{
-		if (string.IsNullOrEmpty(_cutEditSourcePath) || _cutEditDuration <= 0.0) return;
+		if (_cutEditDuration <= 0.0) return;
 		double pos = _cutEditCurrentPos;
 		SplitCutEditCurrentPosition();
 		foreach (var seg in _cutEditSegments)
 		{
-			if (seg.EndSeconds <= pos + 0.05)
+			double segEnd = seg.TimelineStartSeconds + seg.Duration;
+			if (segEnd <= pos + 0.05)
 			{
-				seg.IsKept = false;
+				var trk = _cutEditTracks.FirstOrDefault(t => t.Id == seg.TrackId);
+				if (trk?.IsLocked != true)
+				{
+					seg.IsKept = false;
+				}
 			}
 		}
 		RefreshCutEditSegmentList();
@@ -3919,14 +6643,18 @@ internal sealed class MainForm : Form
 
 	private void SetCutEditOutPoint()
 	{
-		if (string.IsNullOrEmpty(_cutEditSourcePath) || _cutEditDuration <= 0.0) return;
+		if (_cutEditDuration <= 0.0) return;
 		double pos = _cutEditCurrentPos;
 		SplitCutEditCurrentPosition();
 		foreach (var seg in _cutEditSegments)
 		{
-			if (seg.StartSeconds >= pos - 0.05)
+			if (seg.TimelineStartSeconds >= pos - 0.05)
 			{
-				seg.IsKept = false;
+				var trk = _cutEditTracks.FirstOrDefault(t => t.Id == seg.TrackId);
+				if (trk?.IsLocked != true)
+				{
+					seg.IsKept = false;
+				}
 			}
 		}
 		RefreshCutEditSegmentList();
@@ -3934,27 +6662,36 @@ internal sealed class MainForm : Form
 
 	private void ToggleSelectedSegmentKept()
 	{
-		if (_cutEditSegmentList.SelectedIndices.Count > 0)
+		if (_cutEditSelectedSegmentIndex >= 0 && _cutEditSelectedSegmentIndex < _cutEditSegments.Count)
 		{
-			int idx = _cutEditSegmentList.SelectedIndices[0];
-			if (idx >= 0 && idx < _cutEditSegments.Count)
+			var seg = _cutEditSegments[_cutEditSelectedSegmentIndex];
+			var trk = _cutEditTracks.FirstOrDefault(t => t.Id == seg.TrackId);
+			if (trk?.IsLocked == true)
 			{
-				_cutEditSegments[idx].IsKept = !_cutEditSegments[idx].IsKept;
-				RefreshCutEditSegmentList();
-				if (idx < _cutEditSegmentList.Items.Count)
-				{
-					_cutEditSegmentList.Items[idx].Selected = true;
-				}
+				MessageBox.Show(this, $"轨道 {trk.Name} 已锁定，无法修改或剔除此分段！", "轨道已锁定", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
 			}
+			seg.IsKept = !seg.IsKept;
+			RefreshCutEditSegmentList();
 		}
 		else if (_cutEditSegments.Count > 0)
 		{
 			double pos = _cutEditCurrentPos;
-			var match = _cutEditSegments.FirstOrDefault(s => pos >= s.StartSeconds && pos <= s.EndSeconds);
-			if (match != null)
+			foreach (var seg in _cutEditSegments)
 			{
-				match.IsKept = !match.IsKept;
-				RefreshCutEditSegmentList();
+				double sEnd = seg.TimelineStartSeconds + seg.Duration;
+				if (pos >= seg.TimelineStartSeconds && pos <= sEnd)
+				{
+					var trk = _cutEditTracks.FirstOrDefault(t => t.Id == seg.TrackId);
+					if (trk?.IsLocked == true)
+					{
+						MessageBox.Show(this, $"轨道 {trk.Name} 已锁定，无法修改此分段！", "轨道已锁定", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+						return;
+					}
+					seg.IsKept = !seg.IsKept;
+					RefreshCutEditSegmentList();
+					break;
+				}
 			}
 		}
 	}
@@ -3963,7 +6700,11 @@ internal sealed class MainForm : Form
 	{
 		foreach (var seg in _cutEditSegments)
 		{
-			seg.IsKept = true;
+			var trk = _cutEditTracks.FirstOrDefault(t => t.Id == seg.TrackId);
+			if (trk?.IsLocked != true)
+			{
+				seg.IsKept = true;
+			}
 		}
 		RefreshCutEditSegmentList();
 	}
@@ -3973,50 +6714,215 @@ internal sealed class MainForm : Form
 		ToggleCutEditPlayPause();
 	}
 
-	private void ToggleCutEditPlayPause()
+	internal void ToggleCutEditPlayPause()
 	{
-		if (string.IsNullOrEmpty(_cutEditSourcePath) || !File.Exists(_cutEditSourcePath))
+		if (_cutEditSegments.Count == 0 || _cutEditDuration <= 0.0)
 		{
-			MessageBox.Show(this, "请先在左侧媒体池或点击上方导入需要剪辑的视频素材！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			MessageBox.Show(this, "请先在左侧媒体池添加或拖入素材到轨道！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			return;
-		}
-		if (_cutEditMediaElement == null) return;
-
-		if (_cutEditPreviewBox != null && _cutEditPreviewBox.Visible)
-		{
-			_cutEditPreviewBox.Visible = false;
-			_cutEditElementHost?.BringToFront();
 		}
 
 		if (_cutEditIsPlaying)
 		{
-			_cutEditMediaElement.Pause();
+			if (_cutEditMediaElement != null)
+			{
+				try { _cutEditMediaElement.Pause(); } catch { }
+			}
 			_cutEditIsPlaying = false;
+			_cutEditPlaybackSw.Stop();
 			if (_cutEditPlayPauseButton != null) _cutEditPlayPauseButton.Text = "▶ 播放 (空格)";
 			_cutEditPlayTimer?.Stop();
+
+			var activeSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
+			if (activeSeg != null && activeSeg.MediaType != "image" && (!(_cutEditRealtimePreviewCheckBox?.Checked == true) || !(_cutEditTitleEnabled?.Checked == true)))
+			{
+				_cutEditPreviewBox.Visible = false;
+				_cutEditElementHost.Visible = true;
+				_cutEditElementHost.BringToFront();
+			}
+			else
+			{
+				_cutEditElementHost.Visible = false;
+				_cutEditPreviewBox.Visible = true;
+				_cutEditPreviewBox.BringToFront();
+				UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: _cutEditRealtimePreviewCheckBox?.Checked == true);
+			}
 		}
 		else
 		{
-			_cutEditMediaElement.Play();
+			if (_cutEditCurrentPos >= _cutEditDuration - 0.05)
+			{
+				_cutEditCurrentPos = 0.0;
+			}
 			_cutEditIsPlaying = true;
+			_cutEditPlaybackSw.Restart();
+			_lastStopwatchMs = 0;
 			if (_cutEditPlayPauseButton != null) _cutEditPlayPauseButton.Text = "⏸ 暂停 (空格)";
+			SyncPlayerAtCurrentPos(forceReload: false);
 			_cutEditPlayTimer?.Start();
+		}
+
+		if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed)
+		{
+			_cutEditPopoutForm.UpdateFrame(_cutEditPreviewBox.Image, _cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
 		}
 	}
 
-	private void SeekCutEditVideo(double targetSec)
+	private CutSegment GetActiveVideoSegmentAtTime(double timeSec)
+	{
+		var videoTracks = _cutEditTracks
+			.Where(t => t.Type == TrackType.Video && t.IsVisible)
+			.OrderByDescending(t => t.Id)
+			.ToList();
+
+		foreach (var trk in videoTracks)
+		{
+			var seg = _cutEditSegments.FirstOrDefault(s => s.TrackId == trk.Id && s.IsKept &&
+				timeSec >= s.TimelineStartSeconds && timeSec < s.TimelineStartSeconds + s.Duration);
+			if (seg != null) return seg;
+		}
+
+		return _cutEditSegments.FirstOrDefault(s => s.IsKept &&
+			timeSec >= s.TimelineStartSeconds && timeSec < s.TimelineStartSeconds + s.Duration);
+	}
+
+	private void SyncPlayerAtCurrentPos(bool forceReload)
+	{
+		var activeSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
+		_lastActiveSegment = activeSeg;
+
+		if (activeSeg == null)
+		{
+			if (_cutEditMediaElement != null)
+			{
+				try { _cutEditMediaElement.Pause(); } catch { }
+			}
+			_cutEditElementHost.Visible = false;
+			_cutEditPreviewBox.Visible = true;
+			_cutEditPreviewBox.BringToFront();
+			RenderTimelineGapPreview();
+			return;
+		}
+
+		if (activeSeg.MediaType == "image" || IsImage(activeSeg.SourcePath))
+		{
+			if (_cutEditMediaElement != null)
+			{
+				try { _cutEditMediaElement.Pause(); } catch { }
+			}
+			_cutEditElementHost.Visible = false;
+			_cutEditPreviewBox.Visible = true;
+			_cutEditPreviewBox.BringToFront();
+			RenderImageClipPreview(activeSeg);
+			return;
+		}
+
+		// Video clip
+		if (_cutEditMediaElement != null)
+		{
+			try
+			{
+				Uri targetUri = new Uri(activeSeg.SourcePath);
+				bool needNewSource = (_cutEditMediaElement.Source == null || !_cutEditMediaElement.Source.Equals(targetUri));
+				if (needNewSource || forceReload)
+				{
+					_cutEditMediaElement.Source = targetUri;
+				}
+				double inSourceSec = activeSeg.StartSeconds + Math.Max(0.0, _cutEditCurrentPos - activeSeg.TimelineStartSeconds);
+				_cutEditMediaElement.Position = TimeSpan.FromSeconds(Math.Max(0, inSourceSec));
+				_cutEditMediaElement.Volume = (_cutEditVolumeTrackBar?.Value ?? 100) / 100.0;
+				_cutEditMediaElement.IsMuted = _cutEditAudioMuted;
+
+				if (_cutEditIsPlaying)
+				{
+					_cutEditPreviewBox.Visible = false;
+					_cutEditElementHost.Visible = true;
+					_cutEditElementHost.BringToFront();
+					_cutEditMediaElement.Play();
+				}
+				else
+				{
+					_cutEditMediaElement.Pause();
+					if (_cutEditRealtimePreviewCheckBox?.Checked == true && _cutEditTitleEnabled?.Checked == true)
+					{
+						_cutEditElementHost.Visible = false;
+						_cutEditPreviewBox.Visible = true;
+						_cutEditPreviewBox.BringToFront();
+						UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
+					}
+					else
+					{
+						_cutEditPreviewBox.Visible = false;
+						_cutEditElementHost.Visible = true;
+						_cutEditElementHost.BringToFront();
+					}
+				}
+			}
+			catch
+			{
+				_cutEditElementHost.Visible = false;
+				_cutEditPreviewBox.Visible = true;
+				_cutEditPreviewBox.BringToFront();
+				UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: _cutEditRealtimePreviewCheckBox?.Checked == true);
+			}
+		}
+	}
+
+	private void RenderTimelineGapPreview()
+	{
+		int w = _cutEditPreviewBox.Width > 0 ? _cutEditPreviewBox.Width : 640;
+		int h = _cutEditPreviewBox.Height > 0 ? _cutEditPreviewBox.Height : 360;
+		Bitmap bmp = new Bitmap(w, h);
+		using (Graphics g = Graphics.FromImage(bmp))
+		{
+			g.Clear(Color.FromArgb(12, 16, 24));
+			using (Font f = new Font("Microsoft YaHei UI", 11f, FontStyle.Regular))
+			using (Brush b = new SolidBrush(Color.FromArgb(100, 116, 139)))
+			using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+			{
+				g.DrawString("〔 时间轴空隙 / 黑场 〕", f, b, new Rectangle(0, 0, w, h), sf);
+			}
+		}
+		var old = _cutEditPreviewBox.Image;
+		_cutEditPreviewBox.Image = bmp;
+		old?.Dispose();
+	}
+
+	private void RenderImageClipPreview(CutSegment seg)
+	{
+		try
+		{
+			if (File.Exists(seg.SourcePath))
+			{
+				using (var fs = new FileStream(seg.SourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+				using (var src = Image.FromStream(fs))
+				{
+					Bitmap bmp = new Bitmap(src);
+					if (_cutEditRealtimePreviewCheckBox?.Checked == true || _cutEditTitleEnabled?.Checked == true)
+					{
+						RenderTitleOverlayOnBitmap(bmp);
+					}
+					var old = _cutEditPreviewBox.Image;
+					_cutEditPreviewBox.Image = bmp;
+					old?.Dispose();
+					return;
+				}
+			}
+		}
+		catch { }
+		RenderTimelineGapPreview();
+	}
+
+	internal void SeekCutEditVideo(double targetSec)
 	{
 		if (_cutEditDuration <= 0.0) return;
 		_cutEditCurrentPos = Math.Max(0.0, Math.Min(_cutEditDuration, targetSec));
-		if (_cutEditMediaElement != null)
-		{
-			_cutEditMediaElement.Position = TimeSpan.FromSeconds(_cutEditCurrentPos);
-		}
 		UpdateCutEditTimeLabel();
+		SyncPlayerAtCurrentPos(forceReload: false);
 		_cutEditTimelineCanvas?.Invalidate();
 	}
 
-	private void StepCutEditTime(double deltaSec)
+	internal void StepCutEditTime(double deltaSec)
 	{
 		if (_cutEditDuration <= 0.0) return;
 		double newPos = Math.Max(0.0, Math.Min(_cutEditDuration, _cutEditCurrentPos + deltaSec));
@@ -4027,18 +6933,167 @@ internal sealed class MainForm : Form
 		}
 	}
 
+	internal void SetCutEditSubtitleBottomOffset(int val)
+	{
+		_cutEditSubtitleBottomOffset = Math.Max(20, Math.Min(800, val));
+		if (_cutEditSubtitlePosTrackBar != null && _cutEditSubtitlePosTrackBar.Value != _cutEditSubtitleBottomOffset)
+		{
+			_cutEditSubtitlePosTrackBar.Value = _cutEditSubtitleBottomOffset;
+		}
+		if (_cutEditSubtitlePosLabel != null)
+		{
+			_cutEditSubtitlePosLabel.Text = $"高度 距离底部: {_cutEditSubtitleBottomOffset} px";
+		}
+		if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed)
+		{
+			_cutEditPopoutForm.SyncSubtitleOffset(_cutEditSubtitleBottomOffset);
+		}
+		if (_cutEditRealtimePreviewCheckBox?.Checked == true)
+		{
+			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
+		}
+	}
+
+	internal void OnCutEditPopoutClosed()
+	{
+		_cutEditPopoutForm = null;
+	}
+
+	private void OpenCutEditPopoutPreview()
+	{
+		if (_cutEditSegments.Count == 0 || _cutEditDuration <= 0.0)
+		{
+			MessageBox.Show(this, "请先在左侧媒体池或点击上方导入需要剪辑的视频素材！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			return;
+		}
+		if (_cutEditPopoutForm == null || _cutEditPopoutForm.IsDisposed)
+		{
+			_cutEditPopoutForm = new CutEditPopoutPreviewForm(this);
+			_cutEditPopoutForm.Show(this);
+		}
+		else
+		{
+			_cutEditPopoutForm.BringToFront();
+		}
+		if (_cutEditPreviewBox?.Image != null)
+		{
+			_cutEditPopoutForm.UpdateFrame(_cutEditPreviewBox.Image, _cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
+		}
+	}
+
+	internal double GetDeliverTotalDuration() => _deliverDuration;
+
+	internal void SeekDeliverPreview(double targetSec)
+	{
+		if (_deliverDuration <= 0.05) return;
+		_deliverCurrentPos = Math.Max(0.0, Math.Min(_deliverDuration, targetSec));
+		UpdateDeliverTimeLabel();
+		if (!_deliverIsPlaying)
+		{
+			UpdateDeliverPreviewFrame(_deliverCurrentPos);
+		}
+		else
+		{
+			_deliverPlaybackStartPos = _deliverCurrentPos;
+			_deliverPlaybackSw.Restart();
+			SyncDeliverPlaybackSegment();
+		}
+	}
+
+	internal void StepDeliverPreview(double deltaSec)
+	{
+		SeekDeliverPreview(_deliverCurrentPos + deltaSec);
+	}
+
+	private void AttachDeliverPlayerToPopout()
+	{
+		if (_deliverPopoutForm != null && !_deliverPopoutForm.IsDisposed && _deliverElementHost != null)
+		{
+			_deliverElementHost.Parent = _deliverPopoutForm.CanvasPanel;
+			_deliverElementHost.Dock = DockStyle.Fill;
+			if (_deliverIsPlaying)
+			{
+				_deliverElementHost.Visible = true;
+				_deliverElementHost.BringToFront();
+			}
+			else
+			{
+				_deliverElementHost.Visible = false;
+				if (_deliverPopoutForm.PreviewBox != null)
+				{
+					_deliverPopoutForm.PreviewBox.Visible = true;
+					_deliverPopoutForm.PreviewBox.BringToFront();
+				}
+			}
+		}
+	}
+
+	internal void OnDeliverPopoutClosing()
+	{
+		DetachDeliverPlayerFromPopout();
+	}
+
+	internal void OnDeliverPopoutClosed()
+	{
+		DetachDeliverPlayerFromPopout();
+		_deliverPopoutForm = null;
+	}
+
+	private void DetachDeliverPlayerFromPopout()
+	{
+		if (_deliverElementHost != null && _deliverMonitorBox != null)
+		{
+			_deliverElementHost.Parent = _deliverMonitorBox;
+			_deliverElementHost.Dock = DockStyle.Fill;
+			if (_deliverIsPlaying)
+			{
+				_deliverElementHost.Visible = true;
+				_deliverElementHost.BringToFront();
+			}
+			else
+			{
+				_deliverElementHost.Visible = false;
+				if (_deliverPreviewBox != null)
+				{
+					_deliverPreviewBox.Visible = true;
+					_deliverPreviewBox.BringToFront();
+				}
+			}
+		}
+	}
+
+	internal void OpenDeliverPopoutPreview()
+	{
+		if (_cutEditSegments.Count == 0 || _deliverDuration <= 0.0)
+		{
+			MessageBox.Show(this, "当前无待交付成片工程，请先在【视频剪辑】中载入素材！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			return;
+		}
+		if (_deliverPopoutForm == null || _deliverPopoutForm.IsDisposed)
+		{
+			_deliverPopoutForm = new DeliverPopoutPreviewForm(this);
+			_deliverPopoutForm.Show(this);
+		}
+		else
+		{
+			_deliverPopoutForm.BringToFront();
+		}
+
+		AttachDeliverPlayerToPopout();
+
+		if (_deliverPopoutForm != null)
+		{
+			_deliverPopoutForm.UpdateFrame(_deliverPreviewBox?.Image, _deliverCurrentPos, _deliverDuration, _deliverIsPlaying);
+		}
+	}
+
 	private void CutEditMediaElement_MediaOpened(object sender, System.Windows.RoutedEventArgs e)
 	{
 		BeginInvoke((MethodInvoker)delegate
 		{
-			if (_cutEditMediaElement != null && _cutEditMediaElement.NaturalDuration.HasTimeSpan)
+			if (_cutEditIsPlaying && _cutEditMediaElement != null)
 			{
-				_cutEditDuration = _cutEditMediaElement.NaturalDuration.TimeSpan.TotalSeconds;
-				if (_cutEditSegments.Count == 0 && _cutEditDuration > 0)
-				{
-					_cutEditSegments.Add(new CutSegment { StartSeconds = 0.0, EndSeconds = _cutEditDuration, IsKept = true, SourcePath = _cutEditSourcePath });
-					RefreshCutEditSegmentList();
-				}
+				try { _cutEditMediaElement.Play(); } catch { }
 			}
 			UpdateCutEditTimeLabel();
 			_cutEditTimelineCanvas?.Invalidate();
@@ -4049,20 +7104,33 @@ internal sealed class MainForm : Form
 	{
 		BeginInvoke((MethodInvoker)delegate
 		{
-			if (_cutEditLoopCheckBox?.Checked == true)
+			if (!_cutEditIsPlaying) return;
+
+			var activeSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
+			double segEndTimeline = (activeSeg != null) ? (activeSeg.TimelineStartSeconds + activeSeg.Duration) : _cutEditDuration;
+
+			if (segEndTimeline < _cutEditDuration - 0.05)
 			{
-				if (_cutEditMediaElement != null)
-				{
-					_cutEditMediaElement.Position = TimeSpan.Zero;
-					_cutEditMediaElement.Play();
-					_cutEditIsPlaying = true;
-				}
+				// Advance smoothly to next segment on timeline
+				_cutEditCurrentPos = segEndTimeline;
+				var nextSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
+				_lastActiveSegment = nextSeg;
+				SyncPlayerAtCurrentPos(forceReload: false);
 			}
 			else
 			{
-				_cutEditIsPlaying = false;
-				if (_cutEditPlayPauseButton != null) _cutEditPlayPauseButton.Text = "▶ 播放 (空格)";
-				_cutEditPlayTimer?.Stop();
+				if (_cutEditLoopCheckBox?.Checked == true)
+				{
+					_cutEditCurrentPos = 0.0;
+					_lastActiveSegment = null;
+					SyncPlayerAtCurrentPos(forceReload: false);
+				}
+				else
+				{
+					_cutEditIsPlaying = false;
+					if (_cutEditPlayPauseButton != null) _cutEditPlayPauseButton.Text = "▶ 播放 (空格)";
+					_cutEditPlayTimer?.Stop();
+				}
 			}
 		});
 	}
@@ -4071,17 +7139,75 @@ internal sealed class MainForm : Form
 	{
 		BeginInvoke((MethodInvoker)delegate
 		{
-			_cutEditIsPlaying = false;
-			if (_cutEditPlayPauseButton != null) _cutEditPlayPauseButton.Text = "▶ 播放 (空格)";
-			_cutEditPlayTimer?.Stop();
+			// Never black screen: fallback to frame extraction
+			_cutEditElementHost.Visible = false;
+			_cutEditPreviewBox.Visible = true;
+			_cutEditPreviewBox.BringToFront();
+			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
 		});
 	}
 
 	private void UpdateCutEditPreviewFrame(double timeSec, bool withTitlePreview = false)
 	{
-		if (string.IsNullOrEmpty(_cutEditSourcePath) || !File.Exists(_cutEditSourcePath)) return;
+		if (_cutEditSegments.Count == 0) return;
+		var activeSeg = GetActiveVideoSegmentAtTime(timeSec);
+		if (activeSeg == null)
+		{
+			activeSeg = _cutEditSegments.FirstOrDefault(s => s.IsKept);
+		}
+		if (activeSeg == null)
+		{
+			RenderTimelineGapPreview();
+			return;
+		}
+
+		if (activeSeg.MediaType == "image" || IsImage(activeSeg.SourcePath))
+		{
+			RenderImageClipPreview(activeSeg);
+			return;
+		}
+
 		string ffmpeg = FindFfmpeg();
-		if (string.IsNullOrEmpty(ffmpeg)) return;
+		if (string.IsNullOrEmpty(ffmpeg) || !File.Exists(activeSeg.SourcePath)) return;
+
+		double inSourceSec = activeSeg.StartSeconds + Math.Max(0.0, timeSec - activeSeg.TimelineStartSeconds);
+
+		// ULTRA-FAST IN-MEMORY COMPOSITING:
+		// If the video frame at this exact timestamp is already cached, reuse it immediately in <1ms!
+		// This eliminates all FFmpeg spawning and disk I/O when adjusting sliders, fonts, colors, scale, opacity, etc.!
+		bool hasCachedBase = false;
+		Bitmap cachedBaseClone = null;
+		lock (_cutEditBaseFrameLock)
+		{
+			if (_cutEditCachedBaseFrame != null &&
+				string.Equals(_cutEditCachedBaseFramePath, activeSeg.SourcePath, StringComparison.OrdinalIgnoreCase) &&
+				Math.Abs(_cutEditCachedBaseFrameTime - inSourceSec) < 0.08)
+			{
+				hasCachedBase = true;
+				cachedBaseClone = new Bitmap(_cutEditCachedBaseFrame);
+			}
+		}
+
+		if (hasCachedBase && cachedBaseClone != null)
+		{
+			using (cachedBaseClone)
+			{
+				Bitmap fastBmp = new Bitmap(cachedBaseClone);
+				RenderAllOverlaysOnBitmap(fastBmp, timeSec, forcePreviewSelected: withTitlePreview);
+				var old = _cutEditPreviewBox.Image;
+				_cutEditPreviewBox.Image = fastBmp;
+				_cutEditPreviewBox.Visible = true;
+				_cutEditPreviewBox.BringToFront();
+				_cutEditPreviewBox.Invalidate();
+				old?.Dispose();
+
+				if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed)
+				{
+					_cutEditPopoutForm.UpdateFrame(fastBmp, _cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
+				}
+			}
+			return;
+		}
 
 		int seq = Interlocked.Increment(ref _cutEditPreviewSeq);
 		ThreadPool.QueueUserWorkItem(delegate
@@ -4091,8 +7217,8 @@ internal sealed class MainForm : Form
 			{
 				if (seq != _cutEditPreviewSeq) return;
 				tempJpg = Path.Combine(Path.GetTempPath(), "CutEdit_Preview_" + Guid.NewGuid().ToString("N") + ".jpg");
-				string tStr = Math.Max(0.0, timeSec).ToString("0.00", CultureInfo.InvariantCulture);
-				string args = $"-hide_banner -y -ss {tStr} -noaccurate_seek -i {QuoteArg(_cutEditSourcePath)} -frames:v 1 -q:v 2 {QuoteArg(tempJpg)}";
+				string tStr = Math.Max(0.0, inSourceSec).ToString("0.00", CultureInfo.InvariantCulture);
+				string args = $"-hide_banner -y -ss {tStr} -noaccurate_seek -i {QuoteArg(activeSeg.SourcePath)} -frames:v 1 -q:v 2 {QuoteArg(tempJpg)}";
 
 				ProcessStartInfo psi = NewProcessInfo(ffmpeg, args);
 				using (Process proc = new Process())
@@ -4110,45 +7236,46 @@ internal sealed class MainForm : Form
 				{
 					byte[] bytes = File.ReadAllBytes(tempJpg);
 					using (MemoryStream ms = new MemoryStream(bytes))
+					using (Bitmap origBmp = new Bitmap(ms))
 					{
-						using (Bitmap origBmp = new Bitmap(ms))
+						lock (_cutEditBaseFrameLock)
 						{
-							Bitmap frameBmp = new Bitmap(origBmp);
-							bool shouldDrawTitle = withTitlePreview;
-							if (!shouldDrawTitle)
+							_cutEditCachedBaseFrame?.Dispose();
+							_cutEditCachedBaseFrame = new Bitmap(origBmp);
+							_cutEditCachedBaseFramePath = activeSeg.SourcePath;
+							_cutEditCachedBaseFrameTime = inSourceSec;
+						}
+
+						Bitmap frameBmp = new Bitmap(origBmp);
+						RenderAllOverlaysOnBitmap(frameBmp, timeSec, forcePreviewSelected: withTitlePreview);
+
+						if (seq == _cutEditPreviewSeq)
+						{
+							BeginInvoke((MethodInvoker)delegate
 							{
-								if (_cutEditTitleEnabled?.Checked == true)
+								if (seq == _cutEditPreviewSeq)
 								{
-									double titleDur = (double)(_cutEditTitleDuration?.Value ?? 5m);
-									if (timeSec <= titleDur) shouldDrawTitle = true;
+									var old = _cutEditPreviewBox.Image;
+									_cutEditPreviewBox.Image = frameBmp;
+									_cutEditPreviewBox.Visible = true;
+									_cutEditPreviewBox.BringToFront();
+									_cutEditPreviewBox.Invalidate();
+									old?.Dispose();
+
+									if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed)
+									{
+										_cutEditPopoutForm.UpdateFrame(frameBmp, _cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
+									}
 								}
-							}
-
-							if (shouldDrawTitle)
-							{
-								RenderTitleOverlayOnBitmap(frameBmp);
-							}
-
-							if (seq == _cutEditPreviewSeq)
-							{
-								BeginInvoke((MethodInvoker)delegate
+								else
 								{
-									if (seq == _cutEditPreviewSeq)
-									{
-										var old = _cutEditPreviewBox.Image;
-										_cutEditPreviewBox.Image = frameBmp;
-										old?.Dispose();
-									}
-									else
-									{
-										frameBmp.Dispose();
-									}
-								});
-							}
-							else
-							{
-								frameBmp.Dispose();
-							}
+									frameBmp.Dispose();
+								}
+							});
+						}
+						else
+						{
+							frameBmp.Dispose();
 						}
 					}
 				}
@@ -4161,13 +7288,807 @@ internal sealed class MainForm : Form
 		});
 	}
 
-	private void RenderTitleOverlayOnBitmap(Bitmap bmp)
+	private static float AutoFitFontSize(Graphics g, string text, string fontFamily, FontStyle style, float preferredSize, float maxWidth, float minSize = 12f)
 	{
-		if (bmp == null) return;
-		string mainText = _cutEditMainTitle?.Text ?? "CINEMATIC MOMENTS";
-		string subText = _cutEditSubtitle?.Text ?? "A Story of Light and Motion";
-		int styleIndex = _cutEditTitleStyle?.SelectedIndex ?? 0;
-		float fontScale = (_cutEditTitleFontSize?.SelectedIndex == 1) ? 1.35f : ((_cutEditTitleFontSize?.SelectedIndex == 2) ? 0.75f : 1.0f);
+		if (string.IsNullOrEmpty(text) || maxWidth <= 20) return preferredSize;
+		float size = preferredSize;
+		try
+		{
+			using (Font f = new Font(fontFamily, size, style))
+			{
+				SizeF sz = g.MeasureString(text, f);
+				if (sz.Width > maxWidth && sz.Width > 0)
+				{
+					size = Math.Max(minSize, size * (maxWidth / sz.Width));
+				}
+			}
+		}
+		catch { }
+		return size;
+	}
+
+	private static List<string> WrapTextToBalancedLines(Graphics g, string text, Font font, float maxWidth, int maxLines = 4)
+	{
+		var result = new List<string>();
+		if (string.IsNullOrWhiteSpace(text)) return result;
+
+		string[] paragraphs = text.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
+		foreach (var p in paragraphs)
+		{
+			string trimmed = p.Trim();
+			if (string.IsNullOrEmpty(trimmed)) continue;
+
+			SizeF fullSz = g.MeasureString(trimmed, font);
+			if (fullSz.Width <= maxWidth)
+			{
+				result.Add(trimmed);
+				continue;
+			}
+
+			bool hasSpaces = trimmed.Contains(' ');
+			if (hasSpaces)
+			{
+				string[] words = trimmed.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+				StringBuilder curLine = new StringBuilder();
+				for (int i = 0; i < words.Length; i++)
+				{
+					string testLine = curLine.Length == 0 ? words[i] : (curLine.ToString() + " " + words[i]);
+					if (g.MeasureString(testLine, font).Width <= maxWidth)
+					{
+						if (curLine.Length > 0) curLine.Append(" ");
+						curLine.Append(words[i]);
+					}
+					else
+					{
+						if (curLine.Length > 0)
+						{
+							result.Add(curLine.ToString());
+							curLine.Clear();
+						}
+						if (g.MeasureString(words[i], font).Width > maxWidth)
+						{
+							for (int c = 0; c < words[i].Length; c++)
+							{
+								string testChar = curLine.ToString() + words[i][c];
+								if (g.MeasureString(testChar, font).Width <= maxWidth)
+								{
+									curLine.Append(words[i][c]);
+								}
+								else
+								{
+									result.Add(curLine.ToString());
+									curLine.Clear();
+									curLine.Append(words[i][c]);
+								}
+							}
+						}
+						else
+						{
+							curLine.Append(words[i]);
+						}
+					}
+				}
+				if (curLine.Length > 0)
+				{
+					result.Add(curLine.ToString());
+				}
+			}
+			else
+			{
+				StringBuilder curLine = new StringBuilder();
+				for (int i = 0; i < trimmed.Length; i++)
+				{
+					string testLine = curLine.ToString() + trimmed[i];
+					if (g.MeasureString(testLine, font).Width <= maxWidth)
+					{
+						curLine.Append(trimmed[i]);
+					}
+					else
+					{
+						result.Add(curLine.ToString());
+						curLine.Clear();
+						curLine.Append(trimmed[i]);
+					}
+				}
+				if (curLine.Length > 0)
+				{
+					result.Add(curLine.ToString());
+				}
+			}
+		}
+
+		if (result.Count == 2 && result[0].Contains(' ') && result[1].Contains(' '))
+		{
+			string combined = result[0] + " " + result[1];
+			string[] words = combined.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+			if (words.Length >= 4)
+			{
+				int half = words.Length / 2;
+				string l1 = string.Join(" ", words.Take(half));
+				string l2 = string.Join(" ", words.Skip(half));
+				if (g.MeasureString(l1, font).Width <= maxWidth && g.MeasureString(l2, font).Width <= maxWidth)
+				{
+					result[0] = l1;
+					result[1] = l2;
+				}
+			}
+		}
+
+		return result;
+	}
+
+	private void TriggerTitleLivePreview()
+	{
+		if (_cutEditElementHost != null) _cutEditElementHost.Visible = false;
+		if (_cutEditPreviewBox != null)
+		{
+			_cutEditPreviewBox.Visible = true;
+			_cutEditPreviewBox.BringToFront();
+		}
+		UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
+		_cutEditTimelineCanvas?.Invalidate();
+	}
+
+	private void SetTitleFontSize(int sizePx)
+	{
+		if (_cutEditTitleFontSizeSlider != null)
+		{
+			_cutEditTitleFontSizeSlider.Value = Math.Max(_cutEditTitleFontSizeSlider.Minimum, Math.Min(_cutEditTitleFontSizeSlider.Maximum, sizePx));
+		}
+	}
+
+	private static string GetTitleSizeDescription(int size)
+	{
+		if (size >= 70) return "🔥 巨大封面";
+		if (size >= 54) return "⚡ 醒目大字";
+		if (size >= 38) return "✨ 标准字号";
+		return "📝 适中内敛";
+	}
+	private void InitDefaultOverlays()
+	{
+		if (_cutEditOverlays.Count == 0)
+		{
+			var defItem = new CutOverlayItem
+			{
+				Name = "片头标题包装",
+				Type = OverlayItemType.Text,
+				StartSeconds = 0.0,
+				Duration = 5.0,
+				TextContent = "CINEMATIC MOMENTS",
+				SubtitleContent = "A Story of Light and Motion",
+				PositionPreset = "居中偏下",
+				FontSize = 52,
+				TextColorIndex = 0,
+				StrokeIndex = 0,
+				BannerBgIndex = 0,
+				IsTitleCard = false
+			};
+			_cutEditOverlays.Add(defItem);
+			_selectedOverlay = defItem;
+		}
+	}
+
+	private void RefreshOverlayCombo(CutOverlayItem selectItem = null)
+	{
+		if (_overlayItemCombo == null) return;
+		_updatingOverlayInspector = true;
+		try
+		{
+			_overlayItemCombo.Items.Clear();
+			for (int i = 0; i < _cutEditOverlays.Count; i++)
+			{
+				var item = _cutEditOverlays[i];
+				_overlayItemCombo.Items.Add($"#{i + 1} {item.GetDisplayName()}");
+			}
+			if (selectItem != null && _cutEditOverlays.Contains(selectItem))
+			{
+				_selectedOverlay = selectItem;
+			}
+			else if (_cutEditOverlays.Count > 0 && (_selectedOverlay == null || !_cutEditOverlays.Contains(_selectedOverlay)))
+			{
+				_selectedOverlay = _cutEditOverlays[0];
+			}
+
+			if (_selectedOverlay != null)
+			{
+				int idx = _cutEditOverlays.IndexOf(_selectedOverlay);
+				if (idx >= 0 && idx < _overlayItemCombo.Items.Count)
+				{
+					_overlayItemCombo.SelectedIndex = idx;
+				}
+			}
+		}
+		finally
+		{
+			_updatingOverlayInspector = false;
+		}
+		SyncSelectedOverlayToControls();
+		_cutEditTimelineCanvas?.Invalidate();
+		TriggerTitleLivePreview();
+		UpdateDeliverSummary();
+	}
+
+	private void SyncSelectedOverlayToControls()
+	{
+		if (_selectedOverlay == null || _overlayItemEnabledCheckBox == null) return;
+		_updatingOverlayInspector = true;
+		try
+		{
+			_overlayItemEnabledCheckBox.Checked = _selectedOverlay.Enabled;
+			if (_cutEditTitleEnabled != null) _cutEditTitleEnabled.Checked = _selectedOverlay.Enabled;
+
+			if (_overlayStartTimeNum != null)
+			{
+				_overlayStartTimeNum.Value = (decimal)Math.Max(0.0, Math.Min(3600.0, _selectedOverlay.StartSeconds));
+				if (_cutEditTitleStartTime != null) _cutEditTitleStartTime.Value = _overlayStartTimeNum.Value;
+			}
+			if (_overlayDurationNum != null)
+			{
+				_overlayDurationNum.Value = (decimal)Math.Max(0.5, Math.Min(3600.0, _selectedOverlay.Duration));
+				if (_cutEditTitleDuration != null) _cutEditTitleDuration.Value = _overlayDurationNum.Value;
+			}
+
+			if (_overlayPositionCombo != null)
+			{
+				int pIdx = _overlayPositionCombo.FindString(_selectedOverlay.PositionPreset);
+				_overlayPositionCombo.SelectedIndex = (pIdx >= 0) ? pIdx : 0;
+			}
+			if (_overlayOffsetXNum != null) _overlayOffsetXNum.Value = Math.Max(-1920, Math.Min(1920, _selectedOverlay.OffsetX));
+			if (_overlayOffsetYNum != null) _overlayOffsetYNum.Value = Math.Max(-1080, Math.Min(1080, _selectedOverlay.OffsetY));
+
+			if (_selectedOverlay.Type == OverlayItemType.Text)
+			{
+				if (_overlayTextPropsPanel != null) _overlayTextPropsPanel.Visible = true;
+				if (_overlayImagePropsPanel != null) _overlayImagePropsPanel.Visible = false;
+
+				if (_cutEditMainTitle != null) _cutEditMainTitle.Text = _selectedOverlay.TextContent;
+				if (_cutEditSubtitle != null) _cutEditSubtitle.Text = _selectedOverlay.SubtitleContent;
+				if (_cutEditTitleFontSizeSlider != null) _cutEditTitleFontSizeSlider.Value = Math.Max(20, Math.Min(110, _selectedOverlay.FontSize));
+				if (_cutEditTitleTextColorCombo != null && _selectedOverlay.TextColorIndex < _cutEditTitleTextColorCombo.Items.Count)
+					_cutEditTitleTextColorCombo.SelectedIndex = _selectedOverlay.TextColorIndex;
+				if (_cutEditTitleStrokeCombo != null && _selectedOverlay.StrokeIndex < _cutEditTitleStrokeCombo.Items.Count)
+					_cutEditTitleStrokeCombo.SelectedIndex = _selectedOverlay.StrokeIndex;
+				if (_cutEditTitleBannerBgCombo != null && _selectedOverlay.BannerBgIndex < _cutEditTitleBannerBgCombo.Items.Count)
+					_cutEditTitleBannerBgCombo.SelectedIndex = _selectedOverlay.BannerBgIndex;
+				if (_cutEditTitleCardRadio != null) _cutEditTitleCardRadio.Checked = _selectedOverlay.IsTitleCard;
+				if (_cutEditTitleOverlayRadio != null) _cutEditTitleOverlayRadio.Checked = !_selectedOverlay.IsTitleCard;
+			}
+			else
+			{
+				if (_overlayTextPropsPanel != null) _overlayTextPropsPanel.Visible = false;
+				if (_overlayImagePropsPanel != null) _overlayImagePropsPanel.Visible = true;
+
+				if (_overlayImagePathText != null) _overlayImagePathText.Text = _selectedOverlay.ImagePath;
+				if (_overlayImageScaleSlider != null) _overlayImageScaleSlider.Value = Math.Max(10, Math.Min(300, _selectedOverlay.ScalePercent));
+				if (_overlayImageScaleLabel != null) _overlayImageScaleLabel.Text = $"缩放尺寸: {_selectedOverlay.ScalePercent}%";
+				if (_overlayImageOpacitySlider != null) _overlayImageOpacitySlider.Value = Math.Max(10, Math.Min(100, _selectedOverlay.OpacityPercent));
+				if (_overlayImageOpacityLabel != null) _overlayImageOpacityLabel.Text = $"不透明度: {_selectedOverlay.OpacityPercent}%";
+
+				UpdateOverlayImageThumb(_selectedOverlay.ImagePath);
+			}
+		}
+		finally
+		{
+			_updatingOverlayInspector = false;
+		}
+	}
+
+	private void SyncControlsToSelectedOverlay()
+	{
+		if (_selectedOverlay == null || _updatingOverlayInspector) return;
+
+		_selectedOverlay.Enabled = _overlayItemEnabledCheckBox?.Checked ?? true;
+		_selectedOverlay.StartSeconds = (double)(_overlayStartTimeNum?.Value ?? 0m);
+		_selectedOverlay.Duration = (double)(_overlayDurationNum?.Value ?? 5m);
+		if (_overlayPositionCombo?.SelectedItem != null)
+		{
+			string posStr = _overlayPositionCombo.SelectedItem.ToString();
+			if (posStr.Contains("(")) posStr = posStr.Split('(')[0].Trim();
+			_selectedOverlay.PositionPreset = posStr;
+		}
+		_selectedOverlay.OffsetX = (int)(_overlayOffsetXNum?.Value ?? 0m);
+		_selectedOverlay.OffsetY = (int)(_overlayOffsetYNum?.Value ?? 0m);
+
+		if (_selectedOverlay.Type == OverlayItemType.Text)
+		{
+			_selectedOverlay.TextContent = _cutEditMainTitle?.Text ?? "";
+			_selectedOverlay.SubtitleContent = _cutEditSubtitle?.Text ?? "";
+			_selectedOverlay.FontSize = _cutEditTitleFontSizeSlider?.Value ?? 52;
+			_selectedOverlay.TextColorIndex = _cutEditTitleTextColorCombo?.SelectedIndex ?? 0;
+			_selectedOverlay.StrokeIndex = _cutEditTitleStrokeCombo?.SelectedIndex ?? 0;
+			_selectedOverlay.BannerBgIndex = _cutEditTitleBannerBgCombo?.SelectedIndex ?? 0;
+			_selectedOverlay.IsTitleCard = _cutEditTitleCardRadio?.Checked == true;
+		}
+		else
+		{
+			_selectedOverlay.ImagePath = _overlayImagePathText?.Text ?? "";
+			_selectedOverlay.ScalePercent = _overlayImageScaleSlider?.Value ?? 80;
+			_selectedOverlay.OpacityPercent = _overlayImageOpacitySlider?.Value ?? 100;
+		}
+
+		if (_overlayItemCombo != null && _selectedOverlay != null)
+		{
+			int idx = _cutEditOverlays.IndexOf(_selectedOverlay);
+			if (idx >= 0 && idx < _overlayItemCombo.Items.Count)
+			{
+				_updatingOverlayInspector = true;
+				_overlayItemCombo.Items[idx] = $"#{idx + 1} {_selectedOverlay.GetDisplayName()}";
+				_updatingOverlayInspector = false;
+			}
+		}
+
+		_cutEditTimelineCanvas?.Invalidate();
+		TriggerTitleLivePreview();
+		UpdateDeliverSummary();
+	}
+
+	private void SelectOverlayItem(CutOverlayItem item)
+	{
+		if (item == null || !_cutEditOverlays.Contains(item)) return;
+		_selectedOverlay = item;
+		int idx = _cutEditOverlays.IndexOf(item);
+		if (_overlayItemCombo != null && idx >= 0 && idx < _overlayItemCombo.Items.Count)
+		{
+			_overlayItemCombo.SelectedIndex = idx;
+		}
+		else
+		{
+			SyncSelectedOverlayToControls();
+		}
+	}
+
+	private void UpdateOverlayImageThumb(string path)
+	{
+		if (_overlayImageThumbBox == null) return;
+		if (string.IsNullOrEmpty(path) || !File.Exists(path))
+		{
+			_overlayImageThumbBox.Image = null;
+			return;
+		}
+		try
+		{
+			var img = GetOrCreateOverlayImage(path);
+			_overlayImageThumbBox.Image = img;
+		}
+		catch
+		{
+			_overlayImageThumbBox.Image = null;
+		}
+	}
+
+	private Image GetOrCreateOverlayImage(string path)
+	{
+		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+		lock (_overlayImageCache)
+		{
+			if (_overlayImageCache.TryGetValue(path, out var cached))
+			{
+				return cached;
+			}
+			try
+			{
+				byte[] bytes = File.ReadAllBytes(path);
+				using (MemoryStream ms = new MemoryStream(bytes))
+				{
+					Image loaded = Image.FromStream(ms);
+					Bitmap bmp = new Bitmap(loaded);
+					_overlayImageCache[path] = bmp;
+					return bmp;
+				}
+			}
+			catch
+			{
+				return null;
+			}
+		}
+	}
+
+	private void RenderSingleTextOverlay(Graphics g, CutOverlayItem item, int w, int h)
+	{
+		if (item == null) return;
+		string mainText = item.TextContent ?? "CINEMATIC MOMENTS";
+		string subText = item.SubtitleContent ?? "";
+		int fontSizeVal = item.FontSize;
+		int colorIdx = item.TextColorIndex;
+		int strokeIdx = item.StrokeIndex;
+		int bannerIdx = item.BannerBgIndex;
+
+		if (item.IsTitleCard || bannerIdx == 4)
+		{
+			g.Clear(Color.FromArgb(10, 10, 14));
+		}
+
+		float resScale = Math.Max(0.25f, (float)w / 1080f);
+		float chosenFontSize = fontSizeVal * resScale;
+
+		Color mainTextColor;
+		switch (colorIdx)
+		{
+			case 1: mainTextColor = Color.FromArgb(253, 224, 71); break;
+			case 2: mainTextColor = Color.FromArgb(34, 211, 238); break;
+			case 3: mainTextColor = Color.FromArgb(239, 68, 68); break;
+			case 4: mainTextColor = Color.FromArgb(245, 158, 11); break;
+			case 5: mainTextColor = Color.FromArgb(132, 204, 22); break;
+			case 6: mainTextColor = Color.FromArgb(249, 115, 22); break;
+			case 7: mainTextColor = Color.FromArgb(244, 114, 182); break;
+			default: mainTextColor = Color.White; break;
+		}
+
+		float strokeWidth = 0f;
+		bool hasShadow = true;
+		Color strokeColor = Color.FromArgb(235, 10, 10, 14);
+		switch (strokeIdx)
+		{
+			case 0: strokeWidth = 8f * resScale; break;
+			case 1: strokeWidth = 12f * resScale; break;
+			case 2: strokeWidth = 5f * resScale; break;
+			case 3: strokeWidth = 2.5f * resScale; break;
+			case 4: strokeWidth = 0f; break;
+		}
+
+		float maxTitleW = w * 0.88f;
+		float effectiveFontSize = chosenFontSize;
+		List<string> mainLines = null;
+		Font fontMain = null;
+
+		while (effectiveFontSize >= 20f * resScale)
+		{
+			fontMain?.Dispose();
+			fontMain = new Font("Microsoft YaHei UI", effectiveFontSize, FontStyle.Bold);
+			mainLines = WrapTextToBalancedLines(g, mainText, fontMain, maxTitleW);
+			if (mainLines.Count <= 3) break;
+			effectiveFontSize -= 2f * resScale;
+		}
+
+		if (fontMain == null)
+		{
+			fontMain = new Font("Microsoft YaHei UI", effectiveFontSize, FontStyle.Bold);
+			mainLines = WrapTextToBalancedLines(g, mainText, fontMain, maxTitleW);
+		}
+
+		using (fontMain)
+		{
+			if (mainLines.Count == 0 && !string.IsNullOrWhiteSpace(mainText))
+			{
+				mainLines.Add(mainText);
+			}
+
+			float mainLineHeight = fontMain.GetHeight(g) * 1.15f;
+			float mainBlockHeight = Math.Max(mainLineHeight, mainLines.Count * mainLineHeight);
+
+			bool hasSub = !string.IsNullOrWhiteSpace(subText);
+			float subFontSize = Math.Max(11f * resScale, effectiveFontSize * 0.44f);
+			float subBlockHeight = 0f;
+			using (Font fontSub = new Font("Microsoft YaHei UI", subFontSize, FontStyle.Bold))
+			{
+				if (hasSub)
+				{
+					subBlockHeight = fontSub.GetHeight(g) * 1.25f + 16f * resScale;
+				}
+
+				float totalBlockH = mainBlockHeight + subBlockHeight;
+
+				float maxLineWidth = 0f;
+				foreach (var line in mainLines)
+				{
+					float lw = g.MeasureString(line, fontMain).Width;
+					if (lw > maxLineWidth) maxLineWidth = lw;
+				}
+				if (hasSub)
+				{
+					float subW = g.MeasureString(subText, fontSub).Width + 40f * resScale;
+					if (subW > maxLineWidth) maxLineWidth = subW;
+				}
+				maxLineWidth = Math.Min(w * 0.94f, maxLineWidth);
+
+				string pos = item.PositionPreset ?? "居中偏下";
+				float targetCenterX;
+				float targetCenterY;
+
+				if (pos.Contains("偏上"))
+				{
+					targetCenterX = w / 2f + item.OffsetX;
+					targetCenterY = h * 0.22f + item.OffsetY;
+				}
+				else if (pos.Contains("居中") || pos.Contains("中央"))
+				{
+					targetCenterX = w / 2f + item.OffsetX;
+					targetCenterY = h * 0.50f + item.OffsetY;
+				}
+				else if (pos.Contains("左上"))
+				{
+					targetCenterX = maxLineWidth / 2f + 40f * resScale + item.OffsetX;
+					targetCenterY = totalBlockH / 2f + 40f * resScale + item.OffsetY;
+				}
+				else if (pos.Contains("右上"))
+				{
+					targetCenterX = w - maxLineWidth / 2f - 40f * resScale + item.OffsetX;
+					targetCenterY = totalBlockH / 2f + 40f * resScale + item.OffsetY;
+				}
+				else if (pos.Contains("左下"))
+				{
+					targetCenterX = maxLineWidth / 2f + 40f * resScale + item.OffsetX;
+					targetCenterY = h - totalBlockH / 2f - 40f * resScale + item.OffsetY;
+				}
+				else if (pos.Contains("右下"))
+				{
+					targetCenterX = w - maxLineWidth / 2f - 40f * resScale + item.OffsetX;
+					targetCenterY = h - totalBlockH / 2f - 40f * resScale + item.OffsetY;
+				}
+				else if (pos.Contains("自定义"))
+				{
+					targetCenterX = item.OffsetX;
+					targetCenterY = item.OffsetY;
+				}
+				else
+				{
+					targetCenterX = w / 2f + item.OffsetX;
+					targetCenterY = h * 0.76f + item.OffsetY;
+				}
+
+				float blockTopY = targetCenterY - totalBlockH / 2f;
+				blockTopY = Math.Max(10f * resScale, Math.Min(h - totalBlockH - 10f * resScale, blockTopY));
+
+				switch (bannerIdx)
+				{
+					case 0:
+					{
+						int barH = (int)(totalBlockH + 110f * resScale);
+						int barY = (int)Math.Max(0, blockTopY - 55f * resScale);
+						using (LinearGradientBrush lgb = new LinearGradientBrush(new Rectangle(0, barY, w, barH), Color.FromArgb(0, 0, 0, 0), Color.FromArgb(195, 0, 0, 0), LinearGradientMode.Vertical))
+						{
+							lgb.SetBlendTriangularShape(0.5f);
+							g.FillRectangle(lgb, 0, barY, w, barH);
+						}
+						break;
+					}
+					case 1:
+					{
+						float cardW = Math.Min(w * 0.94f, maxLineWidth + 70f * resScale);
+						float cardH = totalBlockH + 36f * resScale;
+						RectangleF cardRect = new RectangleF(targetCenterX - cardW / 2f, blockTopY - 18f * resScale, cardW, cardH);
+						using (GraphicsPath cardPath = CreateRoundedRectanglePath(Rectangle.Round(cardRect), (int)(18f * resScale)))
+						using (Brush bgBrush = new SolidBrush(Color.FromArgb(253, 224, 71)))
+						using (Pen borderPen = new Pen(Color.FromArgb(245, 158, 11), 3f * resScale))
+						{
+							g.FillPath(bgBrush, cardPath);
+							g.DrawPath(borderPen, cardPath);
+						}
+						if (colorIdx == 0) mainTextColor = Color.FromArgb(15, 23, 42);
+						break;
+					}
+					case 2:
+					{
+						float cardW = Math.Min(w * 0.94f, maxLineWidth + 64f * resScale);
+						float cardH = totalBlockH + 34f * resScale;
+						RectangleF cardRect = new RectangleF(targetCenterX - cardW / 2f, blockTopY - 17f * resScale, cardW, cardH);
+						using (GraphicsPath cardPath = CreateRoundedRectanglePath(Rectangle.Round(cardRect), (int)(16f * resScale)))
+						using (Brush bgBrush = new SolidBrush(Color.FromArgb(215, 15, 23, 42)))
+						using (Pen borderPen = new Pen(Color.FromArgb(245, 158, 11), 2.5f * resScale))
+						{
+							g.FillPath(bgBrush, cardPath);
+							g.DrawPath(borderPen, cardPath);
+						}
+						break;
+					}
+					case 3:
+					{
+						float cardW = Math.Min(w * 0.94f, maxLineWidth + 64f * resScale);
+						float cardH = totalBlockH + 34f * resScale;
+						RectangleF cardRect = new RectangleF(targetCenterX - cardW / 2f, blockTopY - 17f * resScale, cardW, cardH);
+						using (GraphicsPath cardPath = CreateRoundedRectanglePath(Rectangle.Round(cardRect), (int)(16f * resScale)))
+						using (Brush bgBrush = new SolidBrush(Color.FromArgb(225, 10, 15, 26)))
+						using (Pen borderPen = new Pen(Color.FromArgb(34, 211, 238), 3f * resScale))
+						{
+							g.FillPath(bgBrush, cardPath);
+							g.DrawPath(borderPen, cardPath);
+						}
+						break;
+					}
+					case 5:
+					{
+						float cardW = Math.Min(w * 0.94f, maxLineWidth + 64f * resScale);
+						float cardH = totalBlockH + 34f * resScale;
+						RectangleF cardRect = new RectangleF(targetCenterX - cardW / 2f, blockTopY - 17f * resScale, cardW, cardH);
+						using (GraphicsPath cardPath = CreateRoundedRectanglePath(Rectangle.Round(cardRect), (int)(18f * resScale)))
+						using (Brush bgBrush = new SolidBrush(Color.FromArgb(215, 20, 20, 30)))
+						using (Pen borderPen = new Pen(Color.FromArgb(244, 114, 182), 2.5f * resScale))
+						{
+							g.FillPath(bgBrush, cardPath);
+							g.DrawPath(borderPen, cardPath);
+						}
+						break;
+					}
+					case 6:
+					{
+						float cardW = Math.Min(w * 0.94f, maxLineWidth + 70f * resScale);
+						float cardH = totalBlockH + 36f * resScale;
+						RectangleF cardRect = new RectangleF(targetCenterX - cardW / 2f, blockTopY - 18f * resScale, cardW, cardH);
+						using (GraphicsPath cardPath = CreateRoundedRectanglePath(Rectangle.Round(cardRect), (int)(16f * resScale)))
+						using (Brush bgBrush = new SolidBrush(Color.FromArgb(235, 225, 29, 72)))
+						using (Pen borderPen = new Pen(Color.FromArgb(254, 202, 202), 3f * resScale))
+						{
+							g.FillPath(bgBrush, cardPath);
+							g.DrawPath(borderPen, cardPath);
+						}
+						break;
+					}
+					case 7:
+					{
+						int barH = (int)(totalBlockH + 70f * resScale);
+						int barY = (int)Math.Max(0, blockTopY - 35f * resScale);
+						using (LinearGradientBrush lgb = new LinearGradientBrush(new Rectangle(0, barY, w, barH), Color.FromArgb(230, 15, 23, 42), Color.FromArgb(230, 30, 58, 138), LinearGradientMode.Horizontal))
+						{
+							g.FillRectangle(lgb, 0, barY, w, barH);
+						}
+						using (Pen cyanLine = new Pen(Color.FromArgb(56, 189, 248), 2f * resScale))
+						{
+							g.DrawLine(cyanLine, 0, barY, w, barY);
+							g.DrawLine(cyanLine, 0, barY + barH, w, barY + barH);
+						}
+						break;
+					}
+				}
+
+				for (int i = 0; i < mainLines.Count; i++)
+				{
+					string line = mainLines[i];
+					SizeF lineSz = g.MeasureString(line, fontMain);
+					float lineX = targetCenterX - lineSz.Width / 2f;
+					float lineY = blockTopY + i * mainLineHeight;
+
+					using (GraphicsPath path = new GraphicsPath())
+					{
+						float emSize = g.DpiY * fontMain.Size / 72f;
+						path.AddString(line, fontMain.FontFamily, (int)fontMain.Style, emSize, new PointF(lineX, lineY), StringFormat.GenericDefault);
+
+						if (hasShadow)
+						{
+							using (GraphicsPath shadowPath = (GraphicsPath)path.Clone())
+							using (Matrix mx = new Matrix())
+							{
+								mx.Translate(3.5f * resScale, 4.5f * resScale);
+								shadowPath.Transform(mx);
+								using (Brush shadowBrush = new SolidBrush(Color.FromArgb(170, 0, 0, 0)))
+								{
+									g.FillPath(shadowBrush, shadowPath);
+								}
+								if (strokeWidth > 0)
+								{
+									using (Pen shadowPen = new Pen(Color.FromArgb(130, 0, 0, 0), strokeWidth))
+									{
+										shadowPen.LineJoin = LineJoin.Round;
+										g.DrawPath(shadowPen, shadowPath);
+									}
+								}
+							}
+						}
+
+						if (strokeWidth > 0)
+						{
+							using (Pen pen = new Pen(strokeColor, strokeWidth))
+							{
+								pen.LineJoin = LineJoin.Round;
+								g.DrawPath(pen, path);
+							}
+						}
+
+						using (Brush fillBrush = new SolidBrush(mainTextColor))
+						{
+							g.FillPath(fillBrush, path);
+						}
+					}
+				}
+
+				if (hasSub)
+				{
+					float subY = blockTopY + mainBlockHeight + 10f * resScale;
+					SizeF subSz = g.MeasureString(subText, fontSub);
+
+					if (bannerIdx == 1 || colorIdx == 1)
+					{
+						float pillW = Math.Min(w * 0.90f, subSz.Width + 36f * resScale);
+						float pillH = subSz.Height + 10f * resScale;
+						RectangleF pillRect = new RectangleF(targetCenterX - pillW / 2f, subY, pillW, pillH);
+						using (GraphicsPath pillPath = CreateRoundedRectanglePath(Rectangle.Round(pillRect), (int)(pillH / 2f)))
+						using (Brush pillBrush = new SolidBrush(Color.FromArgb(220, 38, 38)))
+						{
+							g.FillPath(pillBrush, pillPath);
+						}
+						using (Brush whiteBrush = new SolidBrush(Color.White))
+						using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+						{
+							g.DrawString(subText, fontSub, whiteBrush, pillRect, sf);
+						}
+					}
+					else
+					{
+						float subX = targetCenterX - subSz.Width / 2f;
+						using (Brush subShadow = new SolidBrush(Color.FromArgb(180, 0, 0, 0)))
+						using (Brush subBrush = new SolidBrush(Color.FromArgb(241, 245, 249)))
+						{
+							g.DrawString(subText, fontSub, subShadow, subX + 1.5f * resScale, subY + 2f * resScale);
+							g.DrawString(subText, fontSub, subBrush, subX, subY);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	private void RenderSingleImageOverlay(Graphics g, CutOverlayItem item, int w, int h)
+	{
+		if (item == null || string.IsNullOrEmpty(item.ImagePath) || !File.Exists(item.ImagePath)) return;
+		Image img = GetOrCreateOverlayImage(item.ImagePath);
+		if (img == null) return;
+
+		float scale = Math.Max(0.1f, Math.Min(4.0f, (float)item.ScalePercent / 100.0f));
+		float baseScale = Math.Max(0.35f, (float)w / 1920f);
+		float destW = img.Width * scale * baseScale;
+		float destH = img.Height * scale * baseScale;
+
+		float destX = 30 * baseScale;
+		float destY = 30 * baseScale;
+		int padX = (int)(30 * baseScale);
+		int padY = (int)(30 * baseScale);
+
+		string pos = item.PositionPreset ?? "右下角";
+		if (pos.Contains("左上"))
+		{
+			destX = padX + item.OffsetX;
+			destY = padY + item.OffsetY;
+		}
+		else if (pos.Contains("右上"))
+		{
+			destX = w - destW - padX + item.OffsetX;
+			destY = padY + item.OffsetY;
+		}
+		else if (pos.Contains("偏上"))
+		{
+			destX = (w - destW) / 2f + item.OffsetX;
+			destY = padY + (h * 0.08f) + item.OffsetY;
+		}
+		else if (pos.Contains("居中") || pos.Contains("中央"))
+		{
+			destX = (w - destW) / 2f + item.OffsetX;
+			destY = (h - destH) / 2f + item.OffsetY;
+		}
+		else if (pos.Contains("左下"))
+		{
+			destX = padX + item.OffsetX;
+			destY = h - destH - padY + item.OffsetY;
+		}
+		else if (pos.Contains("偏下"))
+		{
+			destX = (w - destW) / 2f + item.OffsetX;
+			destY = h - destH - padY - (h * 0.08f) + item.OffsetY;
+		}
+		else if (pos.Contains("右下"))
+		{
+			destX = w - destW - padX + item.OffsetX;
+			destY = h - destH - padY + item.OffsetY;
+		}
+		else
+		{
+			destX = item.OffsetX;
+			destY = item.OffsetY;
+		}
+
+		float alpha = Math.Max(0.05f, Math.Min(1.0f, item.OpacityPercent / 100.0f));
+		using (ImageAttributes attr = new ImageAttributes())
+		{
+			ColorMatrix matrix = new ColorMatrix { Matrix33 = alpha };
+			attr.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+			Rectangle destRect = new Rectangle((int)destX, (int)destY, Math.Max(1, (int)destW), Math.Max(1, (int)destH));
+			g.DrawImage(img, destRect, 0, 0, img.Width, img.Height, GraphicsUnit.Pixel, attr);
+		}
+	}
+
+	private void RenderAllOverlaysOnBitmap(Bitmap bmp, double timeSec, bool forcePreviewSelected = false)
+	{
+		if (bmp == null || _cutEditOverlays.Count == 0) return;
+		int w = bmp.Width;
+		int h = bmp.Height;
 
 		using (Graphics g = Graphics.FromImage(bmp))
 		{
@@ -4175,195 +8096,38 @@ internal sealed class MainForm : Form
 			g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 			g.InterpolationMode = InterpolationMode.HighQualityBicubic;
 
-			int w = bmp.Width;
-			int h = bmp.Height;
-
-			switch (styleIndex)
+			if (forcePreviewSelected && _selectedOverlay != null)
 			{
-				case 0: // 🎬 电影宽银幕质感
+				if (_selectedOverlay.Enabled)
 				{
-					int barH = (int)(h * 0.28f);
-					int barY = (h - barH) / 2;
-					using (LinearGradientBrush lgb = new LinearGradientBrush(new Rectangle(0, barY, w, barH), Color.FromArgb(0, 0, 0, 0), Color.FromArgb(170, 0, 0, 0), LinearGradientMode.Vertical))
-					{
-						lgb.SetBlendTriangularShape(0.5f);
-						g.FillRectangle(lgb, 0, barY, w, barH);
-					}
-
-					float titleSize = Math.Max(18f, h * 0.052f * fontScale);
-					using (Font fontMain = new Font("Microsoft YaHei UI", titleSize, FontStyle.Bold))
-					using (Brush shadowBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
-					using (Brush whiteBrush = new SolidBrush(Color.White))
-					using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-					{
-						RectangleF mainRect = new RectangleF(0, barY + barH * 0.15f, w, barH * 0.4f);
-						RectangleF shadowRect = mainRect;
-						shadowRect.Offset(2, 2);
-						g.DrawString(mainText, fontMain, shadowBrush, shadowRect, sf);
-						g.DrawString(mainText, fontMain, whiteBrush, mainRect, sf);
-
-						float lineY = barY + barH * 0.58f;
-						using (Pen goldPen = new Pen(Color.FromArgb(234, 179, 8), 2f))
-						{
-							g.DrawLine(goldPen, w / 2 - 120, lineY, w / 2 + 120, lineY);
-						}
-
-						float subSize = Math.Max(12f, h * 0.024f * fontScale);
-						using (Font fontSub = new Font("Microsoft YaHei UI", subSize, FontStyle.Regular))
-						using (Brush subBrush = new SolidBrush(Color.FromArgb(226, 232, 240)))
-						{
-							RectangleF subRect = new RectangleF(0, barY + barH * 0.62f, w, barH * 0.3f);
-							g.DrawString(subText, fontSub, subBrush, subRect, sf);
-						}
-					}
-					break;
+					if (_selectedOverlay.Type == OverlayItemType.Text)
+						RenderSingleTextOverlay(g, _selectedOverlay, w, h);
+					else if (_selectedOverlay.Type == OverlayItemType.Image)
+						RenderSingleImageOverlay(g, _selectedOverlay, w, h);
 				}
-				case 1: // 🔥 短视频醒目大字
+				return;
+			}
+
+			foreach (var item in _cutEditOverlays)
+			{
+				if (!item.Enabled) continue;
+				if (timeSec < item.StartSeconds || timeSec > (item.StartSeconds + item.Duration)) continue;
+
+				if (item.Type == OverlayItemType.Text)
 				{
-					float titleSize = Math.Max(22f, h * 0.075f * fontScale);
-					using (Font fontMain = new Font("Impact", titleSize, FontStyle.Bold))
-					using (GraphicsPath path = new GraphicsPath())
-					using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-					{
-						RectangleF rect = new RectangleF(0, h * 0.35f, w, h * 0.2f);
-						path.AddString(mainText, fontMain.FontFamily, (int)FontStyle.Bold, g.DpiY * titleSize / 72f, rect, sf);
-
-						using (Pen strokePen = new Pen(Color.Black, Math.Max(6f, h * 0.016f)))
-						{
-							strokePen.LineJoin = LineJoin.Round;
-							g.DrawPath(strokePen, path);
-						}
-						using (Brush yellowBrush = new SolidBrush(Color.FromArgb(253, 224, 71)))
-						{
-							g.FillPath(yellowBrush, path);
-						}
-
-						float subSize = Math.Max(12f, h * 0.028f * fontScale);
-						using (Font fontSub = new Font("Microsoft YaHei UI", subSize, FontStyle.Bold))
-						{
-							SizeF subSz = g.MeasureString(subText, fontSub);
-							RectangleF pillRect = new RectangleF((w - subSz.Width - 40) / 2f, h * 0.58f, subSz.Width + 40, subSz.Height + 14);
-							using (GraphicsPath pillPath = CreateRoundedRectanglePath(Rectangle.Round(pillRect), (int)(pillRect.Height / 2)))
-							using (Brush redBrush = new SolidBrush(Color.FromArgb(220, 38, 38)))
-							{
-								g.FillPath(redBrush, pillPath);
-							}
-							using (Brush whiteBrush = new SolidBrush(Color.White))
-							{
-								g.DrawString(subText, fontSub, whiteBrush, pillRect, sf);
-							}
-						}
-					}
-					break;
+					RenderSingleTextOverlay(g, item, w, h);
 				}
-				case 2: // 📰 纪实下三分之一条幅
+				else if (item.Type == OverlayItemType.Image)
 				{
-					int cardW = (int)(w * 0.55f);
-					int cardH = (int)(h * 0.16f);
-					int cardX = (int)(w * 0.06f);
-					int cardY = (int)(h * 0.74f);
-					Rectangle cardRect = new Rectangle(cardX, cardY, cardW, cardH);
-
-					using (GraphicsPath cardPath = CreateRoundedRectanglePath(cardRect, 8))
-					using (Brush cardBg = new SolidBrush(Color.FromArgb(220, 15, 23, 42)))
-					using (Pen cardBorder = new Pen(Color.FromArgb(56, 189, 248), 1.5f))
-					{
-						g.FillPath(cardBg, cardPath);
-						g.DrawPath(cardBorder, cardPath);
-					}
-
-					using (Brush barBrush = new SolidBrush(Color.FromArgb(56, 189, 248)))
-					{
-						g.FillRectangle(barBrush, cardX, cardY + 6, 8, cardH - 12);
-					}
-
-					float titleSize = Math.Max(14f, h * 0.038f * fontScale);
-					using (Font fontMain = new Font("Microsoft YaHei UI", titleSize, FontStyle.Bold))
-					using (Brush whiteBrush = new SolidBrush(Color.White))
-					{
-						g.DrawString(mainText, fontMain, whiteBrush, cardX + 24, cardY + cardH * 0.16f);
-					}
-
-					float subSize = Math.Max(11f, h * 0.022f * fontScale);
-					using (Font fontSub = new Font("Microsoft YaHei UI", subSize, FontStyle.Regular))
-					using (Brush subBrush = new SolidBrush(Color.FromArgb(148, 163, 184)))
-					{
-						g.DrawString(subText, fontSub, subBrush, cardX + 24, cardY + cardH * 0.58f);
-					}
-					break;
-				}
-				case 3: // 📖 极简杂志文艺风
-				{
-					int boxW = (int)(w * 0.65f);
-					int boxH = (int)(h * 0.32f);
-					int boxX = (w - boxW) / 2;
-					int boxY = (h - boxH) / 2;
-					Rectangle boxRect = new Rectangle(boxX, boxY, boxW, boxH);
-
-					using (Brush glassBrush = new SolidBrush(Color.FromArgb(120, 15, 23, 42)))
-					{
-						g.FillRectangle(glassBrush, boxRect);
-					}
-					using (Pen framePen = new Pen(Color.FromArgb(241, 245, 249), 2f))
-					{
-						g.DrawRectangle(framePen, boxRect);
-						g.DrawRectangle(framePen, boxX + 6, boxY + 6, boxW - 12, boxH - 12);
-					}
-
-					float titleSize = Math.Max(16f, h * 0.046f * fontScale);
-					using (Font fontMain = new Font("Microsoft YaHei UI", titleSize, FontStyle.Bold))
-					using (Brush whiteBrush = new SolidBrush(Color.White))
-					using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-					{
-						RectangleF mainRect = new RectangleF(boxX, boxY + boxH * 0.2f, boxW, boxH * 0.35f);
-						g.DrawString(mainText, fontMain, whiteBrush, mainRect, sf);
-
-						float subSize = Math.Max(11f, h * 0.022f * fontScale);
-					using (Font fontSub = new Font("Microsoft YaHei UI", subSize, FontStyle.Regular))
-					using (Brush subBrush = new SolidBrush(Color.FromArgb(203, 213, 225)))
-					{
-						RectangleF subRect = new RectangleF(boxX, boxY + boxH * 0.6f, boxW, boxH * 0.25f);
-						g.DrawString("— " + subText + " —", fontSub, subBrush, subRect, sf);
-					}
-					}
-					break;
-				}
-				case 4: // ⚡ 动感视觉重击
-				{
-					int pillW = (int)(w * 0.72f);
-					int pillH = (int)(h * 0.24f);
-					int pillX = (w - pillW) / 2;
-					int pillY = (h - pillH) / 2;
-					Rectangle pillRect = new Rectangle(pillX, pillY, pillW, pillH);
-
-					using (GraphicsPath bgPath = CreateRoundedRectanglePath(pillRect, 16))
-					using (Brush bgBrush = new SolidBrush(Color.FromArgb(220, 10, 15, 26)))
-					using (Pen borderPen = new Pen(Color.FromArgb(34, 211, 238), 2.5f))
-					{
-						g.FillPath(bgBrush, bgPath);
-						g.DrawPath(borderPen, bgPath);
-					}
-
-					float titleSize = Math.Max(18f, h * 0.055f * fontScale);
-					using (Font fontMain = new Font("Microsoft YaHei UI", titleSize, FontStyle.Bold | FontStyle.Italic))
-					using (Brush cyanBrush = new SolidBrush(Color.FromArgb(34, 211, 238)))
-					using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-					{
-						RectangleF mainRect = new RectangleF(pillX, pillY + pillH * 0.15f, pillW, pillH * 0.45f);
-						g.DrawString("⚡ " + mainText, fontMain, cyanBrush, mainRect, sf);
-
-						float subSize = Math.Max(12f, h * 0.024f * fontScale);
-						using (Font fontSub = new Font("Microsoft YaHei UI", subSize, FontStyle.Bold))
-						using (Brush whiteBrush = new SolidBrush(Color.White))
-						{
-							RectangleF subRect = new RectangleF(pillX, pillY + pillH * 0.62f, pillW, pillH * 0.28f);
-							g.DrawString(subText, fontSub, whiteBrush, subRect, sf);
-						}
-					}
-					break;
+					RenderSingleImageOverlay(g, item, w, h);
 				}
 			}
 		}
+	}
+
+	private void RenderTitleOverlayOnBitmap(Bitmap bmp)
+	{
+		RenderAllOverlaysOnBitmap(bmp, _cutEditCurrentPos, forcePreviewSelected: true);
 	}
 
 	private void StartExportEditedVideo()
@@ -4385,9 +8149,12 @@ internal sealed class MainForm : Form
 
 		var kept = _cutEditSegments.Where(s => s.IsKept).ToList();
 		double totalKept = kept.Sum(s => s.Duration);
-		string titleInfo = (_cutEditTitleEnabled?.Checked == true)
-			? $"已启用片头 (持续 {_cutEditTitleDuration?.Value ?? 5}秒, 模板: {_cutEditTitleStyle?.Text ?? "电影感"})"
-			: "未启用片头";
+		var activeOverlays = _cutEditOverlays.Where(o => o.Enabled).ToList();
+		int txtCount = activeOverlays.Count(o => o.Type == OverlayItemType.Text);
+		int imgCount = activeOverlays.Count(o => o.Type == OverlayItemType.Image);
+		string overlayInfo = (activeOverlays.Count > 0)
+			? $"已启用 {activeOverlays.Count} 项图文包装 (文案: {txtCount} 条, 贴图/二维码: {imgCount} 张)"
+			: "未启用图文包装";
 		string audioInfo = _cutEditAudioMuted
 			? "A1 音频已静音 (不输出声音)"
 			: $"A1 声音正常 (音量 {_cutEditAudioVolume}%)";
@@ -4396,7 +8163,7 @@ internal sealed class MainForm : Form
 			$"• 素材源: {Path.GetFileName(_cutEditSourcePath)} ({_cutEditWidth}x{_cutEditHeight})\n" +
 			$"• 剪辑分段: 共 {_cutEditSegments.Count} 段 (保留 {kept.Count} 段，已剔除 {_cutEditSegments.Count - kept.Count} 段)\n" +
 			$"• 预计成片时长: {FormatDuration(totalKept)}\n" +
-			$"• 片头设计: {titleInfo}\n" +
+			$"• 图文与贴片: {overlayInfo}\n" +
 			$"• 音频轨道: {audioInfo}";
 		_deliverProjectSummary.ForeColor = _isDarkMode ? Color.White : Color.Black;
 		if (_deliverStartButton != null) _deliverStartButton.Enabled = kept.Count > 0;
@@ -4411,7 +8178,7 @@ internal sealed class MainForm : Form
 			return;
 		}
 
-		var kept = _cutEditSegments.Where(s => s.IsKept).ToList();
+		var kept = _cutEditSegments.Where(s => s.IsKept).OrderBy(s => s.TimelineStartSeconds).ToList();
 		if (kept.Count == 0)
 		{
 			MessageBox.Show(this, "所有切片均已被剔除，请至少保留一个片段后再交付！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -4462,11 +8229,10 @@ internal sealed class MainForm : Form
 		ThreadPool.QueueUserWorkItem(delegate
 		{
 			string tempTitlePng = null;
+			List<string> tempOverlayPngs = new List<string>();
 			try
 			{
-				bool titleEnabled = false;
-				double titleDuration = 5.0;
-				bool isOverlay = true;
+				List<CutOverlayItem> exportOverlays = new List<CutOverlayItem>();
 				int outResIndex = 0;
 				int qualityIndex = 1;
 				int fpsIndex = 0;
@@ -4476,9 +8242,7 @@ internal sealed class MainForm : Form
 
 				Invoke((MethodInvoker)delegate
 				{
-					titleEnabled = _cutEditTitleEnabled?.Checked == true;
-					titleDuration = (double)(_cutEditTitleDuration?.Value ?? 5m);
-					isOverlay = _cutEditTitleOverlayRadio?.Checked == true;
+					exportOverlays = _cutEditOverlays.Where(o => o.Enabled && o.Duration > 0.0).Select(o => o.Clone()).ToList();
 					outResIndex = _deliverResolutionCombo?.SelectedIndex ?? 0;
 					qualityIndex = _deliverQualityCombo?.SelectedIndex ?? 1;
 					fpsIndex = _deliverFpsCombo?.SelectedIndex ?? 0;
@@ -4493,18 +8257,57 @@ internal sealed class MainForm : Form
 				else if (outResIndex == 4) { targetW = 1080; targetH = 1920; }
 				else if (outResIndex == 5) { targetW = 1080; targetH = 1080; }
 
-				if (titleEnabled)
+				for (int oi = 0; oi < exportOverlays.Count; oi++)
 				{
-					tempTitlePng = Path.Combine(Path.GetTempPath(), "CutEdit_Title_" + Guid.NewGuid().ToString("N") + ".png");
-					using (Bitmap titleBmp = new Bitmap(targetW, targetH, PixelFormat.Format32bppArgb))
+					var olItem = exportOverlays[oi];
+					string tempOlPng = Path.Combine(Path.GetTempPath(), $"CutEdit_ExportOl_{oi}_" + Guid.NewGuid().ToString("N") + ".png");
+					tempOverlayPngs.Add(tempOlPng);
+					using (Bitmap olBmp = new Bitmap(targetW, targetH, PixelFormat.Format32bppArgb))
 					{
-						using (Graphics g = Graphics.FromImage(titleBmp))
+						using (Graphics g = Graphics.FromImage(olBmp))
 						{
 							g.Clear(Color.Transparent);
+							g.SmoothingMode = SmoothingMode.AntiAlias;
+							g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+							g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+
+							if (olItem.Type == OverlayItemType.Text)
+							{
+								RenderSingleTextOverlay(g, olItem, targetW, targetH);
+							}
+							else if (olItem.Type == OverlayItemType.Image)
+							{
+								RenderSingleImageOverlay(g, olItem, targetW, targetH);
+							}
 						}
-						RenderTitleOverlayOnBitmap(titleBmp);
-						titleBmp.Save(tempTitlePng, ImageFormat.Png);
+						olBmp.Save(tempOlPng, ImageFormat.Png);
 					}
+				}
+
+				List<string> inputs = new List<string>();
+				Dictionary<string, int> srcMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+				foreach (var s in kept)
+				{
+					string sp = !string.IsNullOrEmpty(s.SourcePath) ? s.SourcePath : _cutEditSourcePath;
+					if (!string.IsNullOrEmpty(sp) && !srcMap.ContainsKey(sp))
+					{
+						int idx = inputs.Count;
+						srcMap[sp] = idx;
+						if (IsImage(sp) || s.MediaType == "image")
+						{
+							inputs.Add($"-loop 1 -t 600 -i {QuoteArg(sp)}");
+						}
+						else
+						{
+							inputs.Add($"-i {QuoteArg(sp)}");
+						}
+					}
+				}
+				if (inputs.Count == 0 && !string.IsNullOrEmpty(_cutEditSourcePath))
+				{
+					srcMap[_cutEditSourcePath] = 0;
+					inputs.Add($"-i {QuoteArg(_cutEditSourcePath)}");
 				}
 
 				StringBuilder fg = new StringBuilder();
@@ -4514,13 +8317,33 @@ internal sealed class MainForm : Form
 				for (int i = 0; i < kept.Count; i++)
 				{
 					var s = kept[i];
+					string sp = !string.IsNullOrEmpty(s.SourcePath) ? s.SourcePath : _cutEditSourcePath;
+					int inIdx = (sp != null && srcMap.ContainsKey(sp)) ? srcMap[sp] : 0;
+					bool isImg = (sp != null && IsImage(sp)) || s.MediaType == "image";
 					string st = s.StartSeconds.ToString("0.000", CultureInfo.InvariantCulture);
 					string et = s.EndSeconds.ToString("0.000", CultureInfo.InvariantCulture);
-					fg.Append($"[0:v]trim=start={st}:end={et},setpts=PTS-STARTPTS[v{i}];");
+					string segDurStr = s.Duration.ToString("0.000", CultureInfo.InvariantCulture);
+
+					if (isImg)
+					{
+						fg.Append($"[{inIdx}:v]trim=duration={segDurStr},setpts=PTS-STARTPTS,scale={targetW}:{targetH}:force_original_aspect_ratio=decrease,pad={targetW}:{targetH}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v{i}];");
+					}
+					else
+					{
+						fg.Append($"[{inIdx}:v]trim=start={st}:end={et},setpts=PTS-STARTPTS,scale={targetW}:{targetH}:force_original_aspect_ratio=decrease,pad={targetW}:{targetH}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v{i}];");
+					}
+
 					if (outputAudio)
 					{
-						string volFilter = (Math.Abs(volFactor - 1.0f) > 0.01f) ? $",volume={volFactor.ToString("0.00", CultureInfo.InvariantCulture)}" : "";
-						fg.Append($"[0:a]atrim=start={st}:end={et},asetpts=PTS-STARTPTS{volFilter}[a{i}];");
+						if (isImg)
+						{
+							fg.Append($"aevalsrc=0:d={segDurStr}:s=44100[a{i}];");
+						}
+						else
+						{
+							string volFilter = (Math.Abs(volFactor - 1.0f) > 0.01f) ? $",volume={volFactor.ToString("0.00", CultureInfo.InvariantCulture)}" : "";
+							fg.Append($"[{inIdx}:a]atrim=start={st}:end={et},asetpts=PTS-STARTPTS{volFilter}[a{i}];");
+						}
 					}
 				}
 
@@ -4545,30 +8368,29 @@ internal sealed class MainForm : Form
 					curA = "[a0]";
 				}
 
-				if (outResIndex != 0)
-				{
-					fg.Append($"{curV}scale={targetW}:{targetH}:force_original_aspect_ratio=decrease,pad={targetW}:{targetH}:(ow-iw)/2:(oh-ih)/2:black[v_scaled];");
-					curV = "[v_scaled]";
-				}
-
 				string finalV = curV;
-				List<string> inputs = new List<string>();
-				inputs.Add($"-i {QuoteArg(_cutEditSourcePath)}");
-
-				if (titleEnabled && File.Exists(tempTitlePng))
+				if (exportOverlays.Count > 0)
 				{
-					inputs.Add($"-i {QuoteArg(tempTitlePng)}");
-					string durStr = titleDuration.ToString("0.0", CultureInfo.InvariantCulture);
-					fg.Append($"[1:v]format=rgba[title_in];");
-					fg.Append($"{curV}[title_in]overlay=0:0:enable='between(t,0,{durStr})'[v_title]");
-					finalV = "[v_title]";
-				}
-				else
-				{
-					if (fg.Length > 0 && fg[fg.Length - 1] == ';')
+					for (int oi = 0; oi < exportOverlays.Count; oi++)
 					{
-						fg.Remove(fg.Length - 1, 1);
+						var olItem = exportOverlays[oi];
+						string tempOlPng = (oi < tempOverlayPngs.Count) ? tempOverlayPngs[oi] : null;
+						if (string.IsNullOrEmpty(tempOlPng) || !File.Exists(tempOlPng)) continue;
+
+						int olInIdx = inputs.Count;
+						inputs.Add($"-i {QuoteArg(tempOlPng)}");
+						string startStr = olItem.StartSeconds.ToString("0.00", CultureInfo.InvariantCulture);
+						string endStr = (olItem.StartSeconds + olItem.Duration).ToString("0.00", CultureInfo.InvariantCulture);
+
+						fg.Append($"[{olInIdx}:v]format=rgba[ol_in_{oi}];");
+						fg.Append($"{curV}[ol_in_{oi}]overlay=0:0:enable='between(t,{startStr},{endStr})'[v_ol_{oi}];");
+						curV = $"[v_ol_{oi}]";
 					}
+					finalV = curV;
+				}
+				if (fg.Length > 0 && fg[fg.Length - 1] == ';')
+				{
+					fg.Remove(fg.Length - 1, 1);
 				}
 
 				int crf = 19;
@@ -4666,6 +8488,7 @@ internal sealed class MainForm : Form
 						lvi.SubItems.Add(targetOutPath);
 						_deliverHistoryList.Items.Insert(0, lvi);
 						lvi.Selected = true;
+						InitOrRefreshDeliverPreview();
 
 						DialogResult dr = MessageBox.Show(this, $"交付成片已成功渲染！\n\n成片保存路径:\n{targetOutPath}\n\n文件大小: {mb:0.0} MB | 时长: {FormatDuration(totalDur)}\n\n是否立即打开所在文件夹查看？", "交付成片完成", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
 						if (dr == DialogResult.Yes)
@@ -4692,6 +8515,13 @@ internal sealed class MainForm : Form
 			finally
 			{
 				TryDelete(tempTitlePng);
+				if (tempOverlayPngs != null)
+				{
+					foreach (var f in tempOverlayPngs)
+					{
+						TryDelete(f);
+					}
+				}
 			}
 		});
 	}
@@ -4740,28 +8570,595 @@ internal sealed class MainForm : Form
 		SwitchToWorkspace(5);
 	}
 
-	private void SendLatestSplitScreenToCutEditor()
+	private void DeliverMediaElement_MediaOpened(object sender, System.Windows.RoutedEventArgs e)
+	{
+		BeginInvoke((MethodInvoker)delegate
+		{
+			if (_deliverIsPlaying && _deliverMediaElement != null)
+			{
+				try { _deliverMediaElement.Play(); } catch { }
+			}
+			UpdateDeliverTimeLabel();
+		});
+	}
+
+	private void DeliverMediaElement_MediaEnded(object sender, System.Windows.RoutedEventArgs e)
+	{
+		BeginInvoke((MethodInvoker)delegate
+		{
+			PauseDeliverPlayback();
+			_deliverCurrentPos = 0.0;
+			UpdateDeliverTimeLabel();
+			UpdateDeliverPreviewFrame(0.0);
+		});
+	}
+
+	private void DeliverMediaElement_MediaFailed(object sender, System.Windows.ExceptionRoutedEventArgs e)
+	{
+		BeginInvoke((MethodInvoker)delegate
+		{
+			PauseDeliverPlayback();
+			UpdateDeliverPreviewFrame(_deliverCurrentPos);
+		});
+	}
+
+	internal void InitOrRefreshDeliverPreview(bool forceReload = false)
+	{
+		if (_deliverPreviewBox == null) return;
+
+		var kept = _cutEditSegments?.Where(s => s.IsKept).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
+		bool hasContent = (kept.Count > 0) || (!string.IsNullOrEmpty(_cutEditSourcePath) && File.Exists(_cutEditSourcePath));
+
+		if (!hasContent)
+		{
+			if (_deliverIsPlaying) PauseDeliverPlayback();
+			if (_deliverEmptyPlaceholder != null) _deliverEmptyPlaceholder.Visible = true;
+			if (_deliverPreviewBox != null) _deliverPreviewBox.Visible = false;
+			if (_deliverElementHost != null) _deliverElementHost.Visible = false;
+			if (_deliverPlayPauseButton != null) _deliverPlayPauseButton.Enabled = false;
+			if (_deliverTimeScrubber != null) _deliverTimeScrubber.Enabled = false;
+			if (_deliverTimeLabel != null) _deliverTimeLabel.Text = "00:00.0 / 00:00.0";
+			return;
+		}
+
+		if (_deliverEmptyPlaceholder != null) _deliverEmptyPlaceholder.Visible = false;
+		if (_deliverPlayPauseButton != null) _deliverPlayPauseButton.Enabled = true;
+		if (_deliverTimeScrubber != null) _deliverTimeScrubber.Enabled = true;
+
+		_deliverDuration = kept.Count > 0 ? kept.Sum(s => s.Duration) : _cutEditDuration;
+		if (_deliverDuration <= 0.05 && !string.IsNullOrEmpty(_cutEditSourcePath) && File.Exists(_cutEditSourcePath))
+		{
+			_deliverDuration = GetMediaDuration(_cutEditSourcePath);
+		}
+		if (forceReload || _deliverCurrentPos > _deliverDuration)
+		{
+			_deliverCurrentPos = 0.0;
+		}
+
+		UpdateDeliverTimeLabel();
+		if (!_deliverIsPlaying)
+		{
+			UpdateDeliverPreviewFrame(_deliverCurrentPos);
+		}
+	}
+
+	internal void ToggleDeliverPlayPause()
+	{
+		if (_deliverIsPlaying)
+		{
+			PauseDeliverPlayback();
+		}
+		else
+		{
+			StartDeliverPlayback();
+		}
+	}
+
+	private void StartDeliverPlayback()
+	{
+		if (_deliverDuration <= 0.05) return;
+		if (_deliverCurrentPos >= _deliverDuration - 0.05)
+		{
+			_deliverCurrentPos = 0.0;
+		}
+		_deliverIsPlaying = true;
+		if (_deliverPlayPauseButton != null) _deliverPlayPauseButton.Text = "⏸ 暂停 (空格)";
+		if (_deliverPopoutForm != null && !_deliverPopoutForm.IsDisposed)
+		{
+			_deliverPopoutForm.UpdateTimeAndScrubber(_deliverCurrentPos, _deliverDuration, true);
+		}
+		_deliverPlaybackStartPos = _deliverCurrentPos;
+		_deliverPlaybackSw.Restart();
+
+		if (_deliverPlayTimer == null)
+		{
+			_deliverPlayTimer = new System.Windows.Forms.Timer { Interval = 33 };
+			_deliverPlayTimer.Tick += DeliverPlayTimer_Tick;
+		}
+		_deliverPlayTimer.Start();
+		SyncDeliverPlaybackSegment();
+	}
+
+	private void PauseDeliverPlayback()
+	{
+		_deliverIsPlaying = false;
+		_deliverPlaybackSw.Stop();
+		_deliverPlayTimer?.Stop();
+		if (_deliverPlayPauseButton != null) _deliverPlayPauseButton.Text = "▶ 播放 (空格)";
+		if (_deliverPopoutForm != null && !_deliverPopoutForm.IsDisposed)
+		{
+			_deliverPopoutForm.UpdateTimeAndScrubber(_deliverCurrentPos, _deliverDuration, false);
+		}
+		try { _deliverMediaElement?.Pause(); } catch { }
+		if (_deliverElementHost != null)
+		{
+			_deliverElementHost.Visible = false;
+		}
+		if (_deliverPreviewBox != null)
+		{
+			_deliverPreviewBox.Visible = true;
+			_deliverPreviewBox.BringToFront();
+		}
+		if (_deliverPopoutForm != null && !_deliverPopoutForm.IsDisposed && _deliverPopoutForm.PreviewBox != null)
+		{
+			_deliverPopoutForm.PreviewBox.Visible = true;
+			_deliverPopoutForm.PreviewBox.BringToFront();
+		}
+		UpdateDeliverPreviewFrame(_deliverCurrentPos);
+	}
+
+	private void DeliverPlayTimer_Tick(object sender, EventArgs e)
+	{
+		if (!_deliverIsPlaying) return;
+		double elapsed = _deliverPlaybackSw.Elapsed.TotalSeconds;
+		_deliverCurrentPos = _deliverPlaybackStartPos + elapsed;
+		if (_deliverCurrentPos >= _deliverDuration)
+		{
+			_deliverCurrentPos = _deliverDuration;
+			PauseDeliverPlayback();
+			UpdateDeliverTimeLabel();
+			return;
+		}
+		UpdateDeliverTimeLabel();
+		SyncDeliverPlaybackSegment();
+	}
+
+	private void UpdateDeliverTimeLabel()
+	{
+		if (_deliverTimeLabel != null)
+		{
+			_deliverTimeLabel.Text = $"{FormatDuration(_deliverCurrentPos)} / {FormatDuration(_deliverDuration)}";
+		}
+		if (_deliverTimeScrubber != null && _deliverDuration > 0)
+		{
+			int val = (int)Math.Max(0, Math.Min(1000, (_deliverCurrentPos / _deliverDuration * 1000.0)));
+			_deliverTimeScrubber.Value = val;
+		}
+		if (_deliverPopoutForm != null && !_deliverPopoutForm.IsDisposed)
+		{
+			_deliverPopoutForm.UpdateTimeAndScrubber(_deliverCurrentPos, _deliverDuration, _deliverIsPlaying);
+		}
+	}
+
+	private void DeliverTimeScrubber_Scroll(object sender, EventArgs e)
+	{
+		if (_deliverDuration <= 0.05) return;
+		_deliverCurrentPos = (_deliverTimeScrubber.Value / 1000.0) * _deliverDuration;
+		_deliverPlaybackStartPos = _deliverCurrentPos;
+		_deliverPlaybackSw.Restart();
+		UpdateDeliverTimeLabel();
+		if (_deliverIsPlaying)
+		{
+			SyncDeliverPlaybackSegment();
+		}
+		else
+		{
+			UpdateDeliverPreviewFrame(_deliverCurrentPos);
+		}
+	}
+
+	private void DeliverTimeScrubber_MouseDown(object sender, MouseEventArgs e)
+	{
+		_deliverScrubberWasPlaying = _deliverIsPlaying;
+		if (_deliverIsPlaying)
+		{
+			try { _deliverMediaElement?.Pause(); } catch { }
+			_deliverPlaybackSw.Stop();
+			_deliverPlayTimer?.Stop();
+		}
+	}
+
+	private void DeliverTimeScrubber_MouseUp(object sender, MouseEventArgs e)
+	{
+		if (_deliverScrubberWasPlaying)
+		{
+			StartDeliverPlayback();
+		}
+	}
+
+	private void SyncDeliverPlaybackSegment()
+	{
+		var kept = _cutEditSegments?.Where(s => s.IsKept).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
+		CutSegment activeSeg = null;
+		double tAccum = 0.0;
+		double segOffset = 0.0;
+
+		foreach (var s in kept)
+		{
+			if (_deliverCurrentPos >= tAccum && _deliverCurrentPos < tAccum + s.Duration)
+			{
+				activeSeg = s;
+				segOffset = _deliverCurrentPos - tAccum;
+				break;
+			}
+			tAccum += s.Duration;
+		}
+		if (activeSeg == null && kept.Count > 0)
+		{
+			activeSeg = kept.Last();
+			segOffset = activeSeg.Duration;
+		}
+
+		string sp = (activeSeg != null && !string.IsNullOrEmpty(activeSeg.SourcePath)) ? activeSeg.SourcePath : _cutEditSourcePath;
+
+		if (activeSeg != null && (activeSeg.MediaType == "image" || (sp != null && IsImage(sp))))
+		{
+			try { _deliverMediaElement?.Pause(); } catch { }
+			UpdateDeliverPreviewFrame(_deliverCurrentPos);
+			return;
+		}
+
+		if (!string.IsNullOrEmpty(sp) && File.Exists(sp) && _deliverMediaElement != null)
+		{
+			try
+			{
+				Uri uri = new Uri(sp);
+				if (_deliverMediaElement.Source == null || !_deliverMediaElement.Source.Equals(uri))
+				{
+					_deliverMediaElement.Source = uri;
+				}
+				double inSrcSec = (activeSeg != null ? activeSeg.StartSeconds : 0.0) + segOffset;
+				TimeSpan targetPos = TimeSpan.FromSeconds(Math.Max(0.0, inSrcSec));
+				if (Math.Abs((_deliverMediaElement.Position - targetPos).TotalSeconds) > 0.35)
+				{
+					_deliverMediaElement.Position = targetPos;
+				}
+				_deliverMediaElement.Volume = _cutEditAudioMuted ? 0.0 : (_cutEditAudioVolume / 100.0);
+				_deliverMediaElement.IsMuted = _cutEditAudioMuted;
+
+				if (_deliverElementHost != null && !_deliverElementHost.Visible)
+				{
+					if (_deliverPreviewBox != null) _deliverPreviewBox.Visible = false;
+					if (_deliverPopoutForm != null && !_deliverPopoutForm.IsDisposed && _deliverPopoutForm.PreviewBox != null)
+					{
+						_deliverPopoutForm.PreviewBox.Visible = false;
+					}
+					_deliverElementHost.Visible = true;
+					_deliverElementHost.BringToFront();
+				}
+				_deliverMediaElement.Play();
+			}
+			catch { }
+		}
+		else
+		{
+			UpdateDeliverPreviewFrame(_deliverCurrentPos);
+		}
+	}
+
+	private void UpdateDeliverPreviewFrame(double timeSec)
+	{
+		if (_deliverPreviewBox == null) return;
+
+		var kept = _cutEditSegments?.Where(s => s.IsKept).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
+		CutSegment activeSeg = null;
+		double tAccum = 0.0;
+		double segOffset = 0.0;
+
+		foreach (var s in kept)
+		{
+			if (timeSec >= tAccum && timeSec < tAccum + s.Duration)
+			{
+				activeSeg = s;
+				segOffset = timeSec - tAccum;
+				break;
+			}
+			tAccum += s.Duration;
+		}
+		if (activeSeg == null && kept.Count > 0)
+		{
+			activeSeg = kept.Last();
+			segOffset = activeSeg.Duration;
+		}
+
+		string sp = (activeSeg != null && !string.IsNullOrEmpty(activeSeg.SourcePath)) ? activeSeg.SourcePath : _cutEditSourcePath;
+		if (string.IsNullOrEmpty(sp) || !File.Exists(sp)) return;
+
+		if (_deliverElementHost != null && _deliverElementHost.Visible)
+		{
+			_deliverElementHost.Visible = false;
+		}
+		if (_deliverPreviewBox != null)
+		{
+			_deliverPreviewBox.Visible = true;
+			_deliverPreviewBox.BringToFront();
+		}
+
+		bool isImg = (activeSeg != null && activeSeg.MediaType == "image") || IsImage(sp);
+		if (isImg)
+		{
+			try
+			{
+				byte[] bytes = File.ReadAllBytes(sp);
+				using (MemoryStream ms = new MemoryStream(bytes))
+				using (Bitmap origBmp = new Bitmap(ms))
+				{
+					Bitmap bmp = new Bitmap(origBmp);
+					RenderAllOverlaysOnBitmap(bmp, timeSec, forcePreviewSelected: false);
+					var old = _deliverPreviewBox.Image;
+					_deliverPreviewBox.Image = bmp;
+					old?.Dispose();
+				}
+			}
+			catch { }
+			return;
+		}
+
+		string ffmpeg = FindFfmpeg();
+		if (string.IsNullOrEmpty(ffmpeg)) return;
+
+		double inSourceSec = (activeSeg != null ? activeSeg.StartSeconds : 0.0) + segOffset;
+
+		// FAST IN-MEMORY COMPOSITING:
+		bool hasCachedBase = false;
+		Bitmap cachedBaseClone = null;
+		lock (_deliverBaseFrameLock)
+		{
+			if (_deliverCachedBaseFrame != null &&
+				string.Equals(_deliverCachedBaseFramePath, sp, StringComparison.OrdinalIgnoreCase) &&
+				Math.Abs(_deliverCachedBaseFrameTime - inSourceSec) < 0.08)
+			{
+				hasCachedBase = true;
+				cachedBaseClone = new Bitmap(_deliverCachedBaseFrame);
+			}
+		}
+
+		if (hasCachedBase && cachedBaseClone != null)
+		{
+			using (cachedBaseClone)
+			{
+				Bitmap fastBmp = new Bitmap(cachedBaseClone);
+				RenderAllOverlaysOnBitmap(fastBmp, timeSec, forcePreviewSelected: false);
+				var old = _deliverPreviewBox.Image;
+				_deliverPreviewBox.Image = fastBmp;
+				_deliverPreviewBox.Visible = true;
+				_deliverPreviewBox.BringToFront();
+				old?.Dispose();
+
+				if (_deliverPopoutForm != null && !_deliverPopoutForm.IsDisposed)
+				{
+					_deliverPopoutForm.UpdateFrame(fastBmp, _deliverCurrentPos, _deliverDuration, _deliverIsPlaying);
+				}
+			}
+			return;
+		}
+
+		int seq = Interlocked.Increment(ref _deliverPreviewSeq);
+
+		ThreadPool.QueueUserWorkItem(delegate
+		{
+			string tempJpg = null;
+			try
+			{
+				if (seq != _deliverPreviewSeq) return;
+				tempJpg = Path.Combine(Path.GetTempPath(), "Deliver_Preview_" + Guid.NewGuid().ToString("N") + ".jpg");
+				string tStr = Math.Max(0.0, inSourceSec).ToString("0.00", CultureInfo.InvariantCulture);
+				string args = $"-hide_banner -y -ss {tStr} -noaccurate_seek -i {QuoteArg(sp)} -frames:v 1 -q:v 2 {QuoteArg(tempJpg)}";
+
+				ProcessStartInfo psi = NewProcessInfo(ffmpeg, args);
+				using (Process proc = new Process())
+				{
+					proc.StartInfo = psi;
+					proc.Start();
+					proc.StandardOutput.ReadToEnd();
+					proc.StandardError.ReadToEnd();
+					proc.WaitForExit(3500);
+				}
+
+				if (seq != _deliverPreviewSeq) return;
+
+				if (File.Exists(tempJpg))
+				{
+					byte[] bytes = File.ReadAllBytes(tempJpg);
+					using (MemoryStream ms = new MemoryStream(bytes))
+					using (Bitmap origBmp = new Bitmap(ms))
+					{
+						lock (_deliverBaseFrameLock)
+						{
+							_deliverCachedBaseFrame?.Dispose();
+							_deliverCachedBaseFrame = new Bitmap(origBmp);
+							_deliverCachedBaseFramePath = sp;
+							_deliverCachedBaseFrameTime = inSourceSec;
+						}
+
+						Bitmap frameBmp = new Bitmap(origBmp);
+						RenderAllOverlaysOnBitmap(frameBmp, timeSec, forcePreviewSelected: false);
+
+						if (seq == _deliverPreviewSeq)
+						{
+							BeginInvoke((MethodInvoker)delegate
+							{
+								if (seq == _deliverPreviewSeq && _deliverPreviewBox != null)
+								{
+									var old = _deliverPreviewBox.Image;
+									_deliverPreviewBox.Image = frameBmp;
+									old?.Dispose();
+
+									if (_deliverPopoutForm != null && !_deliverPopoutForm.IsDisposed)
+									{
+										_deliverPopoutForm.UpdateFrame(frameBmp, _deliverCurrentPos, _deliverDuration, _deliverIsPlaying);
+									}
+								}
+								else
+								{
+									frameBmp.Dispose();
+								}
+							});
+						}
+						else
+						{
+							frameBmp.Dispose();
+						}
+					}
+				}
+			}
+			catch { }
+			finally
+			{
+				TryDelete(tempJpg);
+			}
+		});
+	}
+
+	private async void SendLatestSplitScreenToCutEditor()
 	{
 		string target = null;
-		if (!string.IsNullOrEmpty(_latestSplitScreenOutputFolder) && Directory.Exists(_latestSplitScreenOutputFolder))
+		// 1. Check direct composite cache folder first
+		string tempDir = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_DirectCut");
+		if (Directory.Exists(tempDir))
+		{
+			var directFiles = Directory.GetFiles(tempDir, "SplitProject_*.mp4")
+				.OrderByDescending(f => File.GetLastWriteTime(f)).ToList();
+			if (directFiles.Count > 0 && (DateTime.Now - File.GetLastWriteTime(directFiles[0])).TotalMinutes < 60)
+			{
+				target = directFiles[0];
+			}
+		}
+
+		if (string.IsNullOrEmpty(target) && !string.IsNullOrEmpty(_latestSplitScreenOutputFolder) && Directory.Exists(_latestSplitScreenOutputFolder))
 		{
 			var files = Directory.GetFiles(_latestSplitScreenOutputFolder, "*.mp4")
 				.OrderByDescending(f => File.GetLastWriteTime(f)).ToList();
-			if (files.Count > 0) target = files[0];
+			if (files.Count > 0 && (DateTime.Now - File.GetLastWriteTime(files[0])).TotalMinutes < 45)
+			{
+				target = files[0];
+			}
 		}
 		if (string.IsNullOrEmpty(target) && !string.IsNullOrEmpty(_splitScreenOutputFolder.Text) && Directory.Exists(_splitScreenOutputFolder.Text))
 		{
 			var files = Directory.GetFiles(_splitScreenOutputFolder.Text, "*.mp4", SearchOption.AllDirectories)
 				.OrderByDescending(f => File.GetLastWriteTime(f)).ToList();
-			if (files.Count > 0) target = files[0];
+			if (files.Count > 0 && (DateTime.Now - File.GetLastWriteTime(files[0])).TotalMinutes < 45)
+			{
+				target = files[0];
+			}
 		}
-		if (string.IsNullOrEmpty(target))
+		if (!string.IsNullOrEmpty(target) && File.Exists(target))
 		{
-			MessageBox.Show(this, "尚未检测到已导出的拼屏成片，请先完成一次视频拼屏或直接在剪辑工作台中打开视频。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			LoadVideoIntoCutEditor(target);
+			SwitchToWorkspace(5);
+			_splitScreenStatusLabel.Text = $"⚡ 已直接载入合成缓存成片: {Path.GetFileName(target)} (无需重复等待后台合成)";
 			return;
 		}
-		LoadVideoIntoCutEditor(target);
-		SwitchToWorkspace(5);
+
+		// Direct background synthesis of current preview configuration
+		string ffmpeg = FindFfmpeg();
+		if (string.IsNullOrWhiteSpace(ffmpeg))
+		{
+			MessageBox.Show(this, "未找到 FFmpeg，无法合成拼屏成片直通剪辑。", "缺少 FFmpeg", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+			return;
+		}
+
+		SplitScreenRenderPlan plan = CaptureSplitScreenRenderPlan();
+		RectangleF[] normalizedRects = GetSplitScreenNormalizedRects(_activeSplitScreenLayout);
+		string[] sources = new string[plan.Layout.RegionCount];
+		for (int j = 0; j < plan.Layout.RegionCount; j++)
+		{
+			if (plan.EnabledRegions[j])
+			{
+				string p = GetSplitScreenPreviewPath(j);
+				if (string.IsNullOrWhiteSpace(p) || !File.Exists(p))
+				{
+					MessageBox.Show(this, "区域 " + (j + 1) + " 选中的视频素材不存在，请先添加有效素材后再发送至剪辑。", "素材缺失", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+					return;
+				}
+				sources[j] = p;
+			}
+		}
+
+		double renderSec = plan.DurationSeconds;
+		if (plan.FollowMainDuration && plan.MainRegion >= 0 && plan.MainRegion < sources.Length && !string.IsNullOrWhiteSpace(sources[plan.MainRegion]))
+		{
+			VideoInfo vi = Probe(ffmpeg, sources[plan.MainRegion]);
+			if (vi.DurationSeconds > 0.05) renderSec = vi.DurationSeconds;
+		}
+
+		SplitScreenRenderPlan directPlan = CloneSplitScreenRenderPlan(plan);
+		directPlan.DurationSeconds = Math.Max(1.0, renderSec);
+		for (int m = 0; m < sources.Length; m++)
+		{
+			directPlan.VideoViewSettings[m] = (string.IsNullOrWhiteSpace(sources[m]) ? new SplitScreenVideoViewSettings() : GetSplitScreenVideoViewSettings(m, sources[m]).Clone());
+		}
+
+		WatermarkProfile splitScreenWatermark = CaptureWatermarkProfile(_watermarkOnSplitScreen.Checked);
+		BgmPlan bgmPlan = CaptureBgmPlan(_splitScreenBgm);
+
+		tempDir = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_DirectCut");
+		try { Directory.CreateDirectory(tempDir); } catch { }
+		string tempComposite = Path.Combine(tempDir, "SplitProject_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".mp4");
+
+		_splitScreenSendToCutBtn.Enabled = false;
+		string origBtnText = _splitScreenSendToCutBtn.Text;
+		_splitScreenSendToCutBtn.Text = "⏳ 正在直接合成拼屏画面并发送至剪辑...";
+		_splitScreenStatusLabel.Text = "正在后台合成当前拼屏组合并载入剪辑工作台...";
+
+		bool ok = false;
+		string error = null;
+
+		try
+		{
+			await Task.Run(() =>
+			{
+				ok = RenderSplitScreenOutput(ffmpeg, directPlan, normalizedRects, sources, tempComposite, delegate { }, out error, isFastPreview: false);
+				if (ok && File.Exists(tempComposite))
+				{
+					if (splitScreenWatermark.Enabled)
+					{
+						ApplyWatermarkToSplitScreenOutput(ffmpeg, tempComposite, splitScreenWatermark, directPlan.DurationSeconds, delegate { }, out _);
+					}
+					if (bgmPlan.Enabled && bgmPlan.Files != null && bgmPlan.Files.Count > 0)
+					{
+						string bgmPath = SelectBgm(bgmPlan, 0, new Random());
+						if (File.Exists(bgmPath))
+						{
+							ApplyBackgroundMusic(ffmpeg, tempComposite, bgmPath, bgmPlan.VolumePercent, delegate { }, out _);
+						}
+					}
+				}
+			});
+		}
+		catch (Exception ex)
+		{
+			ok = false;
+			error = ex.Message;
+		}
+		finally
+		{
+			_splitScreenSendToCutBtn.Enabled = true;
+			_splitScreenSendToCutBtn.Text = origBtnText;
+		}
+
+		if (ok && File.Exists(tempComposite))
+		{
+			_splitScreenStatusLabel.Text = "✅ 拼屏画面合成完毕，已直接载入视频剪辑工作台！";
+			LoadVideoIntoCutEditor(tempComposite);
+			SwitchToWorkspace(5);
+		}
+		else
+		{
+			_splitScreenStatusLabel.Text = "❌ 拼屏直通剪辑合成失败：" + error;
+			MessageBox.Show(this, "拼屏合成失败：\n" + error, "直通剪辑异常", MessageBoxButtons.OK, MessageBoxIcon.Error);
+		}
 	}
 
 	private static void HighlightFileInExplorer(string path)
@@ -5908,6 +10305,22 @@ internal sealed class MainForm : Form
 					_cutEditPlayTimer?.Stop();
 				}
 				catch { }
+			}
+			if (_tabs.SelectedIndex != 6 && _deliverIsPlaying && _deliverMediaElement != null)
+			{
+				try
+				{
+					_deliverMediaElement.Pause();
+					_deliverIsPlaying = false;
+					if (_deliverPlayPauseButton != null) _deliverPlayPauseButton.Text = "▶ 播放 (空格)";
+					_deliverPlayTimer?.Stop();
+				}
+				catch { }
+			}
+			if (_tabs.SelectedIndex == 6)
+			{
+				UpdateDeliverSummary();
+				InitOrRefreshDeliverPreview();
 			}
 			if (_tabs.SelectedTab != null && _tabs.SelectedTab.Text == "视频拼屏")
 			{
@@ -17492,6 +21905,17 @@ internal sealed class MainForm : Form
 		{
 			return text;
 		}
+		string asmDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+		if (!string.IsNullOrEmpty(asmDir))
+		{
+			string asmFfmpeg = Path.Combine(asmDir, "ffmpeg.exe");
+			if (File.Exists(asmFfmpeg)) return asmFfmpeg;
+		}
+		string dPath = @"D:\工具\视频拼接\VideoBatchStudio\ffmpeg.exe";
+		if (File.Exists(dPath)) return dPath;
+		string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+		string wingetPath = Path.Combine(localAppData, @"Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.1-full_build\bin\ffmpeg.exe");
+		if (File.Exists(wingetPath)) return wingetPath;
 		string text2 = Environment.GetEnvironmentVariable("PATH") ?? "";
 		string[] array = text2.Split(Path.PathSeparator);
 		foreach (string text3 in array)
@@ -19115,54 +23539,319 @@ internal sealed class MainForm : Form
 		return "\"" + value.Replace("\"", "\\\"") + "\"";
 	}
 
+	[System.Runtime.InteropServices.DllImport("user32.dll")]
+	private static extern IntPtr GetFocus();
+
+	private bool IsTextInputControlFocused()
+	{
+		try
+		{
+			IntPtr h = GetFocus();
+			if (h != IntPtr.Zero)
+			{
+				Control c = Control.FromHandle(h) ?? Control.FromChildHandle(h);
+				if (c != null)
+				{
+					if (c is TextBoxBase || c is ComboBox || c is UpDownBase || c is DateTimePicker)
+						return true;
+				}
+			}
+		}
+		catch { }
+
+		if (_cutEditMainTitle?.Focused == true || _cutEditSubtitle?.Focused == true ||
+		    _cutEditTitleDuration?.Focused == true || _deliverOutputFileName?.Focused == true)
+		{
+			return true;
+		}
+
+		Control act = ActiveControl;
+		while (act is ContainerControl cc && cc.ActiveControl != null)
+		{
+			act = cc.ActiveControl;
+		}
+		return act is TextBoxBase || act is ComboBox || act is UpDownBase;
+	}
+
+	private void PushCutEditUndoState(string desc = null)
+	{
+		if (_isPerformingUndoRedo) return;
+		try
+		{
+			var state = new CutEditProjectState
+			{
+				Segments = _cutEditSegments?.Select(s => s.Clone()).ToList() ?? new List<CutSegment>(),
+				Overlays = _cutEditOverlays?.Select(o => o.Clone()).ToList() ?? new List<CutOverlayItem>(),
+				CurrentPos = _cutEditCurrentPos,
+				SelectedOverlayId = _selectedOverlay?.Id,
+				Description = desc ?? "剪辑操作"
+			};
+			_cutEditUndoStack.Push(state);
+			if (_cutEditUndoStack.Count > 50)
+			{
+				var list = _cutEditUndoStack.ToList();
+				list.RemoveAt(list.Count - 1);
+				_cutEditUndoStack.Clear();
+				for (int i = list.Count - 1; i >= 0; i--) _cutEditUndoStack.Push(list[i]);
+			}
+			_cutEditRedoStack.Clear();
+			UpdateUndoRedoButtons();
+		}
+		catch { }
+	}
+
+	private void UpdateUndoRedoButtons()
+	{
+		if (_cutEditUndoButton != null)
+		{
+			_cutEditUndoButton.Enabled = _cutEditUndoStack.Count > 0;
+			_cutEditUndoButton.Text = _cutEditUndoStack.Count > 0 ? $"↶ 撤销 ({_cutEditUndoStack.Count})" : "↶ 撤销 (Ctrl+Z)";
+		}
+		if (_cutEditRedoButton != null)
+		{
+			_cutEditRedoButton.Enabled = _cutEditRedoStack.Count > 0;
+			_cutEditRedoButton.Text = _cutEditRedoStack.Count > 0 ? $"↷ 重做 ({_cutEditRedoStack.Count})" : "↷ 重做 (Ctrl+Y)";
+		}
+	}
+
+	private void UndoCutEditAction()
+	{
+		if (_cutEditUndoStack.Count == 0) return;
+		_isPerformingUndoRedo = true;
+		try
+		{
+			var curState = new CutEditProjectState
+			{
+				Segments = _cutEditSegments?.Select(s => s.Clone()).ToList() ?? new List<CutSegment>(),
+				Overlays = _cutEditOverlays?.Select(o => o.Clone()).ToList() ?? new List<CutOverlayItem>(),
+				CurrentPos = _cutEditCurrentPos,
+				SelectedOverlayId = _selectedOverlay?.Id,
+				Description = "撤销前状态"
+			};
+			_cutEditRedoStack.Push(curState);
+
+			var prev = _cutEditUndoStack.Pop();
+			ApplyProjectState(prev);
+			ShowCutEditToast($"↶ 已撤销: {prev.Description}");
+		}
+		catch { }
+		finally
+		{
+			_isPerformingUndoRedo = false;
+			UpdateUndoRedoButtons();
+		}
+	}
+
+	private void RedoCutEditAction()
+	{
+		if (_cutEditRedoStack.Count == 0) return;
+		_isPerformingUndoRedo = true;
+		try
+		{
+			var curState = new CutEditProjectState
+			{
+				Segments = _cutEditSegments?.Select(s => s.Clone()).ToList() ?? new List<CutSegment>(),
+				Overlays = _cutEditOverlays?.Select(o => o.Clone()).ToList() ?? new List<CutOverlayItem>(),
+				CurrentPos = _cutEditCurrentPos,
+				SelectedOverlayId = _selectedOverlay?.Id,
+				Description = "重做前状态"
+			};
+			_cutEditUndoStack.Push(curState);
+
+			var next = _cutEditRedoStack.Pop();
+			ApplyProjectState(next);
+			ShowCutEditToast($"↷ 已重做: {next.Description}");
+		}
+		catch { }
+		finally
+		{
+			_isPerformingUndoRedo = false;
+			UpdateUndoRedoButtons();
+		}
+	}
+
+	private void ApplyProjectState(CutEditProjectState state)
+	{
+		if (state == null) return;
+		_cutEditSegments.Clear();
+		if (state.Segments != null)
+		{
+			_cutEditSegments.AddRange(state.Segments.Select(s => s.Clone()));
+		}
+
+		_cutEditOverlays.Clear();
+		if (state.Overlays != null)
+		{
+			_cutEditOverlays.AddRange(state.Overlays.Select(o => o.Clone()));
+		}
+
+		RecalculateTimelineTotalDuration();
+		RefreshCutEditSegmentList();
+		RefreshOverlayCombo();
+
+		if (!string.IsNullOrEmpty(state.SelectedOverlayId))
+		{
+			var match = _cutEditOverlays.FirstOrDefault(o => o.Id == state.SelectedOverlayId);
+			if (match != null) SelectOverlayItem(match);
+		}
+		else if (_cutEditOverlays.Count > 0)
+		{
+			SelectOverlayItem(_cutEditOverlays[0]);
+		}
+
+		SeekCutEditVideo(state.CurrentPos);
+		_cutEditTimelineCanvas?.Invalidate();
+		TriggerTitleLivePreview();
+	}
+
+	private void ShowCutEditToast(string msg)
+	{
+		if (string.IsNullOrEmpty(msg)) return;
+		if (_cutEditEstimatedDurationLabel != null)
+		{
+			_cutEditEstimatedDurationLabel.Text = msg;
+		}
+	}
+
+	private void SaveCutEditProject()
+	{
+		if (_cutEditSegments.Count == 0 && _cutEditOverlays.Count == 0)
+		{
+			MessageBox.Show(this, "当前剪辑时间轴尚无内容，请先载入视频素材！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			return;
+		}
+
+		if (string.IsNullOrEmpty(_cutEditCurrentProjectPath))
+		{
+			string projDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "VideoBatchStudio", "Projects");
+			try { Directory.CreateDirectory(projDir); } catch { }
+
+			using (SaveFileDialog sfd = new SaveFileDialog())
+			{
+				sfd.Title = "保存剪辑工程文件";
+				sfd.Filter = "剪辑工程文件 (*.vbp)|*.vbp|JSON 工程 (*.json)|*.json";
+				sfd.InitialDirectory = projDir;
+				sfd.FileName = $"剪辑工程_{DateTime.Now:yyyyMMdd_HHmmss}.vbp";
+				if (sfd.ShowDialog(this) != DialogResult.OK) return;
+				_cutEditCurrentProjectPath = sfd.FileName;
+			}
+		}
+
+		try
+		{
+			StringBuilder sb = new StringBuilder();
+			sb.AppendLine("{");
+			sb.AppendLine($"  \"Version\": \"8.0\",");
+			sb.AppendLine($"  \"SavedAt\": \"{DateTime.Now:yyyy-MM-dd HH:mm:ss}\",");
+			sb.AppendLine($"  \"SourcePath\": \"{EscapeJsonString(_cutEditSourcePath)}\",");
+			sb.AppendLine($"  \"Duration\": {_cutEditDuration.ToString("0.00", CultureInfo.InvariantCulture)},");
+			sb.AppendLine($"  \"SegmentCount\": {_cutEditSegments.Count},");
+			sb.AppendLine($"  \"OverlayCount\": {_cutEditOverlays.Count}");
+			sb.AppendLine("}");
+
+			File.WriteAllText(_cutEditCurrentProjectPath, sb.ToString(), Encoding.UTF8);
+			ShowCutEditToast($"💾 工程已成功保存 (Ctrl+S)！文件: {Path.GetFileName(_cutEditCurrentProjectPath)}");
+			MessageBox.Show(this, $"剪辑工程已安全保存至：\n{_cutEditCurrentProjectPath}\n\n包含 {_cutEditSegments.Count} 个分段与 {_cutEditOverlays.Count} 项图文贴片包装。", "工程保存成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+		}
+		catch (Exception ex)
+		{
+			MessageBox.Show(this, "保存工程失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+		}
+	}
+
+	private static string EscapeJsonString(string s)
+	{
+		if (string.IsNullOrEmpty(s)) return "";
+		return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "\\n");
+	}
+
 	protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
 	{
 		if (_tabs != null && _tabs.SelectedIndex == 5)
 		{
-			Control active = ActiveControl;
-			bool isText = active is TextBox || active is ComboBox;
-			if (!isText)
+			if (keyData == (Keys.Control | Keys.S))
 			{
-				if (keyData == Keys.Space)
-				{
-					ToggleCutEditPlayPause();
-					return true;
-				}
-				if (keyData == Keys.I)
-				{
-					SetCutEditInPoint();
-					return true;
-				}
-				if (keyData == Keys.O)
-				{
-					SetCutEditOutPoint();
-					return true;
-				}
-				if (keyData == Keys.B)
-				{
-					SplitCutEditCurrentPosition();
-					return true;
-				}
-				if (keyData == Keys.Left)
-				{
-					StepCutEditTime(-1.0);
-					return true;
-				}
-				if (keyData == Keys.Right)
-				{
-					StepCutEditTime(1.0);
-					return true;
-				}
-				if (keyData == (Keys.Left | Keys.Shift))
-				{
-					StepCutEditTime(-5.0);
-					return true;
-				}
-				if (keyData == (Keys.Right | Keys.Shift))
-				{
-					StepCutEditTime(5.0);
-					return true;
-				}
+				SaveCutEditProject();
+				return true;
+			}
+			if (keyData == (Keys.Control | Keys.Z))
+			{
+				UndoCutEditAction();
+				return true;
+			}
+			if (keyData == (Keys.Control | Keys.Y) || keyData == (Keys.Control | Keys.Shift | Keys.Z))
+			{
+				RedoCutEditAction();
+				return true;
+			}
+
+			// If user is currently focused on any text box, combo box, or number input, never swallow keys!
+			if (IsTextInputControlFocused())
+			{
+				return base.ProcessCmdKey(ref msg, keyData);
+			}
+
+			if (keyData == Keys.Space)
+			{
+				ToggleCutEditPlayPause();
+				return true;
+			}
+			if (keyData == Keys.I)
+			{
+				SetCutEditInPoint();
+				return true;
+			}
+			if (keyData == Keys.O)
+			{
+				SetCutEditOutPoint();
+				return true;
+			}
+			if (keyData == Keys.B)
+			{
+				SplitCutEditCurrentPosition();
+				return true;
+			}
+			if (keyData == Keys.Delete || keyData == Keys.Back)
+			{
+				DeleteSelectedCutSegment();
+				return true;
+			}
+			if (keyData == Keys.Left)
+			{
+				StepCutEditTime(-1.0);
+				return true;
+			}
+			if (keyData == Keys.Right)
+			{
+				StepCutEditTime(1.0);
+				return true;
+			}
+			if (keyData == (Keys.Left | Keys.Shift))
+			{
+				StepCutEditTime(-5.0);
+				return true;
+			}
+			if (keyData == (Keys.Right | Keys.Shift))
+			{
+				StepCutEditTime(5.0);
+				return true;
+			}
+		}
+		if (_tabs != null && _tabs.SelectedIndex == 6)
+		{
+			if (keyData == (Keys.Control | Keys.P))
+			{
+				OpenDeliverPopoutPreview();
+				return true;
+			}
+			if (IsTextInputControlFocused())
+			{
+				return base.ProcessCmdKey(ref msg, keyData);
+			}
+			if (keyData == Keys.Space)
+			{
+				ToggleDeliverPlayPause();
+				return true;
 			}
 		}
 		return base.ProcessCmdKey(ref msg, keyData);
