@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.3.0";
+	public const string CurrentAppVersion = "8.4.0";
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
@@ -112,6 +112,7 @@ internal sealed class MainForm : Form
 	private Button _cutEditRippleDeleteBtn;
 	private Button _cutEditSnapBtn;
 	private Button _cutEditLinkBtn;
+	private Button _cutEditCloseGapsBtn;
 
 	// Dragging & Repositioning states
 	private enum TimelineDragMode { None, ScrubPlayhead, MoveClip, TrimIn, TrimOut, PanHand }
@@ -4151,6 +4152,12 @@ internal sealed class MainForm : Form
 		_cutEditDeleteBtn.Click += delegate { DeleteSelectedCutSegment(isRipple: false); };
 		tlToolsLeft.Controls.Add(_cutEditDeleteBtn);
 
+		_cutEditCloseGapsBtn = MakeButton("🧲 闭合间隙", 86);
+		_cutEditCloseGapsBtn.Height = 30;
+		_cutEditCloseGapsBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditCloseGapsBtn.Click += delegate { CloseAllTimelineGaps(); };
+		tlToolsLeft.Controls.Add(_cutEditCloseGapsBtn);
+
 		_cutEditAddTrackBtn = MakeButton("➕ 轨道 ▼", 78);
 		_cutEditAddTrackBtn.Height = 30;
 		_cutEditAddTrackBtn.Margin = new Padding(3, 0, 0, 0);
@@ -5484,6 +5491,12 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 		if (e.Button == MouseButtons.Right)
 		{
+			if (FindSeamAtPoint(e.Location, out CutSegment seamA, out CutSegment seamB, out Rectangle seamR))
+			{
+				ShowSeamTransitionContextMenu(e.Location, seamA, seamB);
+				return;
+			}
+
 			int hitEdge;
 			int segIdx = GetSegmentAtPoint(e.Location, out hitEdge);
 			if (segIdx >= 0)
@@ -5493,11 +5506,26 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				_cutEditTimelineCanvas?.Invalidate();
 				ShowSegmentContextMenu(e.Location);
 			}
+			else
+			{
+				ShowTimelineEmptyContextMenu(e.Location);
+			}
 			return;
 		}
 
 		if (e.Button == MouseButtons.Left)
 		{
+			// Check if left-clicked directly on active seam transition bridge badge
+			if (FindSeamAtPoint(e.Location, out CutSegment seamA, out CutSegment seamB, out Rectangle seamR))
+			{
+				bool hasTrans = (!string.IsNullOrEmpty(seamA.TransitionOutType) && seamA.TransitionOutType != "none") ||
+				                (!string.IsNullOrEmpty(seamB.TransitionInType) && seamB.TransitionInType != "none");
+				if (hasTrans && seamR.Contains(e.Location))
+				{
+					ShowSeamTransitionContextMenu(e.Location, seamA, seamB);
+					return;
+				}
+			}
 			// Razor Tool: Click-to-cut directly at cursor
 			if (_cutEditCurrentTool == TimelineToolMode.Razor)
 			{
@@ -6010,13 +6038,126 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				MessageBox.Show(this, "已成功将音频分离至 A1 原声音轨！\n画面与音频现已完全解绑，您可以自由独立剪切或替换画面与音频。", "音视频分离成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			});
 
-			// 2. Transitions Menu for Video Segments
+			// Seam transitions between adjacent clips on the same track
+			CutSegment segPrev = _cutEditSegments
+				.Where(s => s.TrackId == seg.TrackId && s != seg && s.TimelineStartSeconds < seg.TimelineStartSeconds)
+				.OrderByDescending(s => s.TimelineStartSeconds)
+				.FirstOrDefault();
+			bool hasPrevAdjacent = (segPrev != null && Math.Abs((segPrev.TimelineStartSeconds + segPrev.Duration) - seg.TimelineStartSeconds) <= 0.4);
+
+			CutSegment segNext = _cutEditSegments
+				.Where(s => s.TrackId == seg.TrackId && s != seg && s.TimelineStartSeconds > seg.TimelineStartSeconds)
+				.OrderBy(s => s.TimelineStartSeconds)
+				.FirstOrDefault();
+			bool hasNextAdjacent = (segNext != null && Math.Abs((seg.TimelineStartSeconds + seg.Duration) - segNext.TimelineStartSeconds) <= 0.4);
+
+			if (hasNextAdjacent)
+			{
+				string currentTrans = (!string.IsNullOrEmpty(seg.TransitionOutType) && seg.TransitionOutType != "none") ? seg.TransitionOutType : segNext.TransitionInType;
+				if (string.IsNullOrEmpty(currentTrans)) currentTrans = "none";
+				double curDur = (seg.TransitionOutDuration > 0.05) ? seg.TransitionOutDuration : (segNext.TransitionInDuration > 0.05 ? segNext.TransitionInDuration : 0.5);
+
+				ToolStripMenuItem seamNextMenu = new ToolStripMenuItem($"⚡ 在与【后一素材】接缝处加转场 ({GetTransitionName(currentTrans)})");
+				seamNextMenu.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+				seamNextMenu.ForeColor = Color.FromArgb(147, 51, 234);
+
+				foreach (var td in TransitionDefinitions)
+				{
+					string tid = td.id;
+					var mi = seamNextMenu.DropDownItems.Add(td.name, null, delegate
+					{
+						ApplySeamTransition(seg, segNext, tid, curDur);
+					});
+					if (currentTrans == tid) mi.Font = new Font(mi.Font, FontStyle.Bold);
+				}
+
+				seamNextMenu.DropDownItems.Add(new ToolStripSeparator());
+				ToolStripMenuItem durSub = new ToolStripMenuItem($"⏱️ 接缝转场时长 ({curDur:0.0}s)");
+				foreach (var d in new double[] { 0.2, 0.3, 0.5, 0.8, 1.0, 1.5, 2.0 })
+				{
+					double curd = d;
+					var mi = durSub.DropDownItems.Add($"{curd:0.0} 秒", null, delegate
+					{
+						string eff = (currentTrans == "none") ? "fade" : currentTrans;
+						ApplySeamTransition(seg, segNext, eff, curd);
+					});
+					if (Math.Abs(curDur - curd) < 0.05 && currentTrans != "none") mi.Font = new Font(mi.Font, FontStyle.Bold);
+				}
+				seamNextMenu.DropDownItems.Add(durSub);
+
+				if (currentTrans != "none")
+				{
+					seamNextMenu.DropDownItems.Add(new ToolStripSeparator());
+					var delTrans = seamNextMenu.DropDownItems.Add("❌ 移除此接缝转场", null, delegate
+					{
+						RemoveSeamTransition(seg, segNext);
+					});
+					delTrans.ForeColor = Color.FromArgb(239, 68, 68);
+				}
+
+				cms.Items.Add(seamNextMenu);
+			}
+
+			if (hasPrevAdjacent)
+			{
+				string currentTrans = (!string.IsNullOrEmpty(segPrev.TransitionOutType) && segPrev.TransitionOutType != "none") ? segPrev.TransitionOutType : seg.TransitionInType;
+				if (string.IsNullOrEmpty(currentTrans)) currentTrans = "none";
+				double curDur = (segPrev.TransitionOutDuration > 0.05) ? segPrev.TransitionOutDuration : (seg.TransitionInDuration > 0.05 ? seg.TransitionInDuration : 0.5);
+
+				ToolStripMenuItem seamPrevMenu = new ToolStripMenuItem($"⚡ 在与【前一素材】接缝处加转场 ({GetTransitionName(currentTrans)})");
+				seamPrevMenu.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+				seamPrevMenu.ForeColor = Color.FromArgb(147, 51, 234);
+
+				foreach (var td in TransitionDefinitions)
+				{
+					string tid = td.id;
+					var mi = seamPrevMenu.DropDownItems.Add(td.name, null, delegate
+					{
+						ApplySeamTransition(segPrev, seg, tid, curDur);
+					});
+					if (currentTrans == tid) mi.Font = new Font(mi.Font, FontStyle.Bold);
+				}
+
+				seamPrevMenu.DropDownItems.Add(new ToolStripSeparator());
+				ToolStripMenuItem durSub = new ToolStripMenuItem($"⏱️ 接缝转场时长 ({curDur:0.0}s)");
+				foreach (var d in new double[] { 0.2, 0.3, 0.5, 0.8, 1.0, 1.5, 2.0 })
+				{
+					double curd = d;
+					var mi = durSub.DropDownItems.Add($"{curd:0.0} 秒", null, delegate
+					{
+						string eff = (currentTrans == "none") ? "fade" : currentTrans;
+						ApplySeamTransition(segPrev, seg, eff, curd);
+					});
+					if (Math.Abs(curDur - curd) < 0.05 && currentTrans != "none") mi.Font = new Font(mi.Font, FontStyle.Bold);
+				}
+				seamPrevMenu.DropDownItems.Add(durSub);
+
+				if (currentTrans != "none")
+				{
+					seamPrevMenu.DropDownItems.Add(new ToolStripSeparator());
+					var delTrans = seamPrevMenu.DropDownItems.Add("❌ 移除此接缝转场", null, delegate
+					{
+						RemoveSeamTransition(segPrev, seg);
+					});
+					delTrans.ForeColor = Color.FromArgb(239, 68, 68);
+				}
+
+				cms.Items.Add(seamPrevMenu);
+			}
+
+			if (hasPrevAdjacent || hasNextAdjacent)
+			{
+				cms.Items.Add(new ToolStripSeparator());
+			}
+
+			// 2. Single Clip Transitions Menu
 			ToolStripMenuItem inTransMenu = new ToolStripMenuItem($"⚡ 片头转场 ({GetTransitionName(seg.TransitionInType)})");
 			foreach (var td in TransitionDefinitions)
 			{
 				string tid = td.id;
 				var mi = inTransMenu.DropDownItems.Add(td.name, null, delegate
 				{
+					PushCutEditUndoState("设置片头转场");
 					seg.TransitionInType = tid;
 					_cutEditTimelineCanvas?.Invalidate();
 					UpdateDeliverSummary();
@@ -6031,6 +6172,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				string tid = td.id;
 				var mi = outTransMenu.DropDownItems.Add(td.name, null, delegate
 				{
+					PushCutEditUndoState("设置片尾转场");
 					seg.TransitionOutType = tid;
 					_cutEditTimelineCanvas?.Invalidate();
 					UpdateDeliverSummary();
@@ -6039,13 +6181,14 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			}
 			cms.Items.Add(outTransMenu);
 
-			ToolStripMenuItem durMenu = new ToolStripMenuItem($"⏱️ 转场时长 ({seg.TransitionInDuration:0.0}s)");
-			double[] durs = new double[] { 0.3, 0.5, 0.8, 1.0, 1.5, 2.0 };
+			ToolStripMenuItem durMenu = new ToolStripMenuItem($"⏱️ 单素材转场时长 ({seg.TransitionInDuration:0.0}s)");
+			double[] durs = new double[] { 0.2, 0.3, 0.5, 0.8, 1.0, 1.5, 2.0 };
 			foreach (var d in durs)
 			{
 				double curd = d;
 				var mi = durMenu.DropDownItems.Add($"{curd:0.0} 秒", null, delegate
 				{
+					PushCutEditUndoState("修改转场时长");
 					seg.TransitionInDuration = curd;
 					seg.TransitionOutDuration = curd;
 					_cutEditTimelineCanvas?.Invalidate();
@@ -6061,13 +6204,25 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			// Volume Adjustment for Audio Segments
 			ToolStripMenuItem volMenu = new ToolStripMenuItem($"🔊 调节片段音量 ({seg.VolumePercent}%)");
-			int[] vols = new int[] { 150, 120, 100, 80, 50, 20, 0 };
+			int[] vols = new int[] { 200, 150, 120, 100, 80, 50, 20, 0 };
 			foreach (var v in vols)
 			{
 				int curv = v;
-				string label = curv switch { 150 => "150% (增益放大)", 100 => "100% (标准)", 0 => "0% (静音)", _ => $"{curv}%" };
+				string label = curv switch
+				{
+					200 => "200% (🔥 双倍超强增益)",
+					150 => "150% (增益放大 / 人声强化)",
+					120 => "120% (微调提升)",
+					100 => "100% (标准原声)",
+					80 => "80% (轻度压暗)",
+					50 => "50% (背景弱化)",
+					20 => "20% (极微背景音)",
+					0 => "0% (静音)",
+					_ => $"{curv}%"
+				};
 				var mi = volMenu.DropDownItems.Add(label, null, delegate
 				{
+					PushCutEditUndoState("调节音频音量");
 					seg.VolumePercent = curv;
 					_cutEditTimelineCanvas?.Invalidate();
 					UpdateDeliverSummary();
@@ -6109,6 +6264,442 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		if (string.IsNullOrEmpty(id) || id == "none") return "无";
 		var td = TransitionDefinitions.FirstOrDefault(t => t.id == id);
 		return td.shortName ?? id;
+	}
+
+	private int GetTrackY(string trackId)
+	{
+		int curY = 26;
+		foreach (var trk in _cutEditTracks)
+		{
+			if (trk.Id == trackId) return curY;
+			curY += trk.Height + 2;
+		}
+		return curY;
+	}
+
+	private bool FindSeamAtPoint(Point pt, out CutSegment segLeft, out CutSegment segRight, out Rectangle seamBadgeRect)
+	{
+		segLeft = null;
+		segRight = null;
+		seamBadgeRect = Rectangle.Empty;
+		if (pt.X < 92 || _cutEditDuration <= 0.0 || _cutEditTimelineCanvas == null) return false;
+		int canvasW = _cutEditTimelineCanvas.ClientSize.Width;
+
+		var trk = GetTrackAtY(pt.Y);
+		if (trk == null || trk.Type != TrackType.Video) return false;
+
+		var trackSegs = _cutEditSegments.Where(s => s.TrackId == trk.Id).OrderBy(s => s.TimelineStartSeconds).ToList();
+		for (int i = 0; i < trackSegs.Count - 1; i++)
+		{
+			var s1 = trackSegs[i];
+			var s2 = trackSegs[i + 1];
+			double s1End = s1.TimelineStartSeconds + s1.Duration;
+			if (Math.Abs(s2.TimelineStartSeconds - s1End) <= 0.4)
+			{
+				double seamTime = (s1End + s2.TimelineStartSeconds) / 2.0;
+				int seamX = TimeToScreenX(seamTime, canvasW);
+				int curY = GetTrackY(trk.Id);
+				Rectangle badge = new Rectangle(seamX - 34, curY + 2, 68, trk.Height - 4);
+				if (badge.Contains(pt) || (Math.Abs(pt.X - seamX) <= 18 && pt.Y >= curY && pt.Y < curY + trk.Height))
+				{
+					segLeft = s1;
+					segRight = s2;
+					seamBadgeRect = badge;
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private void ApplySeamTransition(CutSegment segLeft, CutSegment segRight, string transType, double duration)
+	{
+		if (segLeft == null || segRight == null) return;
+		PushCutEditUndoState("应用接缝转场");
+		segLeft.TransitionOutType = transType;
+		segLeft.TransitionOutDuration = duration;
+		segRight.TransitionInType = transType;
+		segRight.TransitionInDuration = duration;
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateDeliverSummary();
+	}
+
+	private void RemoveSeamTransition(CutSegment segLeft, CutSegment segRight)
+	{
+		if (segLeft == null && segRight == null) return;
+		PushCutEditUndoState("移除接缝转场");
+		if (segLeft != null)
+		{
+			segLeft.TransitionOutType = "none";
+		}
+		if (segRight != null)
+		{
+			segRight.TransitionInType = "none";
+		}
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateDeliverSummary();
+	}
+
+	private void CloseGapBetween(CutSegment segLeft, CutSegment segRight)
+	{
+		if (segLeft == null || segRight == null) return;
+		double s1End = segLeft.TimelineStartSeconds + segLeft.Duration;
+		double gap = segRight.TimelineStartSeconds - s1End;
+		if (gap <= 0.001) return;
+
+		PushCutEditUndoState("闭合素材间隙");
+		double threshold = segRight.TimelineStartSeconds - 0.001;
+		foreach (var s in _cutEditSegments)
+		{
+			if (s.TrackId == segRight.TrackId && s.TimelineStartSeconds >= threshold)
+			{
+				s.TimelineStartSeconds = Math.Max(0.0, s.TimelineStartSeconds - gap);
+				if (_cutEditLinkedSelectionEnabled && !string.IsNullOrEmpty(s.LinkedPartnerId))
+				{
+					var p = _cutEditSegments.FirstOrDefault(x => x.Id == s.LinkedPartnerId);
+					if (p != null) p.TimelineStartSeconds = s.TimelineStartSeconds;
+				}
+			}
+		}
+		RecalculateTimelineTotalDuration();
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateDeliverSummary();
+	}
+
+	private void CloseAllTimelineGaps()
+	{
+		if (_cutEditSegments.Count == 0) return;
+		PushCutEditUndoState("闭合全轨所有间隙");
+
+		int closedCount = 0;
+		foreach (var trk in _cutEditTracks)
+		{
+			if (trk.IsLocked) continue;
+			var segs = _cutEditSegments.Where(s => s.TrackId == trk.Id).OrderBy(s => s.TimelineStartSeconds).ToList();
+			if (segs.Count == 0) continue;
+
+			if (segs[0].TimelineStartSeconds > 0.02)
+			{
+				double leadGap = segs[0].TimelineStartSeconds;
+				for (int i = 0; i < segs.Count; i++)
+				{
+					segs[i].TimelineStartSeconds = Math.Max(0.0, segs[i].TimelineStartSeconds - leadGap);
+				}
+				closedCount++;
+			}
+
+			for (int i = 0; i < segs.Count - 1; i++)
+			{
+				double s1End = segs[i].TimelineStartSeconds + segs[i].Duration;
+				double gap = segs[i + 1].TimelineStartSeconds - s1End;
+				if (gap > 0.02)
+				{
+					for (int j = i + 1; j < segs.Count; j++)
+					{
+						segs[j].TimelineStartSeconds = Math.Max(0.0, segs[j].TimelineStartSeconds - gap);
+					}
+					closedCount++;
+				}
+			}
+		}
+
+		if (_cutEditLinkedSelectionEnabled)
+		{
+			foreach (var s in _cutEditSegments)
+			{
+				if (!string.IsNullOrEmpty(s.LinkedPartnerId))
+				{
+					var p = _cutEditSegments.FirstOrDefault(x => x.Id == s.LinkedPartnerId);
+					if (p != null && Math.Abs(p.TimelineStartSeconds - s.TimelineStartSeconds) > 0.02)
+					{
+						p.TimelineStartSeconds = s.TimelineStartSeconds;
+					}
+				}
+			}
+		}
+
+		RecalculateTimelineTotalDuration();
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateDeliverSummary();
+		MessageBox.Show(this, "已成功闭合全轨道所有素材间隙！所有黑屏与静音空隙已被消除。", "闭合间隙完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+	}
+
+	private void ShowSeamTransitionContextMenu(Point canvasPt, CutSegment segLeft, CutSegment segRight)
+	{
+		if (segLeft == null || segRight == null) return;
+		ContextMenuStrip cms = new ContextMenuStrip();
+		cms.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+
+		string currentTrans = (!string.IsNullOrEmpty(segLeft.TransitionOutType) && segLeft.TransitionOutType != "none") 
+			? segLeft.TransitionOutType 
+			: segRight.TransitionInType;
+		if (string.IsNullOrEmpty(currentTrans)) currentTrans = "none";
+		double currentDur = (segLeft.TransitionOutDuration > 0.05) ? segLeft.TransitionOutDuration : (segRight.TransitionInDuration > 0.05 ? segRight.TransitionInDuration : 0.5);
+
+		var headerItem = cms.Items.Add($"⚡ 素材接缝转场设置 ({GetTransitionName(currentTrans)})");
+		headerItem.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+		headerItem.ForeColor = Color.FromArgb(147, 51, 234);
+		headerItem.Enabled = false;
+
+		cms.Items.Add(new ToolStripSeparator());
+
+		foreach (var td in TransitionDefinitions)
+		{
+			string tid = td.id;
+			var mi = cms.Items.Add(td.name, null, delegate
+			{
+				ApplySeamTransition(segLeft, segRight, tid, currentDur);
+			});
+			if (currentTrans == tid)
+			{
+				mi.Font = new Font(mi.Font, FontStyle.Bold);
+				mi.Text = "✓ " + mi.Text;
+			}
+		}
+
+		cms.Items.Add(new ToolStripSeparator());
+
+		var durSub = new ToolStripMenuItem($"⏱️ 快速调整转场时长 ({currentDur:0.0}秒)");
+		durSub.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+		durSub.ForeColor = Color.FromArgb(59, 130, 246);
+		(double durVal, string durDesc)[] durPresets = new (double, string)[]
+		{
+			(0.2, "0.2 秒 (极速快切)"),
+			(0.3, "0.3 秒 (轻快转场)"),
+			(0.5, "0.5 秒 (⭐ 经典推荐)"),
+			(0.8, "0.8 秒 (舒缓转场)"),
+			(1.0, "1.0 秒 (标准电影感)"),
+			(1.5, "1.5 秒 (悠长慢淡)"),
+			(2.0, "2.0 秒 (超长抒情)")
+		};
+		foreach (var preset in durPresets)
+		{
+			double d = preset.durVal;
+			var mi = durSub.DropDownItems.Add(preset.durDesc, null, delegate
+			{
+				string effectiveType = (currentTrans == "none") ? "fade" : currentTrans;
+				ApplySeamTransition(segLeft, segRight, effectiveType, d);
+			});
+			if (Math.Abs(currentDur - d) < 0.05 && currentTrans != "none")
+			{
+				mi.Font = new Font(mi.Font, FontStyle.Bold);
+				mi.Text = "✓ " + mi.Text;
+			}
+		}
+		cms.Items.Add(durSub);
+
+		if (currentTrans != "none")
+		{
+			cms.Items.Add(new ToolStripSeparator());
+			var delItem = cms.Items.Add("❌ 移除此接缝转场", null, delegate
+			{
+				RemoveSeamTransition(segLeft, segRight);
+			});
+			delItem.ForeColor = Color.FromArgb(239, 68, 68);
+		}
+
+		double gapSec = segRight.TimelineStartSeconds - (segLeft.TimelineStartSeconds + segLeft.Duration);
+		if (gapSec > 0.02)
+		{
+			cms.Items.Add(new ToolStripSeparator());
+			var closeGapItem = cms.Items.Add($"🧲 闭合两素材间隙 (消除 {gapSec:0.2}秒 黑屏)", null, delegate
+			{
+				CloseGapBetween(segLeft, segRight);
+			});
+			closeGapItem.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+			closeGapItem.ForeColor = Color.FromArgb(16, 185, 129);
+		}
+
+		cms.Show(_cutEditTimelineCanvas, canvasPt);
+	}
+
+	private void ShowTimelineEmptyContextMenu(Point canvasPt)
+	{
+		int canvasW = _cutEditTimelineCanvas.ClientSize.Width;
+		double clickTime = ScreenXToTime(canvasPt.X, canvasW);
+		var trk = GetTrackAtY(canvasPt.Y);
+
+		ContextMenuStrip cms = new ContextMenuStrip();
+		cms.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+
+		CutSegment segBefore = null;
+		CutSegment segAfter = null;
+		if (trk != null)
+		{
+			var segs = _cutEditSegments.Where(s => s.TrackId == trk.Id).OrderBy(s => s.TimelineStartSeconds).ToList();
+			for (int i = 0; i < segs.Count; i++)
+			{
+				var s = segs[i];
+				if (s.TimelineStartSeconds + s.Duration <= clickTime + 0.01)
+				{
+					segBefore = s;
+				}
+				else if (s.TimelineStartSeconds >= clickTime - 0.01)
+				{
+					segAfter = s;
+					break;
+				}
+			}
+		}
+
+		if (segBefore != null && segAfter != null)
+		{
+			double s1End = segBefore.TimelineStartSeconds + segBefore.Duration;
+			double gapDur = segAfter.TimelineStartSeconds - s1End;
+			if (gapDur > 0.02)
+			{
+				var miCloseGap = cms.Items.Add($"🧲 闭合此处间隙 (消除 {gapDur:0.2}秒 空隙)", null, delegate
+				{
+					CloseGapBetween(segBefore, segAfter);
+				});
+				miCloseGap.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+				miCloseGap.ForeColor = Color.FromArgb(16, 185, 129);
+				cms.Items.Add(new ToolStripSeparator());
+			}
+		}
+
+		cms.Items.Add("🧲 紧凑排列 / 闭合全轨道所有间隙", null, delegate
+		{
+			CloseAllTimelineGaps();
+		});
+
+		cms.Items.Add(new ToolStripSeparator());
+
+		cms.Items.Add($"⏱️ 移动播放指针至此处 ({FormatDuration(clickTime)})", null, delegate
+		{
+			_cutEditCurrentPos = Math.Min(clickTime, _cutEditDuration);
+			UpdateCutEditTimeLabel();
+			SeekCutEditVideo(_cutEditCurrentPos);
+			_cutEditTimelineCanvas?.Invalidate();
+		});
+
+		cms.Show(_cutEditTimelineCanvas, canvasPt);
+	}
+
+	private void RippleTrimLeft()
+	{
+		if (_cutEditDuration <= 0.0 || _cutEditSegments.Count == 0) return;
+		double pos = _cutEditCurrentPos;
+
+		CutSegment target = null;
+		if (!string.IsNullOrEmpty(_cutEditSelectedTrackId))
+		{
+			target = _cutEditSegments.FirstOrDefault(s => s.TrackId == _cutEditSelectedTrackId && pos > s.TimelineStartSeconds + 0.02 && pos < s.TimelineStartSeconds + s.Duration - 0.02);
+		}
+		if (target == null)
+		{
+			target = _cutEditSegments.FirstOrDefault(s => pos > s.TimelineStartSeconds + 0.02 && pos < s.TimelineStartSeconds + s.Duration - 0.02);
+		}
+		if (target == null) return;
+
+		var trk = _cutEditTracks.FirstOrDefault(t => t.Id == target.TrackId);
+		if (trk?.IsLocked == true)
+		{
+			MessageBox.Show(this, $"轨道【{trk.Name}】已锁定，无法剪辑！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			return;
+		}
+
+		PushCutEditUndoState("Q 快速波纹剪首");
+
+		double trimSec = pos - target.TimelineStartSeconds;
+		if (trimSec <= 0.02 || target.Duration - trimSec < 0.1) return;
+
+		target.StartSeconds += trimSec;
+
+		CutSegment partner = null;
+		if (_cutEditLinkedSelectionEnabled && !Control.ModifierKeys.HasFlag(Keys.Alt) && !string.IsNullOrEmpty(target.LinkedPartnerId))
+		{
+			partner = _cutEditSegments.FirstOrDefault(s => s.Id == target.LinkedPartnerId);
+			if (partner != null && partner.Duration - trimSec >= 0.1)
+			{
+				partner.StartSeconds += trimSec;
+			}
+		}
+
+		foreach (var s in _cutEditSegments)
+		{
+			if (s != target && s != partner && s.TimelineStartSeconds >= target.TimelineStartSeconds + target.Duration - 0.01)
+			{
+				s.TimelineStartSeconds = Math.Max(0.0, s.TimelineStartSeconds - trimSec);
+			}
+		}
+		foreach (var ol in _cutEditOverlays)
+		{
+			if (ol.StartSeconds >= target.TimelineStartSeconds + target.Duration - 0.01)
+			{
+				ol.StartSeconds = Math.Max(0.0, ol.StartSeconds - trimSec);
+			}
+		}
+
+		_cutEditCurrentPos = target.TimelineStartSeconds;
+		RecalculateTimelineTotalDuration();
+		UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
+		UpdateCutEditTimeLabel();
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateDeliverSummary();
+	}
+
+	private void RippleTrimRight()
+	{
+		if (_cutEditDuration <= 0.0 || _cutEditSegments.Count == 0) return;
+		double pos = _cutEditCurrentPos;
+
+		CutSegment target = null;
+		if (!string.IsNullOrEmpty(_cutEditSelectedTrackId))
+		{
+			target = _cutEditSegments.FirstOrDefault(s => s.TrackId == _cutEditSelectedTrackId && pos > s.TimelineStartSeconds + 0.02 && pos < s.TimelineStartSeconds + s.Duration - 0.02);
+		}
+		if (target == null)
+		{
+			target = _cutEditSegments.FirstOrDefault(s => pos > s.TimelineStartSeconds + 0.02 && pos < s.TimelineStartSeconds + s.Duration - 0.02);
+		}
+		if (target == null) return;
+
+		var trk = _cutEditTracks.FirstOrDefault(t => t.Id == target.TrackId);
+		if (trk?.IsLocked == true)
+		{
+			MessageBox.Show(this, $"轨道【{trk.Name}】已锁定，无法剪辑！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			return;
+		}
+
+		PushCutEditUndoState("W 快速波纹剪尾");
+
+		double trimSec = (target.TimelineStartSeconds + target.Duration) - pos;
+		if (trimSec <= 0.02 || target.Duration - trimSec < 0.1) return;
+
+		target.EndSeconds = target.StartSeconds + (pos - target.TimelineStartSeconds);
+
+		CutSegment partner = null;
+		if (_cutEditLinkedSelectionEnabled && !Control.ModifierKeys.HasFlag(Keys.Alt) && !string.IsNullOrEmpty(target.LinkedPartnerId))
+		{
+			partner = _cutEditSegments.FirstOrDefault(s => s.Id == target.LinkedPartnerId);
+			if (partner != null && partner.Duration - trimSec >= 0.1)
+			{
+				partner.EndSeconds = partner.StartSeconds + (pos - partner.TimelineStartSeconds);
+			}
+		}
+
+		foreach (var s in _cutEditSegments)
+		{
+			if (s != target && s != partner && s.TimelineStartSeconds >= pos - 0.01)
+			{
+				s.TimelineStartSeconds = Math.Max(0.0, s.TimelineStartSeconds - trimSec);
+			}
+		}
+		foreach (var ol in _cutEditOverlays)
+		{
+			if (ol.StartSeconds >= pos - 0.01)
+			{
+				ol.StartSeconds = Math.Max(0.0, ol.StartSeconds - trimSec);
+			}
+		}
+
+		_cutEditCurrentPos = pos;
+		RecalculateTimelineTotalDuration();
+		UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
+		UpdateCutEditTimeLabel();
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateDeliverSummary();
 	}
 
 	private void DeleteSelectedCutSegment(bool isRipple = false)
@@ -6527,6 +7118,54 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 								using (HatchBrush hb = new HatchBrush(HatchStyle.LightUpwardDiagonal, Color.FromArgb(220, 38, 38), Color.FromArgb(69, 10, 10)))
 								{
 									g.FillRectangle(hb, segRect);
+								}
+							}
+						}
+					}
+				}
+
+				// Draw Seam Transition Bridge Badges across adjacent cuts on this track
+				if (trk.Type == TrackType.Video && _cutEditDuration > 0.0)
+				{
+					var trackSegs = _cutEditSegments.Where(s => s.TrackId == trk.Id).OrderBy(s => s.TimelineStartSeconds).ToList();
+					for (int si = 0; si < trackSegs.Count - 1; si++)
+					{
+						var s1 = trackSegs[si];
+						var s2 = trackSegs[si + 1];
+						double s1End = s1.TimelineStartSeconds + s1.Duration;
+						if (Math.Abs(s2.TimelineStartSeconds - s1End) <= 0.4)
+						{
+							int seamX = TimeToScreenX(s1End, bounds.Width);
+							bool hasBridgeTrans = (!string.IsNullOrEmpty(s1.TransitionOutType) && s1.TransitionOutType != "none") ||
+							                      (!string.IsNullOrEmpty(s2.TransitionInType) && s2.TransitionInType != "none");
+							if (hasBridgeTrans)
+							{
+								string tType = (s1.TransitionOutType != "none" && !string.IsNullOrEmpty(s1.TransitionOutType)) ? s1.TransitionOutType : s2.TransitionInType;
+								double tDur = Math.Max(s1.TransitionOutDuration, s2.TransitionInDuration);
+								string tShort = GetTransitionName(tType);
+
+								int bW = 68;
+								int bH = 18;
+								Rectangle bridgeRect = new Rectangle(seamX - bW / 2, curY + (th - bH) / 2, bW, bH);
+								using (GraphicsPath bp = CreateRoundedRectanglePath(bridgeRect, 4))
+								using (LinearGradientBrush bgBrush = new LinearGradientBrush(bridgeRect, Color.FromArgb(147, 51, 234), Color.FromArgb(109, 40, 217), LinearGradientMode.Vertical))
+								using (Pen bPen = new Pen(Color.FromArgb(216, 180, 254), 1.5f))
+								using (Brush bText = new SolidBrush(Color.White))
+								{
+									g.FillPath(bgBrush, bp);
+									g.DrawPath(bPen, bp);
+									g.DrawString($"⚡{tShort} {tDur:0.0}s", badgeFont, bText, bridgeRect, sfCenter);
+								}
+							}
+							else
+							{
+								// Subtle cut seam notches
+								using (Pen pSeam = new Pen(Color.FromArgb(250, 204, 21), 1.5f))
+								{
+									g.DrawLine(pSeam, seamX - 3, curY + 2, seamX + 3, curY + 2);
+									g.DrawLine(pSeam, seamX, curY + 2, seamX, curY + 5);
+									g.DrawLine(pSeam, seamX - 3, curY + th - 3, seamX + 3, curY + th - 3);
+									g.DrawLine(pSeam, seamX, curY + th - 6, seamX, curY + th - 3);
 								}
 							}
 						}
@@ -24933,6 +25572,16 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			if (keyData == Keys.L)
 			{
 				ToggleLinkedSelection();
+				return true;
+			}
+			if (keyData == Keys.Q)
+			{
+				RippleTrimLeft();
+				return true;
+			}
+			if (keyData == Keys.W)
+			{
+				RippleTrimRight();
 				return true;
 			}
 			if (keyData == (Keys.Shift | Keys.Delete) || keyData == (Keys.Shift | Keys.Back))
