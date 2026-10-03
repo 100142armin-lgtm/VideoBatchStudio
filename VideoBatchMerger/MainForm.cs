@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.4.0";
+	public const string CurrentAppVersion = "8.4.1";
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
@@ -58,6 +58,7 @@ internal sealed class MainForm : Form
 	private System.Windows.Forms.Integration.ElementHost _cutEditElementHost;
 	private System.Windows.Controls.MediaElement _cutEditMediaElement;
 	private System.Windows.Controls.Image _cutEditWpfOverlayImage;
+	private System.Windows.Controls.Border _cutEditWpfTransitionBorder;
 	private Button _cutEditClearAllBtn;
 	private System.Windows.Forms.Timer _cutEditPlayTimer;
 	private bool _cutEditIsPlaying;
@@ -278,6 +279,7 @@ internal sealed class MainForm : Form
 	private System.Windows.Forms.Integration.ElementHost _deliverElementHost;
 	private System.Windows.Controls.MediaElement _deliverMediaElement;
 	private System.Windows.Controls.Image _deliverWpfOverlayImage;
+	private System.Windows.Controls.Border _deliverWpfTransitionBorder;
 	private Button _deliverPlayPauseButton;
 	private TrackBar _deliverTimeScrubber;
 	private Label _deliverTimeLabel;
@@ -3931,8 +3933,15 @@ internal sealed class MainForm : Form
 			IsHitTestVisible = false
 		};
 
+		_cutEditWpfTransitionBorder = new System.Windows.Controls.Border
+		{
+			IsHitTestVisible = false,
+			Visibility = System.Windows.Visibility.Collapsed
+		};
+
 		System.Windows.Controls.Grid cutEditGrid = new System.Windows.Controls.Grid();
 		cutEditGrid.Children.Add(_cutEditMediaElement);
+		cutEditGrid.Children.Add(_cutEditWpfTransitionBorder);
 		cutEditGrid.Children.Add(_cutEditWpfOverlayImage);
 		_cutEditElementHost.Child = cutEditGrid;
 
@@ -4706,8 +4715,15 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			IsHitTestVisible = false
 		};
 
+		_deliverWpfTransitionBorder = new System.Windows.Controls.Border
+		{
+			IsHitTestVisible = false,
+			Visibility = System.Windows.Visibility.Collapsed
+		};
+
 		System.Windows.Controls.Grid deliverGrid = new System.Windows.Controls.Grid();
 		deliverGrid.Children.Add(_deliverMediaElement);
+		deliverGrid.Children.Add(_deliverWpfTransitionBorder);
 		deliverGrid.Children.Add(_deliverWpfOverlayImage);
 		_deliverElementHost.Child = deliverGrid;
 
@@ -6161,6 +6177,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					seg.TransitionInType = tid;
 					_cutEditTimelineCanvas?.Invalidate();
 					UpdateDeliverSummary();
+					UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
+					UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
 				});
 				if (seg.TransitionInType == tid) mi.Font = new Font(mi.Font, FontStyle.Bold);
 			}
@@ -6176,6 +6194,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					seg.TransitionOutType = tid;
 					_cutEditTimelineCanvas?.Invalidate();
 					UpdateDeliverSummary();
+					UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
+					UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
 				});
 				if (seg.TransitionOutType == tid) mi.Font = new Font(mi.Font, FontStyle.Bold);
 			}
@@ -6193,6 +6213,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					seg.TransitionOutDuration = curd;
 					_cutEditTimelineCanvas?.Invalidate();
 					UpdateDeliverSummary();
+					UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
+					UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
 				});
 				if (Math.Abs(seg.TransitionInDuration - curd) < 0.05) mi.Font = new Font(mi.Font, FontStyle.Bold);
 			}
@@ -6322,6 +6344,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		segRight.TransitionInDuration = duration;
 		_cutEditTimelineCanvas?.Invalidate();
 		UpdateDeliverSummary();
+		UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
+		UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
 	}
 
 	private void RemoveSeamTransition(CutSegment segLeft, CutSegment segRight)
@@ -6338,6 +6362,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 		_cutEditTimelineCanvas?.Invalidate();
 		UpdateDeliverSummary();
+		UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
+		UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
 	}
 
 	private void CloseGapBetween(CutSegment segLeft, CutSegment segRight)
@@ -8005,8 +8031,350 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 	}
 
+	private bool GetActiveTransitionAtTime(double timeSec, out string transType, out double progress, out bool isTransIn)
+	{
+		transType = null;
+		progress = 0.0;
+		isTransIn = false;
+
+		if (_cutEditSegments == null || _cutEditSegments.Count == 0) return false;
+
+		var kept = _cutEditSegments.Where(s => s.IsKept && (s.MediaType == "video" || s.MediaType == "image" || s.TrackId.StartsWith("V"))).OrderBy(s => s.TimelineStartSeconds).ToList();
+		if (kept.Count == 0) return false;
+
+		// Check if timeSec is inside any segment's Transition In
+		foreach (var s in kept)
+		{
+			if (!string.IsNullOrEmpty(s.TransitionInType) && s.TransitionInType != "none" && s.TransitionInDuration > 0.04)
+			{
+				double inStart = s.TimelineStartSeconds;
+				double inEnd = s.TimelineStartSeconds + s.TransitionInDuration;
+				if (timeSec >= inStart - 0.001 && timeSec <= inEnd)
+				{
+					transType = s.TransitionInType;
+					progress = Math.Max(0.0, Math.Min(1.0, (timeSec - inStart) / s.TransitionInDuration));
+					isTransIn = true;
+					return true;
+				}
+			}
+		}
+
+		// Check if timeSec is inside any segment's Transition Out
+		foreach (var s in kept)
+		{
+			if (!string.IsNullOrEmpty(s.TransitionOutType) && s.TransitionOutType != "none" && s.TransitionOutDuration > 0.04)
+			{
+				double outEnd = s.TimelineStartSeconds + s.Duration;
+				double outStart = outEnd - s.TransitionOutDuration;
+				if (timeSec >= outStart && timeSec <= outEnd + 0.001)
+				{
+					transType = s.TransitionOutType;
+					progress = Math.Max(0.0, Math.Min(1.0, (timeSec - outStart) / s.TransitionOutDuration));
+					isTransIn = false;
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	private void UpdateWpfTransitionOverlay(System.Windows.Controls.Border border, double timeSec)
+	{
+		if (border == null) return;
+		try
+		{
+			if (border.Dispatcher.CheckAccess())
+			{
+				ApplyWpfTransitionToBorder(border, timeSec);
+			}
+			else
+			{
+				border.Dispatcher.BeginInvoke(new Action(() =>
+				{
+					ApplyWpfTransitionToBorder(border, timeSec);
+				}));
+			}
+		}
+		catch { }
+	}
+
+	private void ApplyWpfTransitionToBorder(System.Windows.Controls.Border border, double timeSec)
+	{
+		if (!GetActiveTransitionAtTime(timeSec, out string transType, out double progress, out bool isTransIn))
+		{
+			border.Visibility = System.Windows.Visibility.Collapsed;
+			border.Background = null;
+			return;
+		}
+
+		border.Visibility = System.Windows.Visibility.Visible;
+
+		if (transType == "fadewhite")
+		{
+			double alpha = isTransIn ? (1.0 - progress) : progress;
+			byte a = (byte)Math.Max(0, Math.Min(255, (int)(alpha * 255)));
+			border.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 255, 255, 255));
+		}
+		else if (transType == "fadeblack" || transType == "dissolve" || transType == "none" || transType == "fade")
+		{
+			double alpha = isTransIn ? (1.0 - progress) : progress;
+			byte a = (byte)Math.Max(0, Math.Min(255, (int)(alpha * 255)));
+			border.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 0, 0, 0));
+		}
+		else if (transType == "wipeleft" || transType == "slideleft")
+		{
+			double coverRatio = isTransIn ? (1.0 - progress) : progress;
+			coverRatio = Math.Max(0.001, Math.Min(0.999, coverRatio));
+			var lgb = new System.Windows.Media.LinearGradientBrush
+			{
+				StartPoint = new System.Windows.Point(0, 0.5),
+				EndPoint = new System.Windows.Point(1, 0.5)
+			};
+			if (isTransIn)
+			{
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, 0.0));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, coverRatio));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, coverRatio));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, 1.0));
+			}
+			else
+			{
+				double split = 1.0 - coverRatio;
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, 0.0));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, split));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, split));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, 1.0));
+			}
+			border.Background = lgb;
+		}
+		else if (transType == "wiperight" || transType == "slideright")
+		{
+			double coverRatio = isTransIn ? (1.0 - progress) : progress;
+			coverRatio = Math.Max(0.001, Math.Min(0.999, coverRatio));
+			var lgb = new System.Windows.Media.LinearGradientBrush
+			{
+				StartPoint = new System.Windows.Point(0, 0.5),
+				EndPoint = new System.Windows.Point(1, 0.5)
+			};
+			if (isTransIn)
+			{
+				double split = 1.0 - coverRatio;
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, 0.0));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, split));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, split));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, 1.0));
+			}
+			else
+			{
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, 0.0));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, coverRatio));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, coverRatio));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, 1.0));
+			}
+			border.Background = lgb;
+		}
+		else if (transType == "wipeup")
+		{
+			double coverRatio = isTransIn ? (1.0 - progress) : progress;
+			coverRatio = Math.Max(0.001, Math.Min(0.999, coverRatio));
+			var lgb = new System.Windows.Media.LinearGradientBrush
+			{
+				StartPoint = new System.Windows.Point(0.5, 0),
+				EndPoint = new System.Windows.Point(0.5, 1)
+			};
+			if (isTransIn)
+			{
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, 0.0));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, coverRatio));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, coverRatio));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, 1.0));
+			}
+			else
+			{
+				double split = 1.0 - coverRatio;
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, 0.0));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, split));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, split));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, 1.0));
+			}
+			border.Background = lgb;
+		}
+		else if (transType == "wipedown")
+		{
+			double coverRatio = isTransIn ? (1.0 - progress) : progress;
+			coverRatio = Math.Max(0.001, Math.Min(0.999, coverRatio));
+			var lgb = new System.Windows.Media.LinearGradientBrush
+			{
+				StartPoint = new System.Windows.Point(0.5, 0),
+				EndPoint = new System.Windows.Point(0.5, 1)
+			};
+			if (isTransIn)
+			{
+				double split = 1.0 - coverRatio;
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, 0.0));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, split));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, split));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, 1.0));
+			}
+			else
+			{
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, 0.0));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, coverRatio));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, coverRatio));
+				lgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, 1.0));
+			}
+			border.Background = lgb;
+		}
+		else if (transType == "circleopen")
+		{
+			double openRatio = isTransIn ? progress : (1.0 - progress);
+			openRatio = Math.Max(0.001, Math.Min(1.0, openRatio));
+			var rgb = new System.Windows.Media.RadialGradientBrush
+			{
+				Center = new System.Windows.Point(0.5, 0.5),
+				GradientOrigin = new System.Windows.Point(0.5, 0.5),
+				RadiusX = openRatio,
+				RadiusY = openRatio
+			};
+			rgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, 0.0));
+			rgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Transparent, 0.98));
+			rgb.GradientStops.Add(new System.Windows.Media.GradientStop(System.Windows.Media.Colors.Black, 1.0));
+			border.Background = rgb;
+		}
+		else
+		{
+			double alpha = isTransIn ? (1.0 - progress) : progress;
+			byte a = (byte)Math.Max(0, Math.Min(255, (int)(alpha * 255)));
+			border.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 0, 0, 0));
+		}
+	}
+
+	private void RenderTransitionOnBitmap(Bitmap bmp, double timeSec)
+	{
+		if (bmp == null || _cutEditSegments == null || _cutEditSegments.Count == 0) return;
+		if (!GetActiveTransitionAtTime(timeSec, out string transType, out double progress, out bool isTransIn))
+			return;
+
+		int w = bmp.Width;
+		int h = bmp.Height;
+
+		using (Graphics g = Graphics.FromImage(bmp))
+		{
+			g.SmoothingMode = SmoothingMode.AntiAlias;
+
+			if (transType == "fadewhite")
+			{
+				double alpha = isTransIn ? (1.0 - progress) : progress;
+				int a = Math.Max(0, Math.Min(255, (int)(alpha * 255)));
+				if (a > 0)
+				{
+					using (Brush b = new SolidBrush(Color.FromArgb(a, 255, 255, 255)))
+					{
+						g.FillRectangle(b, 0, 0, w, h);
+					}
+				}
+			}
+			else if (transType == "fadeblack" || transType == "dissolve" || transType == "none" || transType == "fade")
+			{
+				double alpha = isTransIn ? (1.0 - progress) : progress;
+				int a = Math.Max(0, Math.Min(255, (int)(alpha * 255)));
+				if (a > 0)
+				{
+					using (Brush b = new SolidBrush(Color.FromArgb(a, 0, 0, 0)))
+					{
+						g.FillRectangle(b, 0, 0, w, h);
+					}
+				}
+			}
+			else if (transType == "wipeleft" || transType == "slideleft")
+			{
+				double coverRatio = isTransIn ? (1.0 - progress) : progress;
+				int wipeW = (int)(w * coverRatio);
+				if (wipeW > 0)
+				{
+					Rectangle r = isTransIn ? new Rectangle(0, 0, wipeW, h) : new Rectangle(w - wipeW, 0, wipeW, h);
+					using (Brush b = new SolidBrush(Color.Black))
+					{
+						g.FillRectangle(b, r);
+					}
+				}
+			}
+			else if (transType == "wiperight" || transType == "slideright")
+			{
+				double coverRatio = isTransIn ? (1.0 - progress) : progress;
+				int wipeW = (int)(w * coverRatio);
+				if (wipeW > 0)
+				{
+					Rectangle r = isTransIn ? new Rectangle(w - wipeW, 0, wipeW, h) : new Rectangle(0, 0, wipeW, h);
+					using (Brush b = new SolidBrush(Color.Black))
+					{
+						g.FillRectangle(b, r);
+					}
+				}
+			}
+			else if (transType == "wipeup")
+			{
+				double coverRatio = isTransIn ? (1.0 - progress) : progress;
+				int wipeH = (int)(h * coverRatio);
+				if (wipeH > 0)
+				{
+					Rectangle r = isTransIn ? new Rectangle(0, 0, w, wipeH) : new Rectangle(0, h - wipeH, w, wipeH);
+					using (Brush b = new SolidBrush(Color.Black))
+					{
+						g.FillRectangle(b, r);
+					}
+				}
+			}
+			else if (transType == "wipedown")
+			{
+				double coverRatio = isTransIn ? (1.0 - progress) : progress;
+				int wipeH = (int)(h * coverRatio);
+				if (wipeH > 0)
+				{
+					Rectangle r = isTransIn ? new Rectangle(0, h - wipeH, w, wipeH) : new Rectangle(0, 0, w, wipeH);
+					using (Brush b = new SolidBrush(Color.Black))
+					{
+						g.FillRectangle(b, r);
+					}
+				}
+			}
+			else if (transType == "circleopen")
+			{
+				double openRatio = isTransIn ? progress : (1.0 - progress);
+				double maxRadius = Math.Sqrt(w * w + h * h) / 2.0;
+				float radius = (float)(maxRadius * openRatio);
+				using (GraphicsPath path = new GraphicsPath())
+				{
+					path.AddRectangle(new Rectangle(0, 0, w, h));
+					if (radius > 1)
+					{
+						path.AddEllipse(w / 2f - radius, h / 2f - radius, radius * 2f, radius * 2f);
+					}
+					using (Brush b = new SolidBrush(Color.Black))
+					{
+						g.FillPath(b, path);
+					}
+				}
+			}
+			else
+			{
+				double alpha = isTransIn ? (1.0 - progress) : progress;
+				int a = Math.Max(0, Math.Min(255, (int)(alpha * 255)));
+				if (a > 0)
+				{
+					using (Brush b = new SolidBrush(Color.FromArgb(a, 0, 0, 0)))
+					{
+						g.FillRectangle(b, 0, 0, w, h);
+					}
+				}
+			}
+		}
+	}
+
 	private void UpdateCutEditWpfOverlay(double timeSec, bool forcePreviewSelected = false)
 	{
+		UpdateWpfTransitionOverlay(_cutEditWpfTransitionBorder, timeSec);
 		if (_cutEditWpfOverlayImage == null) return;
 		try
 		{
@@ -8088,6 +8456,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	private void UpdateDeliverWpfOverlay(double timeSec)
 	{
+		UpdateWpfTransitionOverlay(_deliverWpfTransitionBorder, timeSec);
 		if (_deliverWpfOverlayImage == null) return;
 		try
 		{
@@ -8568,6 +8937,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					{
 						RenderTitleOverlayOnBitmap(bmp);
 					}
+					RenderTransitionOnBitmap(bmp, _cutEditCurrentPos);
 					var old = _cutEditPreviewBox.Image;
 					_cutEditPreviewBox.Image = bmp;
 					old?.Dispose();
@@ -8860,6 +9230,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			{
 				Bitmap fastBmp = new Bitmap(cachedBaseClone);
 				RenderAllOverlaysOnBitmap(fastBmp, timeSec, forcePreviewSelected: withTitlePreview);
+				RenderTransitionOnBitmap(fastBmp, timeSec);
 				var old = _cutEditPreviewBox.Image;
 				_cutEditPreviewBox.Image = fastBmp;
 				_cutEditPreviewBox.Visible = true;
@@ -8914,6 +9285,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 						Bitmap frameBmp = new Bitmap(origBmp);
 						RenderAllOverlaysOnBitmap(frameBmp, timeSec, forcePreviewSelected: withTitlePreview);
+						RenderTransitionOnBitmap(frameBmp, timeSec);
 
 						if (seq == _cutEditPreviewSeq)
 						{
@@ -10677,6 +11049,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				{
 					Bitmap bmp = new Bitmap(origBmp);
 					RenderAllOverlaysOnBitmap(bmp, timeSec, forcePreviewSelected: false);
+					RenderTransitionOnBitmap(bmp, timeSec);
 					var old = _deliverPreviewBox.Image;
 					_deliverPreviewBox.Image = bmp;
 					old?.Dispose();
@@ -10711,6 +11084,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			{
 				Bitmap fastBmp = new Bitmap(cachedBaseClone);
 				RenderAllOverlaysOnBitmap(fastBmp, timeSec, forcePreviewSelected: false);
+				RenderTransitionOnBitmap(fastBmp, timeSec);
 				var old = _deliverPreviewBox.Image;
 				_deliverPreviewBox.Image = fastBmp;
 				_deliverPreviewBox.Visible = true;
@@ -10765,6 +11139,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 						Bitmap frameBmp = new Bitmap(origBmp);
 						RenderAllOverlaysOnBitmap(frameBmp, timeSec, forcePreviewSelected: false);
+						RenderTransitionOnBitmap(frameBmp, timeSec);
 
 						if (seq == _deliverPreviewSeq)
 						{
