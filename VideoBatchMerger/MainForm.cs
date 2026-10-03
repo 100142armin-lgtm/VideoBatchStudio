@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.2.0";
+	public const string CurrentAppVersion = "8.3.0";
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
@@ -94,8 +94,27 @@ internal sealed class MainForm : Form
 	private ComboBox _cutEditTrackHeightCombo;
 	private Button _cutEditAddTrackBtn;
 
+	// Professional timeline tools and ergonomic navigation
+	private enum TimelineToolMode { Select, Razor }
+	private TimelineToolMode _cutEditCurrentTool = TimelineToolMode.Select;
+	private bool _cutEditSnappingEnabled = true;
+	private bool _cutEditLinkedSelectionEnabled = true;
+	private int _cutEditScrollX = 0;
+	private int _snapGuideScreenX = -1;
+	private int _razorHoverX = -1;
+	private Point _panStartMousePoint;
+	private int _panStartScrollX;
+	private CutSegment _dragPartnerSegment = null;
+	private double _dragPartnerOriginalTimelineStart = 0.0;
+
+	private Button _cutEditToolSelectBtn;
+	private Button _cutEditToolRazorBtn;
+	private Button _cutEditRippleDeleteBtn;
+	private Button _cutEditSnapBtn;
+	private Button _cutEditLinkBtn;
+
 	// Dragging & Repositioning states
-	private enum TimelineDragMode { None, ScrubPlayhead, MoveClip, TrimIn, TrimOut }
+	private enum TimelineDragMode { None, ScrubPlayhead, MoveClip, TrimIn, TrimOut, PanHand }
 	private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
 	private int _dragSegmentIndex = -1;
 	private Point _dragStartMousePoint;
@@ -4083,8 +4102,58 @@ internal sealed class MainForm : Form
 			Padding = new Padding(0, 4, 0, 4)
 		};
 
-		_cutEditAddTrackBtn = MakeButton("➕ 添加轨道 ▼", 100);
+		_cutEditToolSelectBtn = MakeButton("↖ 选择 (V)", 82);
+		_cutEditToolSelectBtn.Height = 30;
+		_cutEditToolSelectBtn.BackColor = Color.FromArgb(14, 165, 233);
+		_cutEditToolSelectBtn.ForeColor = Color.White;
+		_cutEditToolSelectBtn.Click += delegate { SetTimelineToolMode(TimelineToolMode.Select); };
+		tlToolsLeft.Controls.Add(_cutEditToolSelectBtn);
+
+		_cutEditToolRazorBtn = MakeButton("✂ 剃刀 (C)", 82);
+		_cutEditToolRazorBtn.Height = 30;
+		_cutEditToolRazorBtn.Margin = new Padding(2, 0, 0, 0);
+		_cutEditToolRazorBtn.Click += delegate { SetTimelineToolMode(TimelineToolMode.Razor); };
+		tlToolsLeft.Controls.Add(_cutEditToolRazorBtn);
+
+		_cutEditRippleDeleteBtn = MakeButton("🌊 波纹删除 (Shift+Del)", 140);
+		_cutEditRippleDeleteBtn.Height = 30;
+		_cutEditRippleDeleteBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditRippleDeleteBtn.ForeColor = Color.FromArgb(251, 146, 60);
+		_cutEditRippleDeleteBtn.Click += delegate { DeleteSelectedCutSegment(isRipple: true); };
+		tlToolsLeft.Controls.Add(_cutEditRippleDeleteBtn);
+
+		_cutEditSnapBtn = MakeButton("🧲 磁吸:开 (S)", 92);
+		_cutEditSnapBtn.Height = 30;
+		_cutEditSnapBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditSnapBtn.BackColor = Color.FromArgb(6, 182, 212);
+		_cutEditSnapBtn.ForeColor = Color.Black;
+		_cutEditSnapBtn.Click += delegate { ToggleSnapping(); };
+		tlToolsLeft.Controls.Add(_cutEditSnapBtn);
+
+		_cutEditLinkBtn = MakeButton("🔗 联动:开 (L)", 92);
+		_cutEditLinkBtn.Height = 30;
+		_cutEditLinkBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditLinkBtn.BackColor = Color.FromArgb(59, 130, 246);
+		_cutEditLinkBtn.ForeColor = Color.White;
+		_cutEditLinkBtn.Click += delegate { ToggleLinkedSelection(); };
+		tlToolsLeft.Controls.Add(_cutEditLinkBtn);
+
+		_cutEditSplitButton = MakeButton("✂️ 切片 (B)", 82);
+		_cutEditSplitButton.Height = 30;
+		_cutEditSplitButton.Margin = new Padding(3, 0, 0, 0);
+		_cutEditSplitButton.Click += delegate { SplitCutEditCurrentPosition(); };
+		tlToolsLeft.Controls.Add(_cutEditSplitButton);
+
+		_cutEditDeleteBtn = MakeButton("🗑️ 删除 (Del)", 86);
+		_cutEditDeleteBtn.Height = 30;
+		_cutEditDeleteBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditDeleteBtn.ForeColor = Color.FromArgb(248, 113, 113);
+		_cutEditDeleteBtn.Click += delegate { DeleteSelectedCutSegment(isRipple: false); };
+		tlToolsLeft.Controls.Add(_cutEditDeleteBtn);
+
+		_cutEditAddTrackBtn = MakeButton("➕ 轨道 ▼", 78);
 		_cutEditAddTrackBtn.Height = 30;
+		_cutEditAddTrackBtn.Margin = new Padding(3, 0, 0, 0);
 		_cutEditAddTrackBtn.Click += delegate
 		{
 			ContextMenuStrip cms = new ContextMenuStrip();
@@ -4094,19 +4163,6 @@ internal sealed class MainForm : Form
 			cms.Show(_cutEditAddTrackBtn, new Point(0, _cutEditAddTrackBtn.Height));
 		};
 		tlToolsLeft.Controls.Add(_cutEditAddTrackBtn);
-
-		_cutEditSplitButton = MakeButton("✂️ 剃刀切片 (B)", 100);
-		_cutEditSplitButton.Height = 30;
-		_cutEditSplitButton.Margin = new Padding(3, 0, 0, 0);
-		_cutEditSplitButton.Click += delegate { SplitCutEditCurrentPosition(); };
-		tlToolsLeft.Controls.Add(_cutEditSplitButton);
-
-		_cutEditDeleteBtn = MakeButton("🗑️ 一键删除 (Del)", 116);
-		_cutEditDeleteBtn.Height = 30;
-		_cutEditDeleteBtn.Margin = new Padding(3, 0, 0, 0);
-		_cutEditDeleteBtn.ForeColor = Color.FromArgb(248, 113, 113);
-		_cutEditDeleteBtn.Click += delegate { DeleteSelectedCutSegment(); };
-		tlToolsLeft.Controls.Add(_cutEditDeleteBtn);
 
 		_cutEditToggleSegmentButton = MakeButton("🚫 剔除/保留", 90);
 		_cutEditToggleSegmentButton.Height = 30;
@@ -4209,6 +4265,7 @@ internal sealed class MainForm : Form
 		{
 			_cutEditTimelineZoom = _cutEditZoomSlider.Value / 100.0;
 			_cutEditZoomLabel.Text = $"🔍 {_cutEditZoomSlider.Value}%";
+			ClampTimelineScroll(_cutEditTimelineCanvas?.ClientSize.Width ?? 800);
 			_cutEditTimelineCanvas?.Invalidate();
 		};
 		tlToolsRight.Controls.Add(_cutEditZoomSlider);
@@ -4241,7 +4298,9 @@ internal sealed class MainForm : Form
 		_cutEditFitWindowBtn.Click += delegate
 		{
 			_cutEditTimelineZoom = 1.0;
+			_cutEditScrollX = 0;
 			if (_cutEditZoomSlider != null) _cutEditZoomSlider.Value = 100;
+			if (_cutEditZoomLabel != null) _cutEditZoomLabel.Text = "🔍 100%";
 			_cutEditTimelineCanvas?.Invalidate();
 		};
 		tlToolsRight.Controls.Add(_cutEditFitWindowBtn);
@@ -4264,7 +4323,7 @@ internal sealed class MainForm : Form
 		{
 			Dock = DockStyle.Fill,
 			BackColor = Color.FromArgb(16, 20, 28),
-			Cursor = Cursors.Hand,
+			Cursor = Cursors.Default,
 			AllowDrop = true
 		};
 		typeof(PictureBox).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.SetValue(_cutEditTimelineCanvas, true);
@@ -4284,6 +4343,17 @@ internal sealed class MainForm : Form
 		{
 			HandleTimelineMouseUp(e);
 		};
+		_cutEditTimelineCanvas.MouseEnter += delegate
+		{
+			_cutEditTimelineCanvas.Focus();
+		};
+		_cutEditTimelineCanvas.MouseLeave += delegate
+		{
+			_razorHoverX = -1;
+			_snapGuideScreenX = -1;
+			_cutEditTimelineCanvas.Invalidate();
+		};
+		_cutEditTimelineCanvas.MouseWheel += HandleTimelineMouseWheel;
 		_cutEditTimelineCanvas.DragEnter += delegate(object s, DragEventArgs e)
 		{
 			HandleTimelineDragEnter(e);
@@ -4298,6 +4368,7 @@ internal sealed class MainForm : Form
 		};
 		_cutEditTimelineCanvas.Resize += delegate
 		{
+			ClampTimelineScroll(_cutEditTimelineCanvas.ClientSize.Width);
 			_cutEditTimelineCanvas.Invalidate();
 		};
 		bottomTimelineHost.Controls.Add(_cutEditTimelineCanvas);
@@ -5012,15 +5083,317 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		return _cutEditTracks.FirstOrDefault(t => t.Id == "V1") ?? _cutEditTracks.FirstOrDefault();
 	}
 
+	private int TimeToScreenX(double t, int canvasWidth)
+	{
+		int headerW = 92;
+		int padR = 14;
+		int trackW = Math.Max(10, (int)((canvasWidth - headerW - padR) * _cutEditTimelineZoom));
+		double dur = Math.Max(0.1, _cutEditDuration);
+		return headerW + 2 - _cutEditScrollX + (int)((t / dur) * trackW);
+	}
+
+	private double ScreenXToTime(int sx, int canvasWidth)
+	{
+		int headerW = 92;
+		int padR = 14;
+		int trackW = Math.Max(10, (int)((canvasWidth - headerW - padR) * _cutEditTimelineZoom));
+		double dur = Math.Max(0.1, _cutEditDuration);
+		double ratio = (double)(sx - (headerW + 2) + _cutEditScrollX) / trackW;
+		return Math.Max(0.0, Math.Min(dur, ratio * dur));
+	}
+
+	private void ClampTimelineScroll(int canvasWidth)
+	{
+		int headerW = 92;
+		int padR = 14;
+		int trackW = Math.Max(10, (int)((canvasWidth - headerW - padR) * _cutEditTimelineZoom));
+		int visibleW = Math.Max(10, canvasWidth - headerW - padR);
+		int maxScroll = Math.Max(0, trackW - visibleW);
+		_cutEditScrollX = Math.Max(0, Math.Min(maxScroll, _cutEditScrollX));
+	}
+
+	private double SnapTimeToNearestBoundary(double targetTime, int canvasWidth, out bool didSnap, string excludeSegmentId = null)
+	{
+		didSnap = false;
+		if (!_cutEditSnappingEnabled || _cutEditDuration <= 0.0)
+		{
+			_snapGuideScreenX = -1;
+			return targetTime;
+		}
+
+		int headerW = 92;
+		int padR = 14;
+		int trackW = Math.Max(10, (int)((canvasWidth - headerW - padR) * _cutEditTimelineZoom));
+		double dur = Math.Max(0.1, _cutEditDuration);
+		double thresholdSec = Math.Max(0.04, (10.0 / trackW) * dur);
+
+		List<double> candidates = new List<double> { 0.0, _cutEditCurrentPos };
+
+		foreach (var s in _cutEditSegments)
+		{
+			if (!string.IsNullOrEmpty(excludeSegmentId) && (s.Id == excludeSegmentId || s.LinkedPartnerId == excludeSegmentId)) continue;
+			candidates.Add(s.TimelineStartSeconds);
+			candidates.Add(s.TimelineStartSeconds + s.Duration);
+		}
+
+		foreach (var ol in _cutEditOverlays)
+		{
+			if (!ol.Enabled) continue;
+			candidates.Add(ol.StartSeconds);
+			candidates.Add(ol.StartSeconds + ol.Duration);
+		}
+
+		double bestDiff = double.MaxValue;
+		double bestCandidate = targetTime;
+
+		foreach (var c in candidates)
+		{
+			double diff = Math.Abs(targetTime - c);
+			if (diff <= thresholdSec && diff < bestDiff)
+			{
+				bestDiff = diff;
+				bestCandidate = c;
+				didSnap = true;
+			}
+		}
+
+		if (didSnap)
+		{
+			_snapGuideScreenX = TimeToScreenX(bestCandidate, canvasWidth);
+			return bestCandidate;
+		}
+		else
+		{
+			_snapGuideScreenX = -1;
+			return targetTime;
+		}
+	}
+
+	private void SetTimelineToolMode(TimelineToolMode mode)
+	{
+		_cutEditCurrentTool = mode;
+		if (_cutEditToolSelectBtn != null)
+		{
+			bool isSel = (mode == TimelineToolMode.Select);
+			_cutEditToolSelectBtn.BackColor = isSel ? Color.FromArgb(14, 165, 233) : Color.FromArgb(30, 41, 59);
+			_cutEditToolSelectBtn.ForeColor = isSel ? Color.White : Color.FromArgb(203, 213, 225);
+		}
+		if (_cutEditToolRazorBtn != null)
+		{
+			bool isRazor = (mode == TimelineToolMode.Razor);
+			_cutEditToolRazorBtn.BackColor = isRazor ? Color.FromArgb(239, 68, 68) : Color.FromArgb(30, 41, 59);
+			_cutEditToolRazorBtn.ForeColor = isRazor ? Color.White : Color.FromArgb(203, 213, 225);
+		}
+		if (_cutEditTimelineCanvas != null)
+		{
+			_cutEditTimelineCanvas.Cursor = (mode == TimelineToolMode.Razor) ? Cursors.Cross : Cursors.Default;
+			_razorHoverX = -1;
+			_cutEditTimelineCanvas.Invalidate();
+		}
+	}
+
+	private void ToggleSnapping()
+	{
+		_cutEditSnappingEnabled = !_cutEditSnappingEnabled;
+		if (_cutEditSnapBtn != null)
+		{
+			_cutEditSnapBtn.Text = _cutEditSnappingEnabled ? "🧲 磁吸:开 (S)" : "🧲 磁吸:关 (S)";
+			_cutEditSnapBtn.BackColor = _cutEditSnappingEnabled ? Color.FromArgb(6, 182, 212) : Color.FromArgb(30, 41, 59);
+			_cutEditSnapBtn.ForeColor = _cutEditSnappingEnabled ? Color.Black : Color.FromArgb(148, 163, 184);
+		}
+		_snapGuideScreenX = -1;
+		_cutEditTimelineCanvas?.Invalidate();
+	}
+
+	private void ToggleLinkedSelection()
+	{
+		_cutEditLinkedSelectionEnabled = !_cutEditLinkedSelectionEnabled;
+		if (_cutEditLinkBtn != null)
+		{
+			_cutEditLinkBtn.Text = _cutEditLinkedSelectionEnabled ? "🔗 联动:开 (L)" : "🔗 联动:关 (L)";
+			_cutEditLinkBtn.BackColor = _cutEditLinkedSelectionEnabled ? Color.FromArgb(59, 130, 246) : Color.FromArgb(30, 41, 59);
+			_cutEditLinkBtn.ForeColor = _cutEditLinkedSelectionEnabled ? Color.White : Color.FromArgb(148, 163, 184);
+		}
+		_cutEditTimelineCanvas?.Invalidate();
+	}
+
+	private void HandleTimelineMouseWheel(object sender, MouseEventArgs e)
+	{
+		if (_cutEditTimelineCanvas == null || _cutEditDuration <= 0.0) return;
+		int w = _cutEditTimelineCanvas.ClientSize.Width;
+
+		if (Control.ModifierKeys.HasFlag(Keys.Alt))
+		{
+			// Zoom at mouse cursor
+			int headerW = 92;
+			int padR = 14;
+			double mouseTime = ScreenXToTime(e.X, w);
+			double oldZoom = _cutEditTimelineZoom;
+			double factor = e.Delta > 0 ? 1.2 : 0.8333;
+			double newZoom = Math.Max(0.3, Math.Min(5.0, oldZoom * factor));
+			_cutEditTimelineZoom = newZoom;
+			if (_cutEditZoomSlider != null)
+			{
+				int val = (int)Math.Round(newZoom * 100);
+				_cutEditZoomSlider.Value = Math.Max(_cutEditZoomSlider.Minimum, Math.Min(_cutEditZoomSlider.Maximum, val));
+			}
+			if (_cutEditZoomLabel != null)
+			{
+				_cutEditZoomLabel.Text = $"🔍 {(int)(newZoom * 100)}%";
+			}
+
+			// Keep mouseTime at the same screen X
+			int newTrackW = Math.Max(10, (int)((w - headerW - padR) * newZoom));
+			double dur = Math.Max(0.1, _cutEditDuration);
+			int newScrollX = headerW + 2 + (int)((mouseTime / dur) * newTrackW) - e.X;
+			int visibleW = Math.Max(10, w - headerW - padR);
+			int maxScroll = Math.Max(0, newTrackW - visibleW);
+			_cutEditScrollX = Math.Max(0, Math.Min(maxScroll, newScrollX));
+			_cutEditTimelineCanvas.Invalidate();
+		}
+		else
+		{
+			// Horizontal Pan
+			int headerW = 92;
+			int padR = 14;
+			int trackW = Math.Max(10, (int)((w - headerW - padR) * _cutEditTimelineZoom));
+			int visibleW = Math.Max(10, w - headerW - padR);
+			int maxScroll = Math.Max(0, trackW - visibleW);
+			int delta = (int)(e.Delta * 0.8);
+			_cutEditScrollX = Math.Max(0, Math.Min(maxScroll, _cutEditScrollX - delta));
+			_cutEditTimelineCanvas.Invalidate();
+		}
+	}
+
+	private void SplitSegmentAtTime(CutSegment targetSeg, double pos)
+	{
+		if (targetSeg == null) return;
+		int segIdx = _cutEditSegments.IndexOf(targetSeg);
+		if (segIdx < 0) return;
+
+		var trk = _cutEditTracks.FirstOrDefault(t => t.Id == targetSeg.TrackId);
+		if (trk?.IsLocked == true)
+		{
+			MessageBox.Show(this, $"轨道【{trk.Name}】已锁定，无法切割！", "轨道已锁定", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			return;
+		}
+
+		if (pos <= targetSeg.TimelineStartSeconds + 0.05 || pos >= targetSeg.TimelineStartSeconds + targetSeg.Duration - 0.05)
+		{
+			return;
+		}
+
+		PushCutEditUndoState("剃刀切割");
+
+		double offsetInSeg = pos - targetSeg.TimelineStartSeconds;
+		CutSegment seg1 = new CutSegment
+		{
+			Id = Guid.NewGuid().ToString("N"),
+			SourcePath = targetSeg.SourcePath,
+			StartSeconds = targetSeg.StartSeconds,
+			EndSeconds = targetSeg.StartSeconds + offsetInSeg,
+			TimelineStartSeconds = targetSeg.TimelineStartSeconds,
+			IsKept = targetSeg.IsKept,
+			TrackId = targetSeg.TrackId,
+			MediaType = targetSeg.MediaType,
+			Title = targetSeg.Title,
+			VolumePercent = targetSeg.VolumePercent,
+			TransitionInType = targetSeg.TransitionInType,
+			TransitionInDuration = targetSeg.TransitionInDuration,
+			TransitionOutType = "none",
+			TransitionOutDuration = targetSeg.TransitionOutDuration
+		};
+		CutSegment seg2 = new CutSegment
+		{
+			Id = Guid.NewGuid().ToString("N"),
+			SourcePath = targetSeg.SourcePath,
+			StartSeconds = targetSeg.StartSeconds + offsetInSeg,
+			EndSeconds = targetSeg.EndSeconds,
+			TimelineStartSeconds = targetSeg.TimelineStartSeconds + offsetInSeg,
+			IsKept = targetSeg.IsKept,
+			TrackId = targetSeg.TrackId,
+			MediaType = targetSeg.MediaType,
+			Title = targetSeg.Title,
+			VolumePercent = targetSeg.VolumePercent,
+			TransitionInType = "none",
+			TransitionInDuration = targetSeg.TransitionInDuration,
+			TransitionOutType = targetSeg.TransitionOutType,
+			TransitionOutDuration = targetSeg.TransitionOutDuration
+		};
+
+		// Check if linked partner exists
+		CutSegment partner = null;
+		if (_cutEditLinkedSelectionEnabled && !Control.ModifierKeys.HasFlag(Keys.Alt) && !string.IsNullOrEmpty(targetSeg.LinkedPartnerId))
+		{
+			partner = _cutEditSegments.FirstOrDefault(s => s.Id == targetSeg.LinkedPartnerId);
+		}
+
+		_cutEditSegments.RemoveAt(segIdx);
+		_cutEditSegments.Insert(segIdx, seg2);
+		_cutEditSegments.Insert(segIdx, seg1);
+
+		if (partner != null)
+		{
+			int partnerIdx = _cutEditSegments.IndexOf(partner);
+			if (partnerIdx >= 0 && pos > partner.TimelineStartSeconds + 0.05 && pos < partner.TimelineStartSeconds + partner.Duration - 0.05)
+			{
+				double pOffset = pos - partner.TimelineStartSeconds;
+				CutSegment p1 = new CutSegment
+				{
+					Id = Guid.NewGuid().ToString("N"),
+					SourcePath = partner.SourcePath,
+					StartSeconds = partner.StartSeconds,
+					EndSeconds = partner.StartSeconds + pOffset,
+					TimelineStartSeconds = partner.TimelineStartSeconds,
+					IsKept = partner.IsKept,
+					TrackId = partner.TrackId,
+					MediaType = partner.MediaType,
+					Title = partner.Title,
+					VolumePercent = partner.VolumePercent,
+					TransitionInType = partner.TransitionInType,
+					TransitionInDuration = partner.TransitionInDuration,
+					TransitionOutType = "none",
+					TransitionOutDuration = partner.TransitionOutDuration
+				};
+				CutSegment p2 = new CutSegment
+				{
+					Id = Guid.NewGuid().ToString("N"),
+					SourcePath = partner.SourcePath,
+					StartSeconds = partner.StartSeconds + pOffset,
+					EndSeconds = partner.EndSeconds,
+					TimelineStartSeconds = partner.TimelineStartSeconds + pOffset,
+					IsKept = partner.IsKept,
+					TrackId = partner.TrackId,
+					MediaType = partner.MediaType,
+					Title = partner.Title,
+					VolumePercent = partner.VolumePercent,
+					TransitionInType = "none",
+					TransitionInDuration = partner.TransitionInDuration,
+					TransitionOutType = partner.TransitionOutType,
+					TransitionOutDuration = partner.TransitionOutDuration
+				};
+
+				seg1.LinkedPartnerId = p1.Id;
+				p1.LinkedPartnerId = seg1.Id;
+				seg2.LinkedPartnerId = p2.Id;
+				p2.LinkedPartnerId = seg2.Id;
+
+				_cutEditSegments.RemoveAt(partnerIdx);
+				_cutEditSegments.Insert(partnerIdx, p2);
+				_cutEditSegments.Insert(partnerIdx, p1);
+			}
+		}
+
+		_cutEditSelectedSegmentIndex = _cutEditSegments.IndexOf(seg2);
+		RefreshCutEditSegmentList();
+	}
+
 	private int GetSegmentAtPoint(Point pt, out int hitEdge)
 	{
 		hitEdge = 0;
 		int headerW = 92;
-		if (pt.X < headerW || _cutEditDuration <= 0.0) return -1;
-
-		int padR = 14;
-		int trackW = Math.Max(10, (int)((_cutEditTimelineCanvas.ClientSize.Width - headerW - padR) * _cutEditTimelineZoom));
-		double dur = Math.Max(0.1, _cutEditDuration);
+		if (pt.X < headerW || _cutEditDuration <= 0.0 || _cutEditTimelineCanvas == null) return -1;
+		int canvasW = _cutEditTimelineCanvas.ClientSize.Width;
 
 		int curY = 26;
 		foreach (var trk in _cutEditTracks)
@@ -5033,8 +5406,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					bool matchTrack = (seg.TrackId == trk.Id);
 					if (!matchTrack) continue;
 
-					int sx = headerW + 2 + (int)((seg.TimelineStartSeconds / dur) * trackW);
-					int ex = headerW + 2 + (int)(((seg.TimelineStartSeconds + seg.Duration) / dur) * trackW);
+					int sx = TimeToScreenX(seg.TimelineStartSeconds, canvasW);
+					int ex = TimeToScreenX(seg.TimelineStartSeconds + seg.Duration, canvasW);
 					int sw = Math.Max(6, ex - sx);
 
 					if (pt.X >= sx - 4 && pt.X <= sx + sw + 4)
@@ -5056,6 +5429,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 	private void HandleTimelineMouseDown(MouseEventArgs e)
 	{
 		int headerW = 92;
+		int canvasW = _cutEditTimelineCanvas.ClientSize.Width;
+
 		if (e.X < headerW)
 		{
 			int curY = 26;
@@ -5097,6 +5472,16 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			return;
 		}
 
+		// Middle click or Space+Left click: Pan Hand
+		if (e.Button == MouseButtons.Middle || (e.Button == MouseButtons.Left && Control.ModifierKeys.HasFlag(Keys.Space)))
+		{
+			_timelineDragMode = TimelineDragMode.PanHand;
+			_panStartMousePoint = e.Location;
+			_panStartScrollX = _cutEditScrollX;
+			_cutEditTimelineCanvas.Cursor = Cursors.SizeAll;
+			return;
+		}
+
 		if (e.Button == MouseButtons.Right)
 		{
 			int hitEdge;
@@ -5113,6 +5498,44 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 		if (e.Button == MouseButtons.Left)
 		{
+			// Razor Tool: Click-to-cut directly at cursor
+			if (_cutEditCurrentTool == TimelineToolMode.Razor)
+			{
+				if (_cutEditDuration > 0.0)
+				{
+					double clickTime = ScreenXToTime(e.X, canvasW);
+					if (_cutEditSnappingEnabled)
+					{
+						bool didSnap;
+						clickTime = SnapTimeToNearestBoundary(clickTime, canvasW, out didSnap);
+					}
+
+					var trk = GetTrackAtY(e.Y);
+					CutSegment hitSeg = null;
+					if (trk != null)
+					{
+						hitSeg = _cutEditSegments.FirstOrDefault(s => s.TrackId == trk.Id && clickTime > s.TimelineStartSeconds + 0.05 && clickTime < s.TimelineStartSeconds + s.Duration - 0.05);
+					}
+					if (hitSeg == null)
+					{
+						int hitEdge;
+						int sIdx = GetSegmentAtPoint(e.Location, out hitEdge);
+						if (sIdx >= 0) hitSeg = _cutEditSegments[sIdx];
+					}
+
+					if (hitSeg != null)
+					{
+						SplitSegmentAtTime(hitSeg, clickTime);
+						_cutEditCurrentPos = clickTime;
+						UpdateCutEditTimeLabel();
+						SeekCutEditVideo(clickTime);
+						_cutEditTimelineCanvas?.Invalidate();
+						return;
+					}
+				}
+				return;
+			}
+
 			// Check if clicked any overlay item on T1 track
 			CutOverlayItem hitItem = null;
 			Rectangle hitRect = Rectangle.Empty;
@@ -5153,13 +5576,13 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				return;
 			}
 
-			int hitEdge;
-			int segIdx = GetSegmentAtPoint(e.Location, out hitEdge);
-			if (segIdx >= 0)
+			int hitEdgeSeg;
+			int clickedSegIdx = GetSegmentAtPoint(e.Location, out hitEdgeSeg);
+			if (clickedSegIdx >= 0)
 			{
-				var seg = _cutEditSegments[segIdx];
+				var seg = _cutEditSegments[clickedSegIdx];
 				var trk = _cutEditTracks.FirstOrDefault(t => t.Id == seg.TrackId);
-				_cutEditSelectedSegmentIndex = segIdx;
+				_cutEditSelectedSegmentIndex = clickedSegIdx;
 				_cutEditSelectedTrackId = seg.TrackId;
 
 				if (trk?.IsLocked == true)
@@ -5169,7 +5592,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					return;
 				}
 
-				_dragSegmentIndex = segIdx;
+				_dragSegmentIndex = clickedSegIdx;
 				_dragStartMousePoint = e.Location;
 				_dragOriginalTimelineStart = seg.TimelineStartSeconds;
 				_dragOriginalDuration = seg.Duration;
@@ -5177,8 +5600,20 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				_dragOriginalEndSec = seg.EndSeconds;
 				_dragOriginalTrackId = seg.TrackId;
 
-				if (hitEdge == -1) _timelineDragMode = TimelineDragMode.TrimIn;
-				else if (hitEdge == 1) _timelineDragMode = TimelineDragMode.TrimOut;
+				// Setup linked partner drag if linked selection is active and Alt is NOT pressed
+				_dragPartnerSegment = null;
+				_dragPartnerOriginalTimelineStart = 0.0;
+				if (_cutEditLinkedSelectionEnabled && !Control.ModifierKeys.HasFlag(Keys.Alt) && !string.IsNullOrEmpty(seg.LinkedPartnerId))
+				{
+					_dragPartnerSegment = _cutEditSegments.FirstOrDefault(s => s.Id == seg.LinkedPartnerId);
+					if (_dragPartnerSegment != null)
+					{
+						_dragPartnerOriginalTimelineStart = _dragPartnerSegment.TimelineStartSeconds;
+					}
+				}
+
+				if (hitEdgeSeg == -1) _timelineDragMode = TimelineDragMode.TrimIn;
+				else if (hitEdgeSeg == 1) _timelineDragMode = TimelineDragMode.TrimOut;
 				else _timelineDragMode = TimelineDragMode.MoveClip;
 
 				_cutEditTimelineCanvas?.Invalidate();
@@ -5208,10 +5643,26 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	private void HandleTimelineMouseMove(MouseEventArgs e)
 	{
+		int headerW = 92;
+		int padR = 14;
+		int canvasW = _cutEditTimelineCanvas.ClientSize.Width;
+		int trackW = Math.Max(10, (int)((canvasW - headerW - padR) * _cutEditTimelineZoom));
+		double dur = Math.Max(0.1, _cutEditDuration);
+
 		if (e.Button == MouseButtons.None)
 		{
-			if (e.X >= 92)
+			if (e.X >= headerW)
 			{
+				if (_cutEditCurrentTool == TimelineToolMode.Razor)
+				{
+					_cutEditTimelineCanvas.Cursor = Cursors.Cross;
+					_razorHoverX = e.X;
+					_cutEditTimelineCanvas.Invalidate();
+					return;
+				}
+
+				_razorHoverX = -1;
+
 				bool hoveredOl = false;
 				foreach (var kvp in _cachedOverlayRects)
 				{
@@ -5262,13 +5713,19 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			return;
 		}
 
+		// Middle click or Space+Left: Pan Hand
+		if (_timelineDragMode == TimelineDragMode.PanHand)
+		{
+			int dx = e.X - _panStartMousePoint.X;
+			int visibleW = Math.Max(10, canvasW - headerW - padR);
+			int maxScroll = Math.Max(0, trackW - visibleW);
+			_cutEditScrollX = Math.Max(0, Math.Min(maxScroll, _panStartScrollX - dx));
+			_cutEditTimelineCanvas?.Invalidate();
+			return;
+		}
+
 		if (e.Button == MouseButtons.Left)
 		{
-			int headerW = 92;
-			int padR = 14;
-			int trackW = Math.Max(10, (int)((_cutEditTimelineCanvas.ClientSize.Width - headerW - padR) * _cutEditTimelineZoom));
-			double dur = Math.Max(0.1, _cutEditDuration);
-
 			if (_isDraggingOverlay && _draggedOverlayItem != null)
 			{
 				double dt = (double)(e.X - _overlayDragStartMouse) / trackW * dur;
@@ -5310,25 +5767,42 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				double timeDelta = (double)dx / trackW * dur;
 				double newStart = Math.Max(0.0, _dragOriginalTimelineStart + timeDelta);
 
-				// Snapping to 0s, playhead, and adjacent clip edges
-				if (newStart < 0.25) newStart = 0.0;
-				if (Math.Abs(newStart - _cutEditCurrentPos) < 0.25) newStart = _cutEditCurrentPos;
-				foreach (var other in _cutEditSegments)
+				// Magnetic snapping
+				if (_cutEditSnappingEnabled)
 				{
-					if (other == seg) continue;
-					double otherEnd = other.TimelineStartSeconds + other.Duration;
-					if (Math.Abs(newStart - otherEnd) < 0.3)
+					bool didSnapStart;
+					double snapCandidate = SnapTimeToNearestBoundary(newStart, canvasW, out didSnapStart, seg.Id);
+					if (didSnapStart)
 					{
-						newStart = otherEnd;
-						break;
+						newStart = snapCandidate;
 					}
-					if (Math.Abs((newStart + seg.Duration) - other.TimelineStartSeconds) < 0.3)
+					else
 					{
-						newStart = Math.Max(0.0, other.TimelineStartSeconds - seg.Duration);
-						break;
+						bool didSnapEnd;
+						double snapEndCandidate = SnapTimeToNearestBoundary(newStart + seg.Duration, canvasW, out didSnapEnd, seg.Id);
+						if (didSnapEnd)
+						{
+							newStart = Math.Max(0.0, snapEndCandidate - seg.Duration);
+						}
+						else
+						{
+							_snapGuideScreenX = -1;
+						}
 					}
 				}
+				else
+				{
+					_snapGuideScreenX = -1;
+				}
+
+				double deltaApplied = newStart - _dragOriginalTimelineStart;
 				seg.TimelineStartSeconds = newStart;
+
+				// Synchronously move linked partner clip
+				if (_dragPartnerSegment != null && _cutEditLinkedSelectionEnabled && !Control.ModifierKeys.HasFlag(Keys.Alt))
+				{
+					_dragPartnerSegment.TimelineStartSeconds = Math.Max(0.0, _dragPartnerOriginalTimelineStart + deltaApplied);
+				}
 
 				// Track changes vertically
 				var trk = GetTrackAtY(e.Y);
@@ -5356,8 +5830,28 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				double timeDelta = (double)dx / trackW * dur;
 				double maxDelta = _dragOriginalDuration - 0.2;
 				double actualDelta = Math.Max(-_dragOriginalStartSec, Math.Min(maxDelta, timeDelta));
+				double targetTimelineStart = Math.Max(0.0, _dragOriginalTimelineStart + actualDelta);
+
+				if (_cutEditSnappingEnabled)
+				{
+					bool didSnap;
+					double snapped = SnapTimeToNearestBoundary(targetTimelineStart, canvasW, out didSnap, seg.Id);
+					if (didSnap)
+					{
+						actualDelta = snapped - _dragOriginalTimelineStart;
+						actualDelta = Math.Max(-_dragOriginalStartSec, Math.Min(maxDelta, actualDelta));
+					}
+				}
+
 				seg.StartSeconds = _dragOriginalStartSec + actualDelta;
 				seg.TimelineStartSeconds = Math.Max(0.0, _dragOriginalTimelineStart + actualDelta);
+
+				if (_dragPartnerSegment != null && _cutEditLinkedSelectionEnabled && !Control.ModifierKeys.HasFlag(Keys.Alt))
+				{
+					_dragPartnerSegment.StartSeconds = seg.StartSeconds;
+					_dragPartnerSegment.TimelineStartSeconds = seg.TimelineStartSeconds;
+				}
+
 				RecalculateTimelineTotalDuration();
 				_cutEditTimelineCanvas?.Invalidate();
 			}
@@ -5367,7 +5861,25 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				int dx = e.X - _dragStartMousePoint.X;
 				double timeDelta = (double)dx / trackW * dur;
 				double newDur = Math.Max(0.2, _dragOriginalDuration + timeDelta);
+				double targetTimelineEnd = seg.TimelineStartSeconds + newDur;
+
+				if (_cutEditSnappingEnabled)
+				{
+					bool didSnap;
+					double snapped = SnapTimeToNearestBoundary(targetTimelineEnd, canvasW, out didSnap, seg.Id);
+					if (didSnap)
+					{
+						newDur = Math.Max(0.2, snapped - seg.TimelineStartSeconds);
+					}
+				}
+
 				seg.EndSeconds = seg.StartSeconds + newDur;
+
+				if (_dragPartnerSegment != null && _cutEditLinkedSelectionEnabled && !Control.ModifierKeys.HasFlag(Keys.Alt))
+				{
+					_dragPartnerSegment.EndSeconds = _dragPartnerSegment.StartSeconds + newDur;
+				}
+
 				RecalculateTimelineTotalDuration();
 				_cutEditTimelineCanvas?.Invalidate();
 			}
@@ -5376,11 +5888,14 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	private void HandleTimelineMouseUp(MouseEventArgs e)
 	{
+		_snapGuideScreenX = -1;
+		_dragPartnerSegment = null;
+
 		if (_isDraggingOverlay)
 		{
 			_isDraggingOverlay = false;
 			_draggedOverlayItem = null;
-			_cutEditTimelineCanvas.Cursor = Cursors.Default;
+			_cutEditTimelineCanvas.Cursor = (_cutEditCurrentTool == TimelineToolMode.Razor) ? Cursors.Cross : Cursors.Default;
 			UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: true);
 			UpdateDeliverSummary();
 			_cutEditTimelineCanvas?.Invalidate();
@@ -5391,6 +5906,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			_timelineDragMode = TimelineDragMode.None;
 			_dragSegmentIndex = -1;
+			_cutEditTimelineCanvas.Cursor = (_cutEditCurrentTool == TimelineToolMode.Razor) ? Cursors.Cross : Cursors.Default;
 			RecalculateTimelineTotalDuration();
 			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
 			_cutEditTimelineCanvas?.Invalidate();
@@ -5447,8 +5963,12 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		var seg = _cutEditSegments[_cutEditSelectedSegmentIndex];
 		ContextMenuStrip cms = new ContextMenuStrip();
 
-		var itemDel = cms.Items.Add("🗑️ 一键删除此片段 (Delete)", null, delegate { DeleteSelectedCutSegment(); });
-		itemDel.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+		var itemRippleDel = cms.Items.Add("🌊 波纹删除此片段 (Shift+Del)", null, delegate { DeleteSelectedCutSegment(isRipple: true); });
+		itemRippleDel.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+		itemRippleDel.ForeColor = Color.FromArgb(234, 88, 12);
+
+		var itemDel = cms.Items.Add("🗑️ 普通删除此片段 (Delete)", null, delegate { DeleteSelectedCutSegment(isRipple: false); });
+		itemDel.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Regular);
 
 		cms.Items.Add(new ToolStripSeparator());
 
@@ -5591,7 +6111,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		return td.shortName ?? id;
 	}
 
-	private void DeleteSelectedCutSegment()
+	private void DeleteSelectedCutSegment(bool isRipple = false)
 	{
 		if (_cutEditSelectedSegmentIndex < 0 || _cutEditSelectedSegmentIndex >= _cutEditSegments.Count)
 		{
@@ -5631,8 +6151,44 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				return;
 			}
 
+			PushCutEditUndoState(isRipple ? "波纹删除" : "删除片段");
+
+			double delStart = seg.TimelineStartSeconds;
+			double delDur = seg.Duration;
+			string partnerId = seg.LinkedPartnerId;
+
 			_cutEditSegments.RemoveAt(_cutEditSelectedSegmentIndex);
 			_cutEditSelectedSegmentIndex = -1;
+
+			// Also remove linked partner if linked selection is active and not holding Alt
+			if (_cutEditLinkedSelectionEnabled && !Control.ModifierKeys.HasFlag(Keys.Alt) && !string.IsNullOrEmpty(partnerId))
+			{
+				var partner = _cutEditSegments.FirstOrDefault(s => s.Id == partnerId);
+				if (partner != null)
+				{
+					_cutEditSegments.Remove(partner);
+				}
+			}
+
+			if (isRipple)
+			{
+				// Ripple shift all subsequent segments forward
+				foreach (var s in _cutEditSegments)
+				{
+					if (s.TimelineStartSeconds >= delStart - 0.001)
+					{
+						s.TimelineStartSeconds = Math.Max(0.0, s.TimelineStartSeconds - delDur);
+					}
+				}
+				// Also ripple subtitle / overlays
+				foreach (var ol in _cutEditOverlays)
+				{
+					if (ol.StartSeconds >= delStart - 0.001)
+					{
+						ol.StartSeconds = Math.Max(0.0, ol.StartSeconds - delDur);
+					}
+				}
+			}
 
 			RecalculateTimelineTotalDuration();
 
@@ -5660,20 +6216,24 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	private void HandleTimelineSeek(MouseEventArgs e)
 	{
-		int headerW = 92;
-		int padR = 14;
-		int trackW = Math.Max(10, (int)((_cutEditTimelineCanvas.ClientSize.Width - headerW - padR) * _cutEditTimelineZoom));
-		if (_cutEditDuration <= 0.0) return;
+		if (_cutEditDuration <= 0.0 || _cutEditTimelineCanvas == null) return;
+		int canvasW = _cutEditTimelineCanvas.ClientSize.Width;
 
-		double ratio = Math.Max(0.0, Math.Min(1.0, (double)(e.X - headerW) / trackW));
-		double seekTime = ratio * _cutEditDuration;
+		double seekTime = ScreenXToTime(e.X, canvasW);
+		if (_cutEditSnappingEnabled)
+		{
+			bool didSnap;
+			seekTime = SnapTimeToNearestBoundary(seekTime, canvasW, out didSnap);
+		}
+
 		_cutEditCurrentPos = seekTime;
 		SeekCutEditVideo(seekTime);
 		if (_cutEditTimeScrubber != null)
 		{
-			_cutEditTimeScrubber.Value = (int)Math.Max(0, Math.Min(1000, ratio * 1000.0));
+			_cutEditTimeScrubber.Value = (int)Math.Max(0, Math.Min(1000, (seekTime / _cutEditDuration) * 1000.0));
 		}
 		UpdateCutEditTimeLabel();
+		_cutEditTimelineCanvas?.Invalidate();
 	}
 
 	private void PaintTimelineCanvas(Graphics g, Rectangle bounds)
@@ -5698,6 +6258,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			g.DrawLine(rulerBorder, 0, 24, bounds.Width, 24);
 		}
 
+		// Clip ruler ticks to visible lanes area
+		Rectangle rulerClip = new Rectangle(headerW + 1, 0, bounds.Width - headerW - 1, 24);
+		g.SetClip(rulerClip);
+
 		using (Font fRuler = new Font("Consolas", 8f, FontStyle.Regular))
 		using (Brush bRuler = new SolidBrush(Color.FromArgb(148, 163, 184)))
 		using (Pen pTickMajor = new Pen(Color.FromArgb(94, 110, 134), 1f))
@@ -5708,28 +6272,25 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 			for (double mt = 0; mt <= dur; mt += minorStep)
 			{
-				int tx = headerW + 2 + (int)((mt / dur) * trackW);
+				int tx = TimeToScreenX(mt, bounds.Width);
+				if (tx < headerW) continue;
 				if (tx > bounds.Width) break;
 				g.DrawLine(pTickMinor, tx, 18, tx, 24);
 			}
 
 			for (double t = 0; t <= dur; t += stepSec)
 			{
-				int tx = headerW + 2 + (int)((t / dur) * trackW);
+				int tx = TimeToScreenX(t, bounds.Width);
+				if (tx < headerW - 20) continue;
 				if (tx > bounds.Width) break;
 				g.DrawLine(pTickMajor, tx, 12, tx, 24);
 				string timeStr = FormatDuration(t).Split('.')[0];
 				g.DrawString(timeStr, fRuler, bRuler, tx - 14, 2);
 			}
 		}
+		g.ResetClip();
 
-		// Vertical divider line between header and lanes
-		using (Pen p = new Pen(Color.FromArgb(40, 50, 68), 1.5f))
-		{
-			g.DrawLine(p, headerW, 0, headerW, bounds.Height);
-		}
-
-		// 2. Track Lanes and Headers
+		// 2. Track Lanes (Clip to headerW + 1 .. bounds.Width)
 		int curY = 26;
 		using (Font badgeFont = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold))
 		using (Font iconFont = new Font("Segoe UI Emoji", 8.5f, FontStyle.Regular))
@@ -5740,61 +6301,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			{
 				int th = trk.Height;
 				Rectangle headerRect = new Rectangle(0, curY, headerW, th);
-				Rectangle laneRect = new Rectangle(headerW + 2, curY, trackW, th);
-
-				// Draw Header background
-				using (Brush hBg = new SolidBrush(Color.FromArgb(18, 24, 34)))
-				{
-					g.FillRectangle(hBg, headerRect);
-				}
-
-				// If this track is selected, draw active indicator bar
-				if (trk.Id == _cutEditSelectedTrackId)
-				{
-					using (Brush bSel = new SolidBrush(Color.FromArgb(14, 165, 233)))
-					{
-						g.FillRectangle(bSel, 0, curY, 3, th);
-					}
-				}
-
-				// Draw Track Badge (Pill)
-				Rectangle badgeRect = new Rectangle(4, curY + (th - 22) / 2, 38, 22);
-				using (GraphicsPath bp = CreateRoundedRectanglePath(badgeRect, 4))
-				using (Brush bBrush = new SolidBrush(trk.GetBadgeColor()))
-				using (Brush wBrush = new SolidBrush(Color.White))
-				{
-					g.FillPath(bBrush, bp);
-					g.DrawString(trk.Id, badgeFont, wBrush, badgeRect, sfCenter);
-				}
-
-				// Draw Lock Button icon
-				Rectangle lockRect = new Rectangle(44, curY + (th - 20) / 2, 20, 20);
-				string lockIcon = trk.IsLocked ? "🔒" : "🔓";
-				Color lockColor = trk.IsLocked ? Color.FromArgb(245, 158, 11) : Color.FromArgb(100, 116, 139);
-				if (trk.IsLocked)
-				{
-					using (Brush lkBg = new SolidBrush(Color.FromArgb(50, 245, 158, 11)))
-					{
-						g.FillRectangle(lkBg, lockRect);
-					}
-				}
-				using (Brush lkBrush = new SolidBrush(lockColor))
-				{
-					g.DrawString(lockIcon, iconFont, lkBrush, lockRect, sfCenter);
-				}
-
-				// Draw Mute / Eye icon
-				Rectangle muteRect = new Rectangle(68, curY + (th - 20) / 2, 20, 20);
-				string actIcon = (trk.Type == TrackType.Audio)
-					? (trk.IsMuted ? "🔇" : "🔊")
-					: (trk.IsVisible ? "👁" : "🚫");
-				Color actColor = (trk.Type == TrackType.Audio && trk.IsMuted) || (!trk.IsVisible)
-					? Color.FromArgb(239, 68, 68)
-					: Color.FromArgb(148, 163, 184);
-				using (Brush actBrush = new SolidBrush(actColor))
-				{
-					g.DrawString(actIcon, iconFont, actBrush, muteRect, sfCenter);
-				}
+				Rectangle laneRect = new Rectangle(headerW + 2, curY, bounds.Width - headerW - 2, th);
 
 				// Draw Lane background
 				using (Brush laneBrush = new SolidBrush(Color.FromArgb(12, 16, 24)))
@@ -5805,6 +6312,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				{
 					g.DrawLine(laneBorder, headerW, curY + th, bounds.Width, curY + th);
 				}
+
+				// Clip lanes for drawing segments, waveforms, and overlays
+				Rectangle laneClip = new Rectangle(headerW + 1, curY, bounds.Width - headerW - 1, th);
+				g.SetClip(laneClip);
 
 				// --- Paint Segments on this Track ---
 				if (_cutEditSegments.Count == 0)
@@ -5825,11 +6336,23 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 						bool matchTrack = (seg.TrackId == trk.Id);
 						if (!matchTrack) continue;
 
-						int sx = headerW + 2 + (int)((seg.TimelineStartSeconds / dur) * trackW);
-						int ex = headerW + 2 + (int)(((seg.TimelineStartSeconds + seg.Duration) / dur) * trackW);
+						int sx = TimeToScreenX(seg.TimelineStartSeconds, bounds.Width);
+						int ex = TimeToScreenX(seg.TimelineStartSeconds + seg.Duration, bounds.Width);
 						int sw = Math.Max(6, ex - sx);
+						if (sx + sw < headerW || sx > bounds.Width) continue;
+
 						Rectangle segRect = new Rectangle(sx, curY + 2, sw, th - 4);
 						bool isSelected = (_cutEditSelectedSegmentIndex == i);
+
+						bool isLinkedPartnerSelected = false;
+						if (!isSelected && _cutEditLinkedSelectionEnabled && _cutEditSelectedSegmentIndex >= 0 && _cutEditSelectedSegmentIndex < _cutEditSegments.Count)
+						{
+							var curSel = _cutEditSegments[_cutEditSelectedSegmentIndex];
+							if (!string.IsNullOrEmpty(curSel.LinkedPartnerId) && curSel.LinkedPartnerId == seg.Id)
+							{
+								isLinkedPartnerSelected = true;
+							}
+						}
 
 						if (trk.Type == TrackType.Video)
 						{
@@ -5843,8 +6366,15 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 								{
 									g.FillRectangle(lgb, segRect);
 								}
-								using (Pen p = new Pen(isSelected ? Color.FromArgb(234, 179, 8) : Color.FromArgb(96, 165, 250), isSelected ? 2.5f : 1f))
+
+								Color borderColor = isSelected
+									? Color.FromArgb(234, 179, 8)
+									: (isLinkedPartnerSelected ? Color.FromArgb(56, 189, 248) : Color.FromArgb(96, 165, 250));
+								float borderWidth = isSelected ? 2.5f : (isLinkedPartnerSelected ? 2f : 1f);
+
+								using (Pen p = new Pen(borderColor, borderWidth))
 								{
+									if (isLinkedPartnerSelected) p.DashStyle = DashStyle.Dash;
 									g.DrawRectangle(p, segRect);
 								}
 
@@ -5866,7 +6396,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 								if (sw >= 28)
 								{
 									string typePrefix = isImg ? "🖼️ " : "🎬 ";
-									string label = string.IsNullOrEmpty(seg.Title) ? $"{typePrefix}#{i + 1} {FormatDuration(seg.Duration)}" : $"{typePrefix}#{i + 1} {seg.Title}";
+									string linkPrefix = !string.IsNullOrEmpty(seg.LinkedPartnerId) ? "🔗 " : "";
+									string label = string.IsNullOrEmpty(seg.Title)
+										? $"{linkPrefix}{typePrefix}#{i + 1} {FormatDuration(seg.Duration)}"
+										: $"{linkPrefix}{typePrefix}#{i + 1} {seg.Title}";
 									using (Brush txtBrush = new SolidBrush(Color.White))
 									{
 										g.DrawString(label, segFont, txtBrush, segRect, sfCenter);
@@ -5967,7 +6500,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 								if (sw >= 28)
 								{
-									string audTitle = string.IsNullOrEmpty(seg.Title) ? $"🎵 #{i + 1} {FormatDuration(seg.Duration)}" : $"🎵 #{i + 1} {seg.Title}";
+									string linkPrefix = !string.IsNullOrEmpty(seg.LinkedPartnerId) ? "🔗 " : "";
+									string audTitle = string.IsNullOrEmpty(seg.Title)
+										? $"{linkPrefix}🎵 #{i + 1} {FormatDuration(seg.Duration)}"
+										: $"{linkPrefix}🎵 #{i + 1} {seg.Title}";
 									if (seg.VolumePercent != 100) audTitle += $" [{seg.VolumePercent}%]";
 									using (Brush txtBrush = new SolidBrush(Color.FromArgb(220, 252, 231)))
 									{
@@ -5975,8 +6511,14 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 									}
 								}
 
-								using (Pen p = new Pen(isSelected ? Color.FromArgb(234, 179, 8) : Color.FromArgb(52, 211, 153), isSelected ? 2.5f : 1f))
+								Color borderColor = isSelected
+									? Color.FromArgb(234, 179, 8)
+									: (isLinkedPartnerSelected ? Color.FromArgb(56, 189, 248) : Color.FromArgb(52, 211, 153));
+								float borderWidth = isSelected ? 2.5f : (isLinkedPartnerSelected ? 2f : 1f);
+
+								using (Pen p = new Pen(borderColor, borderWidth))
 								{
+									if (isLinkedPartnerSelected) p.DashStyle = DashStyle.Dash;
 									g.DrawRectangle(p, segRect);
 								}
 							}
@@ -6006,8 +6548,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 							double tStart = Math.Max(0.0, Math.Min(dur - 0.2, olItem.StartSeconds));
 							double tDur = Math.Max(0.5, olItem.Duration);
-							int tx1 = headerW + 2 + (int)((tStart / dur) * trackW);
-							int tx2 = headerW + 2 + (int)(((tStart + tDur) / dur) * trackW);
+							int tx1 = TimeToScreenX(tStart, bounds.Width);
+							int tx2 = TimeToScreenX(tStart + tDur, bounds.Width);
 							int tw = Math.Max(16, tx2 - tx1);
 							Rectangle olRect = new Rectangle(tx1, curY + 2, tw, th - 4);
 							_cachedOverlayRects[olItem.Id] = olRect;
@@ -6045,7 +6587,9 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				// BGM Track A2 prompt when no segments exist on A2
 				if (trk.Id == "A2" && !_cutEditSegments.Any(s => s.TrackId == "A2") && _cutEditDuration > 0.0)
 				{
-					Rectangle a2Rect = new Rectangle(headerW + 2, curY + 2, trackW, th - 4);
+					int a2X = TimeToScreenX(0.0, bounds.Width);
+					int a2W = TimeToScreenX(_cutEditDuration, bounds.Width) - a2X;
+					Rectangle a2Rect = new Rectangle(a2X, curY + 2, a2W, th - 4);
 					using (Pen p = new Pen(Color.FromArgb(60, 139, 92, 246), 1f) { DashStyle = DashStyle.Dash })
 					{
 						g.DrawRectangle(p, a2Rect);
@@ -6057,16 +6601,16 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					}
 				}
 
-				// If track is locked, paint hatched warning overlay across the ENTIRE lane
+				// If track is locked, paint hatched warning overlay across the lane
 				if (trk.IsLocked)
 				{
 					using (HatchBrush lkHatch = new HatchBrush(HatchStyle.LightDownwardDiagonal, Color.FromArgb(90, 245, 158, 11), Color.FromArgb(25, 245, 158, 11)))
 					{
-						g.FillRectangle(lkHatch, laneRect);
+						g.FillRectangle(lkHatch, laneClip);
 					}
 					using (Pen lkBorder = new Pen(Color.FromArgb(234, 179, 8), 1.5f))
 					{
-						g.DrawRectangle(lkBorder, laneRect);
+						g.DrawRectangle(lkBorder, laneClip);
 					}
 					using (Font fLk = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold))
 					using (Brush bBg = new SolidBrush(Color.FromArgb(220, 30, 22, 0)))
@@ -6079,8 +6623,70 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					}
 				}
 
+				g.ResetClip();
+
+				// Track Header background (painted on top of lanes so left side is always fixed!)
+				using (Brush hBg = new SolidBrush(Color.FromArgb(18, 24, 34)))
+				{
+					g.FillRectangle(hBg, headerRect);
+				}
+
+				// If this track is selected, draw active indicator bar
+				if (trk.Id == _cutEditSelectedTrackId)
+				{
+					using (Brush bSel = new SolidBrush(Color.FromArgb(14, 165, 233)))
+					{
+						g.FillRectangle(bSel, 0, curY, 3, th);
+					}
+				}
+
+				// Draw Track Badge (Pill)
+				Rectangle badgeRect = new Rectangle(4, curY + (th - 22) / 2, 38, 22);
+				using (GraphicsPath bp = CreateRoundedRectanglePath(badgeRect, 4))
+				using (Brush bBrush = new SolidBrush(trk.GetBadgeColor()))
+				using (Brush wBrush = new SolidBrush(Color.White))
+				{
+					g.FillPath(bBrush, bp);
+					g.DrawString(trk.Id, badgeFont, wBrush, badgeRect, sfCenter);
+				}
+
+				// Draw Lock Button icon
+				Rectangle lockRect = new Rectangle(44, curY + (th - 20) / 2, 20, 20);
+				string lockIcon = trk.IsLocked ? "🔒" : "🔓";
+				Color lockColor = trk.IsLocked ? Color.FromArgb(245, 158, 11) : Color.FromArgb(100, 116, 139);
+				if (trk.IsLocked)
+				{
+					using (Brush lkBg = new SolidBrush(Color.FromArgb(50, 245, 158, 11)))
+					{
+						g.FillRectangle(lkBg, lockRect);
+					}
+				}
+				using (Brush lkBrush = new SolidBrush(lockColor))
+				{
+					g.DrawString(lockIcon, iconFont, lkBrush, lockRect, sfCenter);
+				}
+
+				// Draw Mute / Eye icon
+				Rectangle muteRect = new Rectangle(68, curY + (th - 20) / 2, 20, 20);
+				string actIcon = (trk.Type == TrackType.Audio)
+					? (trk.IsMuted ? "🔇" : "🔊")
+					: (trk.IsVisible ? "👁" : "🚫");
+				Color actColor = (trk.Type == TrackType.Audio && trk.IsMuted) || (!trk.IsVisible)
+					? Color.FromArgb(239, 68, 68)
+					: Color.FromArgb(148, 163, 184);
+				using (Brush actBrush = new SolidBrush(actColor))
+				{
+					g.DrawString(actIcon, iconFont, actBrush, muteRect, sfCenter);
+				}
+
 				curY += th + 2;
 			}
+		}
+
+		// Vertical divider line between header and lanes
+		using (Pen p = new Pen(Color.FromArgb(40, 50, 68), 1.5f))
+		{
+			g.DrawLine(p, headerW, 0, headerW, bounds.Height);
 		}
 
 		// Floating drag badge
@@ -6106,23 +6712,58 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			}
 		}
 
-		// 3. Playhead (Red needle with top triangle head)
+		// 3. Cyan Magnetic Snapping guide line
+		if (_snapGuideScreenX >= headerW + 1 && _snapGuideScreenX <= bounds.Width)
+		{
+			using (Pen pSnap = new Pen(Color.FromArgb(6, 182, 212), 2f) { DashStyle = DashStyle.Dash })
+			{
+				g.DrawLine(pSnap, _snapGuideScreenX, 0, _snapGuideScreenX, bounds.Height);
+			}
+			using (Font fSnap = new Font("Microsoft YaHei UI", 7.5f, FontStyle.Bold))
+			using (Brush bSnapBg = new SolidBrush(Color.FromArgb(220, 6, 182, 212)))
+			using (Brush bSnapTxt = new SolidBrush(Color.Black))
+			using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+			{
+				Rectangle snapTag = new Rectangle(_snapGuideScreenX - 24, 4, 48, 16);
+				g.FillRectangle(bSnapBg, snapTag);
+				g.DrawString("🧲磁吸", fSnap, bSnapTxt, snapTag, sf);
+			}
+		}
+
+		// 4. Red Razor Tool hover line
+		if (_cutEditCurrentTool == TimelineToolMode.Razor && _razorHoverX >= headerW + 1 && _razorHoverX <= bounds.Width)
+		{
+			using (Pen pRazor = new Pen(Color.FromArgb(239, 68, 68), 1.5f) { DashStyle = DashStyle.Dash })
+			{
+				g.DrawLine(pRazor, _razorHoverX, 0, _razorHoverX, bounds.Height);
+			}
+			using (Font fCut = new Font("Segoe UI Emoji", 10f, FontStyle.Regular))
+			using (Brush bCut = new SolidBrush(Color.FromArgb(239, 68, 68)))
+			{
+				g.DrawString("✂", fCut, bCut, _razorHoverX - 7, 2);
+			}
+		}
+
+		// 5. Playhead (Red needle with top triangle head)
 		if (_cutEditDuration > 0.0)
 		{
-			int px = headerW + 2 + (int)((_cutEditCurrentPos / dur) * trackW);
-			using (Pen pHead = new Pen(Color.FromArgb(239, 68, 68), 2f))
+			int px = TimeToScreenX(_cutEditCurrentPos, bounds.Width);
+			if (px >= headerW + 1 && px <= bounds.Width)
 			{
-				g.DrawLine(pHead, px, 0, px, curY);
-			}
-			Point[] cursorPoints = new Point[]
-			{
-				new Point(px - 6, 0),
-				new Point(px + 6, 0),
-				new Point(px, 14)
-			};
-			using (Brush b = new SolidBrush(Color.FromArgb(239, 68, 68)))
-			{
-				g.FillPolygon(b, cursorPoints);
+				using (Pen pHead = new Pen(Color.FromArgb(239, 68, 68), 2f))
+				{
+					g.DrawLine(pHead, px, 0, px, bounds.Height);
+				}
+				Point[] cursorPoints = new Point[]
+				{
+					new Point(px - 6, 0),
+					new Point(px + 6, 0),
+					new Point(px, 14)
+				};
+				using (Brush b = new SolidBrush(Color.FromArgb(239, 68, 68)))
+				{
+					g.FillPolygon(b, cursorPoints);
+				}
 			}
 		}
 	}
@@ -6975,7 +7616,6 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		double pos = _cutEditCurrentPos;
 
 		CutSegment targetSeg = null;
-		int segIdx = -1;
 
 		if (_cutEditSelectedSegmentIndex >= 0 && _cutEditSelectedSegmentIndex < _cutEditSegments.Count)
 		{
@@ -6983,7 +7623,6 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			if (pos > s.TimelineStartSeconds + 0.05 && pos < s.TimelineStartSeconds + s.Duration - 0.05)
 			{
 				targetSeg = s;
-				segIdx = _cutEditSelectedSegmentIndex;
 			}
 		}
 
@@ -6995,7 +7634,6 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				if (s.TrackId == _cutEditSelectedTrackId && pos > s.TimelineStartSeconds + 0.05 && pos < s.TimelineStartSeconds + s.Duration - 0.05)
 				{
 					targetSeg = s;
-					segIdx = i;
 					break;
 				}
 			}
@@ -7009,62 +7647,14 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				if (pos > s.TimelineStartSeconds + 0.05 && pos < s.TimelineStartSeconds + s.Duration - 0.05)
 				{
 					targetSeg = s;
-					segIdx = i;
 					break;
 				}
 			}
 		}
 
-		if (targetSeg != null && segIdx >= 0)
+		if (targetSeg != null)
 		{
-			var trk = _cutEditTracks.FirstOrDefault(t => t.Id == targetSeg.TrackId);
-			if (trk?.IsLocked == true)
-			{
-				MessageBox.Show(this, $"轨道【{trk.Name}】已锁定，无法切割！", "轨道已锁定", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-				return;
-			}
-
-			double offsetInSeg = pos - targetSeg.TimelineStartSeconds;
-			CutSegment seg1 = new CutSegment
-			{
-				Id = Guid.NewGuid().ToString("N"),
-				SourcePath = targetSeg.SourcePath,
-				StartSeconds = targetSeg.StartSeconds,
-				EndSeconds = targetSeg.StartSeconds + offsetInSeg,
-				TimelineStartSeconds = targetSeg.TimelineStartSeconds,
-				IsKept = targetSeg.IsKept,
-				TrackId = targetSeg.TrackId,
-				MediaType = targetSeg.MediaType,
-				Title = targetSeg.Title,
-				VolumePercent = targetSeg.VolumePercent,
-				TransitionInType = targetSeg.TransitionInType,
-				TransitionInDuration = targetSeg.TransitionInDuration,
-				TransitionOutType = "none",
-				TransitionOutDuration = targetSeg.TransitionOutDuration
-			};
-			CutSegment seg2 = new CutSegment
-			{
-				Id = Guid.NewGuid().ToString("N"),
-				SourcePath = targetSeg.SourcePath,
-				StartSeconds = targetSeg.StartSeconds + offsetInSeg,
-				EndSeconds = targetSeg.EndSeconds,
-				TimelineStartSeconds = targetSeg.TimelineStartSeconds + offsetInSeg,
-				IsKept = targetSeg.IsKept,
-				TrackId = targetSeg.TrackId,
-				MediaType = targetSeg.MediaType,
-				Title = targetSeg.Title,
-				VolumePercent = targetSeg.VolumePercent,
-				TransitionInType = "none",
-				TransitionInDuration = targetSeg.TransitionInDuration,
-				TransitionOutType = targetSeg.TransitionOutType,
-				TransitionOutDuration = targetSeg.TransitionOutDuration
-			};
-
-			_cutEditSegments.RemoveAt(segIdx);
-			_cutEditSegments.Insert(segIdx, seg2);
-			_cutEditSegments.Insert(segIdx, seg1);
-			_cutEditSelectedSegmentIndex = segIdx + 1; // select right piece so Del key immediately removes unwanted tail!
-			RefreshCutEditSegmentList();
+			SplitSegmentAtTime(targetSeg, pos);
 		}
 	}
 
@@ -24325,9 +24915,44 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				SplitCutEditCurrentPosition();
 				return true;
 			}
+			if (keyData == Keys.C)
+			{
+				SetTimelineToolMode(TimelineToolMode.Razor);
+				return true;
+			}
+			if (keyData == Keys.V)
+			{
+				SetTimelineToolMode(TimelineToolMode.Select);
+				return true;
+			}
+			if (keyData == Keys.S)
+			{
+				ToggleSnapping();
+				return true;
+			}
+			if (keyData == Keys.L)
+			{
+				ToggleLinkedSelection();
+				return true;
+			}
+			if (keyData == (Keys.Shift | Keys.Delete) || keyData == (Keys.Shift | Keys.Back))
+			{
+				DeleteSelectedCutSegment(isRipple: true);
+				return true;
+			}
 			if (keyData == Keys.Delete || keyData == Keys.Back)
 			{
-				DeleteSelectedCutSegment();
+				DeleteSelectedCutSegment(isRipple: false);
+				return true;
+			}
+			if (keyData == Keys.J)
+			{
+				StepCutEditTime(-2.0);
+				return true;
+			}
+			if (keyData == Keys.K)
+			{
+				if (_cutEditIsPlaying) ToggleCutEditPlayPause();
 				return true;
 			}
 			if (keyData == Keys.Left)
