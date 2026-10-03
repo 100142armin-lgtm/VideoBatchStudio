@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.1.1";
+	public const string CurrentAppVersion = "8.2.0";
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
@@ -214,9 +214,6 @@ internal sealed class MainForm : Form
 	private Button _cutEditMediaPoolRemoveButton;
 	private Button _cutEditMediaPoolClearButton;
 	private PictureBox _cutEditTimelineCanvas;
-	private CheckBox _cutEditAudioMuteCheckBox;
-	private TrackBar _cutEditAudioVolumeTrackBar;
-	private Label _cutEditAudioVolumeLabel;
 	private bool _cutEditAudioMuted;
 	private int _cutEditAudioVolume = 100;
 
@@ -237,7 +234,6 @@ internal sealed class MainForm : Form
 	private int _cutEditBgmVolume = 40;
 	private Button _cutEditFitWindowBtn;
 	private ComboBox _cutEditSpeedCombo;
-	private string _cutEditBgmPath = "";
 
 	private TextBox _deliverOutputFolder;
 	private TextBox _deliverOutputFileName;
@@ -289,6 +285,25 @@ internal sealed class MainForm : Form
 	private static readonly string[] ImageExtensions = new string[5] { ".png", ".jpg", ".jpeg", ".bmp", ".webp" };
 
 	private static readonly string[] AudioExtensions = new string[7] { ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".wma" };
+
+	internal static readonly (string id, string name, string shortName)[] TransitionDefinitions = new[]
+	{
+		("none", "✖️ 无转场 (默认直接硬切)", "无"),
+		("dissolve", "🌫️ 交叉叠化溶解 (Dissolve)", "溶解"),
+		("fadeblack", "🖤 黑色淡入淡出 (Dip to Black)", "黑场"),
+		("fadewhite", "⚪ 亮白闪烁淡入 (Flash White)", "白闪"),
+		("wipeleft", "⬅️ 向左擦除 (Wipe Left)", "左擦"),
+		("wiperight", "➡️ 向右擦除 (Wipe Right)", "右擦"),
+		("wipeup", "⬆️ 向上推移 (Slide Up)", "上移"),
+		("wipedown", "⬇️ 向下推移 (Slide Down)", "下移"),
+		("slideleft", "◀️ 向左平移滑入 (Slide Left)", "左滑"),
+		("slideright", "▶️ 向右平移滑入 (Slide Right)", "右滑"),
+		("zoom", "🔍 镜头推拉缩放 (Zoom In)", "缩放"),
+		("radial", "🔄 径向旋转 (Radial Spin)", "旋转"),
+		("pixelize", "🔲 像素马赛克 (Pixelize)", "马赛克"),
+		("hblur", "💨 动态水平模糊 (Motion Blur)", "动模"),
+		("circleopen", "⭕ 圆形展开 (Circle Open)", "圆展")
+	};
 
 	private readonly List<string> _videos = new List<string>();
 
@@ -2407,7 +2422,7 @@ internal sealed class MainForm : Form
 
 		Label mpSub = new Label
 		{
-			Text = "拖入视频/图片素材，自由加入轨道",
+			Text = "拖入视频/音频/图片素材，自由加入轨道",
 			Font = new Font("Microsoft YaHei UI", 8.25f),
 			ForeColor = MutedColor,
 			AutoSize = true,
@@ -2430,8 +2445,8 @@ internal sealed class MainForm : Form
 		{
 			using (OpenFileDialog ofd = new OpenFileDialog())
 			{
-				ofd.Title = "添加素材到媒体池（支持视频与图片）";
-				ofd.Filter = "媒体文件 (*.mp4;*.mov;*.mkv;*.flv;*.avi;*.jpg;*.png;*.webp;*.bmp)|*.mp4;*.mov;*.mkv;*.flv;*.avi;*.jpg;*.jpeg;*.png;*.webp;*.bmp|视频文件 (*.mp4;*.mov;*.mkv;*.flv;*.avi;*.wmv)|*.mp4;*.mov;*.mkv;*.flv;*.avi;*.wmv|图片文件 (*.jpg;*.png;*.webp;*.bmp)|*.jpg;*.jpeg;*.png;*.webp;*.bmp|所有文件 (*.*)|*.*";
+				ofd.Title = "添加素材到媒体池（视频、音频/BGM、图片）";
+				ofd.Filter = "全部媒体文件 (*.mp4;*.mov;*.mkv;*.mp3;*.wav;*.m4a;*.aac;*.jpg;*.png)|*.mp4;*.mov;*.mkv;*.flv;*.avi;*.wmv;*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg;*.wma;*.jpg;*.jpeg;*.png;*.webp;*.bmp|视频文件 (*.mp4;*.mov;*.mkv;*.flv;*.avi;*.wmv)|*.mp4;*.mov;*.mkv;*.flv;*.avi;*.wmv|音频/BGM文件 (*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg)|*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg;*.wma|图片文件 (*.jpg;*.png;*.webp;*.bmp)|*.jpg;*.jpeg;*.png;*.webp;*.bmp|所有文件 (*.*)|*.*";
 				ofd.Multiselect = true;
 				if (ofd.ShowDialog(this) == DialogResult.OK)
 				{
@@ -3441,172 +3456,87 @@ internal sealed class MainForm : Form
 		InitDefaultOverlays();
 		RefreshOverlayCombo();
 
-		// Tab 2: 样式特效
-		TabPage tabStyle = new TabPage("🎨 样式特效");
-		tabStyle.BackColor = SurfaceColor;
-		tabStyle.AutoScroll = true;
-		GroupBox styleGroup = MakeGroupBox("字幕字体、描边与发光视效", 4, 4, 314, 380);
-		styleGroup.Dock = DockStyle.Fill;
-		styleGroup.Controls.Add(MakeLabel("字幕字体族:", 14, 28));
-		ComboBox fontCombo = new ComboBox { Location = new Point(14, 48), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
-		fontCombo.Items.AddRange(new object[] { "微软雅黑 (系统标准推荐)", "思源黑体 (Source Han Sans)", "黑体 (SimHei Bold)", "Impact (流行醒目短视频大字)", "Arial (英文字幕高清)" });
-		fontCombo.SelectedIndex = 0;
-		styleGroup.Controls.Add(fontCombo);
-
-		styleGroup.Controls.Add(MakeLabel("字色基调与强调预设:", 14, 84));
-		FlowLayoutPanel colorFlow = new FlowLayoutPanel { Location = new Point(14, 104), Size = new Size(286, 36), WrapContents = false };
-		string[] colorNames = new[] { "纯白 #FFF", "明黄 #FE0", "青蓝 #0EF", "金橙 #FA0" };
-		foreach (var cn in colorNames)
-		{
-			Button btnC = MakeButton(cn, 66);
-			btnC.Height = 28;
-			btnC.Margin = new Padding(0, 0, 4, 0);
-			btnC.Click += delegate { UpdateCutEditPreviewFrame(_cutEditCurrentPos, true); };
-			colorFlow.Controls.Add(btnC);
-		}
-		styleGroup.Controls.Add(colorFlow);
-
-		styleGroup.Controls.Add(MakeLabel("描边与投影质感:", 14, 146));
-		ComboBox strokeCombo = new ComboBox { Location = new Point(14, 166), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
-		strokeCombo.Items.AddRange(new object[] { "纯黑强化描边 (高对比度, 推荐短视频)", "柔和环境投影 (Soft Shadow)", "荧光外发光 (Cyber Glow)", "无描边纯文字 (Minimal Clean)" });
-		strokeCombo.SelectedIndex = 0;
-		strokeCombo.SelectedIndexChanged += delegate { UpdateCutEditPreviewFrame(_cutEditCurrentPos, true); };
-		styleGroup.Controls.Add(strokeCombo);
-
-		styleGroup.Controls.Add(MakeLabel("字幕底衬条幅:", 14, 204));
-		ComboBox bgBoxCombo = new ComboBox { Location = new Point(14, 224), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
-		bgBoxCombo.Items.AddRange(new object[] { "无底衬 (浮于视频画面)", "半透明磨砂黑底条 (50% Black Banner)", "圆角胶囊强调框 (Pill Highlight Box)", "电影宽银幕上下遮幅 (Letterbox)" });
-		bgBoxCombo.SelectedIndex = 0;
-		bgBoxCombo.SelectedIndexChanged += delegate { UpdateCutEditPreviewFrame(_cutEditCurrentPos, true); };
-		styleGroup.Controls.Add(bgBoxCombo);
-
-		Button btnApplyStyle = MakeButton("✨ 应用样式并实时预览", 286);
-		btnApplyStyle.Location = new Point(14, 268);
-		btnApplyStyle.Height = 34;
-		btnApplyStyle.Tag = "accent";
-		btnApplyStyle.Click += delegate { UpdateCutEditPreviewFrame(_cutEditCurrentPos, true); };
-		styleGroup.Controls.Add(btnApplyStyle);
-		tabStyle.Controls.Add(styleGroup);
-		inspectorTabs.TabPages.Add(tabStyle);
-
-		// Tab 3: 视听混流
-		TabPage tabAudio = new TabPage("🔊 视听混流");
-		tabAudio.BackColor = SurfaceColor;
-		tabAudio.AutoScroll = true;
-		GroupBox audioGroup = MakeGroupBox("A1 原声与 A2 背景音乐多轨混流", 4, 4, 314, 380);
-		audioGroup.Dock = DockStyle.Fill;
-
-		_cutEditAudioMuteCheckBox = new CheckBox
-		{
-			Text = "🔇 静音 A1 原声音轨",
-			AutoSize = true,
-			Checked = false,
-			Location = new Point(14, 26)
-		};
-		_cutEditAudioMuteCheckBox.CheckedChanged += delegate
-		{
-			_cutEditAudioMuted = _cutEditAudioMuteCheckBox.Checked;
-			if (_cutEditMediaElement != null)
-			{
-				_cutEditMediaElement.IsMuted = _cutEditAudioMuted;
-				if (_cutEditMuteBtn != null) _cutEditMuteBtn.Text = _cutEditAudioMuted ? "🔇" : "🔊";
-			}
-			_cutEditTimelineCanvas?.Invalidate();
-			UpdateDeliverSummary();
-		};
-		audioGroup.Controls.Add(_cutEditAudioMuteCheckBox);
-
-		audioGroup.Controls.Add(MakeLabel("A1 原声音量增益:", 14, 56));
-		_cutEditAudioVolumeLabel = MakeLabel("100%", 130, 56);
-		audioGroup.Controls.Add(_cutEditAudioVolumeLabel);
-
-		_cutEditAudioVolumeTrackBar = new TrackBar
-		{
-			Location = new Point(14, 76),
-			Width = 286,
-			Height = 28,
-			Minimum = 0,
-			Maximum = 200,
-			Value = 100,
-			TickStyle = TickStyle.None
-		};
-		_cutEditAudioVolumeTrackBar.ValueChanged += delegate
-		{
-			_cutEditAudioVolume = _cutEditAudioVolumeTrackBar.Value;
-			_cutEditAudioVolumeLabel.Text = $"{_cutEditAudioVolume}%";
-			if (_cutEditMediaElement != null)
-			{
-				_cutEditMediaElement.Volume = Math.Min(1.0, _cutEditAudioVolume / 100.0);
-			}
-			_cutEditTimelineCanvas?.Invalidate();
-			UpdateDeliverSummary();
-		};
-		audioGroup.Controls.Add(_cutEditAudioVolumeTrackBar);
-
-		audioGroup.Controls.Add(MakeLabel("A2 背景音乐 (BGM):", 14, 114));
-		Button btnPickBgm = MakeButton("🎵 选择BGM音频文件…", 286);
-		btnPickBgm.Location = new Point(14, 134);
-		btnPickBgm.Height = 32;
-		btnPickBgm.Click += delegate
-		{
-			using (OpenFileDialog ofd = new OpenFileDialog())
-			{
-				ofd.Title = "选择背景音乐音频";
-				ofd.Filter = "音频文件 (*.mp3;*.wav;*.aac;*.m4a;*.flac)|*.mp3;*.wav;*.aac;*.m4a;*.flac|所有文件 (*.*)|*.*";
-				if (ofd.ShowDialog(this) == DialogResult.OK)
-				{
-					_cutEditBgmPath = ofd.FileName;
-					MessageBox.Show(this, $"已载入配乐: {Path.GetFileName(_cutEditBgmPath)}", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-					_cutEditTimelineCanvas?.Invalidate();
-				}
-			}
-		};
-		audioGroup.Controls.Add(btnPickBgm);
-
-		audioGroup.Controls.Add(MakeLabel("A2 配乐音量伴奏比例: 40%", 14, 178));
-		TrackBar bgmVolSlider = new TrackBar { Location = new Point(14, 198), Width = 286, Height = 28, Minimum = 0, Maximum = 100, Value = 40, TickStyle = TickStyle.None };
-		bgmVolSlider.ValueChanged += delegate
-		{
-			_cutEditBgmVolume = bgmVolSlider.Value;
-			if (_cutEditBgmVolumeTrackBar != null) _cutEditBgmVolumeTrackBar.Value = _cutEditBgmVolume;
-			if (_cutEditBgmVolumeLabel != null) _cutEditBgmVolumeLabel.Text = $"BGM: {_cutEditBgmVolume}%";
-			_cutEditTimelineCanvas?.Invalidate();
-		};
-		audioGroup.Controls.Add(bgmVolSlider);
-
-		audioGroup.Controls.Add(MakeLabel("环境音效 / 混响衰减:", 14, 234));
-		TrackBar ambSlider = new TrackBar { Location = new Point(14, 254), Width = 286, Height = 28, Minimum = 0, Maximum = 100, Value = 0, TickStyle = TickStyle.None };
-		audioGroup.Controls.Add(ambSlider);
-
-		tabAudio.Controls.Add(audioGroup);
-		inspectorTabs.TabPages.Add(tabAudio);
-
-		// Tab 4: 镜头转场
-		TabPage tabCut = new TabPage("✂ 镜头转场");
+		// Tab 2: 镜头转场 (精简移除样式特效与视听混流，升级镜头转场面板)
+		TabPage tabCut = new TabPage("⚡ 镜头转场");
 		tabCut.BackColor = SurfaceColor;
 		tabCut.AutoScroll = true;
-		GroupBox cutGroup = MakeGroupBox("转场切片与运镜变速", 4, 4, 314, 380);
+		GroupBox cutGroup = MakeGroupBox("片段过渡转场与镜头特效", 4, 4, 314, 380);
 		cutGroup.Dock = DockStyle.Fill;
-		cutGroup.Controls.Add(MakeLabel("片段衔接过渡效果:", 14, 28));
+		cutGroup.Controls.Add(MakeLabel("转场过渡特效类型 (默认无转场):", 14, 28));
+
 		ComboBox transCombo = new ComboBox { Location = new Point(14, 48), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
-		transCombo.Items.AddRange(new object[] { "直接硬切 (Direct Cut - 默认推荐)", "平滑淡入淡出 (Crossfade 0.5s)", "黑场过渡 (Dip to Black 0.3s)", "镜头推进重击 (Zoom Transition)" });
-		transCombo.SelectedIndex = 0;
+		foreach (var td in TransitionDefinitions)
+		{
+			transCombo.Items.Add(td.name);
+		}
+		transCombo.SelectedIndex = 0; // Default: none
 		cutGroup.Controls.Add(transCombo);
 
-		cutGroup.Controls.Add(MakeLabel("智能静音消除阈值:", 14, 86));
-		ComboBox muteThreshCombo = new ComboBox { Location = new Point(14, 106), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
-		muteThreshCombo.Items.AddRange(new object[] { "-35 dB (推荐短视频口播)", "-30 dB (较激进切除微弱停顿)", "-40 dB (较保守保留轻微呼吸声)", "不开启静音检测" });
-		muteThreshCombo.SelectedIndex = 0;
-		cutGroup.Controls.Add(muteThreshCombo);
+		cutGroup.Controls.Add(MakeLabel("转场持续时间 (秒):", 14, 84));
+		ComboBox transDurCombo = new ComboBox { Location = new Point(14, 104), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
+		transDurCombo.Items.AddRange(new object[] { "0.3 秒 (快捷轻快)", "0.5 秒 (自然标准推荐)", "0.8 秒 (舒缓)", "1.0 秒 (平滑)", "1.5 秒 (抒情漫长)", "2.0 秒 (超长淡化)" });
+		transDurCombo.SelectedIndex = 1;
+		cutGroup.Controls.Add(transDurCombo);
 
-		cutGroup.Controls.Add(MakeLabel("片段前后安全保护时长:", 14, 144));
-		Label lblProtect = MakeLabel("前保护: 100 ms  |  后保护: 280 ms", 14, 168);
-		lblProtect.ForeColor = Color.FromArgb(56, 189, 248);
-		cutGroup.Controls.Add(lblProtect);
+		Button btnApplyIn = MakeButton("⚡ 应用到当前选中片段【片头】", 286);
+		btnApplyIn.Location = new Point(14, 142);
+		btnApplyIn.Height = 32;
+		btnApplyIn.Tag = "accent";
+		btnApplyIn.Click += delegate
+		{
+			if (_cutEditSelectedSegmentIndex >= 0 && _cutEditSelectedSegmentIndex < _cutEditSegments.Count)
+			{
+				var seg = _cutEditSegments[_cutEditSelectedSegmentIndex];
+				int selIdx = transCombo.SelectedIndex;
+				if (selIdx >= 0 && selIdx < TransitionDefinitions.Length)
+				{
+					seg.TransitionInType = TransitionDefinitions[selIdx].id;
+					seg.TransitionInDuration = transDurCombo.SelectedIndex switch { 0 => 0.3, 1 => 0.5, 2 => 0.8, 3 => 1.0, 4 => 1.5, _ => 2.0 };
+					_cutEditTimelineCanvas?.Invalidate();
+					UpdateDeliverSummary();
+					MessageBox.Show(this, $"已将【{TransitionDefinitions[selIdx].name}】应用于当前片段片头！", "转场已应用", MessageBoxButtons.OK, MessageBoxIcon.Information);
+				}
+			}
+			else
+			{
+				MessageBox.Show(this, "请先在时间线轨道上点击选中一个视频片段！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			}
+		};
+		cutGroup.Controls.Add(btnApplyIn);
+
+		Button btnApplyOut = MakeButton("⚡ 应用到当前选中片段【片尾】", 286);
+		btnApplyOut.Location = new Point(14, 180);
+		btnApplyOut.Height = 32;
+		btnApplyOut.Click += delegate
+		{
+			if (_cutEditSelectedSegmentIndex >= 0 && _cutEditSelectedSegmentIndex < _cutEditSegments.Count)
+			{
+				var seg = _cutEditSegments[_cutEditSelectedSegmentIndex];
+				int selIdx = transCombo.SelectedIndex;
+				if (selIdx >= 0 && selIdx < TransitionDefinitions.Length)
+				{
+					seg.TransitionOutType = TransitionDefinitions[selIdx].id;
+					seg.TransitionOutDuration = transDurCombo.SelectedIndex switch { 0 => 0.3, 1 => 0.5, 2 => 0.8, 3 => 1.0, 4 => 1.5, _ => 2.0 };
+					_cutEditTimelineCanvas?.Invalidate();
+					UpdateDeliverSummary();
+					MessageBox.Show(this, $"已将【{TransitionDefinitions[selIdx].name}】应用于当前片段片尾！", "转场已应用", MessageBoxButtons.OK, MessageBoxIcon.Information);
+				}
+			}
+			else
+			{
+				MessageBox.Show(this, "请先在时间线轨道上点击选中一个视频片段！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			}
+		};
+		cutGroup.Controls.Add(btnApplyOut);
+
+		Label lblTip = MakeLabel("💡 快捷技巧：\n也可直接在时间线片段上【鼠标右键】，\n在右键菜单中一键添加多种转场与音视频分离！", 14, 222);
+		lblTip.Size = new Size(286, 50);
+		lblTip.ForeColor = Color.FromArgb(56, 189, 248);
+		cutGroup.Controls.Add(lblTip);
 
 		Button btnAddWatermark = MakeButton("🖼️ 载入台标/水印PNG徽标…", 286);
-		btnAddWatermark.Location = new Point(14, 210);
-		btnAddWatermark.Height = 34;
+		btnAddWatermark.Location = new Point(14, 280);
+		btnAddWatermark.Height = 32;
 		btnAddWatermark.Click += delegate
 		{
 			using (OpenFileDialog ofd = new OpenFileDialog())
@@ -3859,7 +3789,7 @@ internal sealed class MainForm : Form
 				_cutEditMediaElement.IsMuted = !_cutEditMediaElement.IsMuted;
 				_cutEditMuteBtn.Text = _cutEditMediaElement.IsMuted ? "🔇" : "🔊";
 				_cutEditAudioMuted = _cutEditMediaElement.IsMuted;
-				if (_cutEditAudioMuteCheckBox != null) _cutEditAudioMuteCheckBox.Checked = _cutEditAudioMuted;
+				if (_cutEditKeepOriginalAudioCheckBox != null) _cutEditKeepOriginalAudioCheckBox.Checked = !_cutEditAudioMuted;
 			}
 		};
 		transportRightPanel.Controls.Add(_cutEditMuteBtn);
@@ -4253,19 +4183,19 @@ internal sealed class MainForm : Form
 		_cutEditKeepOriginalAudioCheckBox.CheckedChanged += delegate
 		{
 			_cutEditAudioMuted = !_cutEditKeepOriginalAudioCheckBox.Checked;
-			if (_cutEditAudioMuteCheckBox != null) _cutEditAudioMuteCheckBox.Checked = _cutEditAudioMuted;
+			if (_cutEditMediaElement != null) _cutEditMediaElement.IsMuted = _cutEditAudioMuted;
 			_cutEditTimelineCanvas?.Invalidate();
 		};
 		tlToolsRight.Controls.Add(_cutEditKeepOriginalAudioCheckBox);
 
-		_cutEditBgmVolumeLabel = new Label { Text = "BGM: 40%", AutoSize = true, ForeColor = Color.FromArgb(192, 132, 252), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 5, 0, 0) };
+		_cutEditBgmVolumeLabel = new Label { Text = $"🎵 配乐: {_cutEditBgmVolume}%", AutoSize = true, ForeColor = Color.FromArgb(192, 132, 252), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 5, 0, 0) };
 		tlToolsRight.Controls.Add(_cutEditBgmVolumeLabel);
 
-		_cutEditBgmVolumeTrackBar = new TrackBar { Width = 56, Height = 24, Minimum = 0, Maximum = 100, Value = _cutEditBgmVolume, TickStyle = TickStyle.None };
+		_cutEditBgmVolumeTrackBar = new TrackBar { Width = 76, Height = 24, Minimum = 0, Maximum = 100, Value = _cutEditBgmVolume, TickStyle = TickStyle.None };
 		_cutEditBgmVolumeTrackBar.ValueChanged += delegate
 		{
 			_cutEditBgmVolume = _cutEditBgmVolumeTrackBar.Value;
-			_cutEditBgmVolumeLabel.Text = $"BGM: {_cutEditBgmVolume}%";
+			_cutEditBgmVolumeLabel.Text = $"🎵 配乐: {_cutEditBgmVolume}%";
 			_cutEditTimelineCanvas?.Invalidate();
 		};
 		tlToolsRight.Controls.Add(_cutEditBgmVolumeTrackBar);
@@ -4956,7 +4886,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			string target = GetSelectedDeliverPath();
 			if (!string.IsNullOrEmpty(target) && File.Exists(target))
 			{
-				LoadVideoIntoCutEditor(target);
+				LoadVideoIntoCutEditor(target, clearExisting: true);
 				SwitchToWorkspace(5);
 			}
 		};
@@ -5100,7 +5030,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				for (int i = 0; i < _cutEditSegments.Count; i++)
 				{
 					var seg = _cutEditSegments[i];
-					bool matchTrack = (seg.TrackId == trk.Id) || (trk.Id == "A1" && seg.TrackId == "V1" && trk.Type == TrackType.Audio);
+					bool matchTrack = (seg.TrackId == trk.Id);
 					if (!matchTrack) continue;
 
 					int sx = headerW + 2 + (int)((seg.TimelineStartSeconds / dur) * trackW);
@@ -5148,7 +5078,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 							if (trk.Id == "A1")
 							{
 								_cutEditAudioMuted = trk.IsMuted;
-								if (_cutEditAudioMuteCheckBox != null) _cutEditAudioMuteCheckBox.Checked = _cutEditAudioMuted;
+								if (_cutEditKeepOriginalAudioCheckBox != null) _cutEditKeepOriginalAudioCheckBox.Checked = !_cutEditAudioMuted;
 								if (_cutEditMediaElement != null) _cutEditMediaElement.IsMuted = _cutEditAudioMuted;
 							}
 						}
@@ -5527,8 +5457,109 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 		cms.Items.Add(new ToolStripSeparator());
 
+		// 1. Audio/Video Separation for Video Segments
+		if (seg.MediaType == "video" || seg.TrackId.StartsWith("V"))
+		{
+			cms.Items.Add("✂️ 音视频分离 (提取音频到A1轨道)", null, delegate
+			{
+				bool hasA1Already = _cutEditSegments.Any(s => s.TrackId == "A1" && s.SourcePath == seg.SourcePath && Math.Abs(s.TimelineStartSeconds - seg.TimelineStartSeconds) < 0.1);
+				if (hasA1Already)
+				{
+					MessageBox.Show(this, "该片段在 A1 原声音轨上已有对应的独立音频片段，无需重复分离。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+					return;
+				}
+				CutSegment aSeg = new CutSegment
+				{
+					Id = Guid.NewGuid().ToString("N"),
+					SourcePath = seg.SourcePath,
+					StartSeconds = seg.StartSeconds,
+					EndSeconds = seg.EndSeconds,
+					TimelineStartSeconds = seg.TimelineStartSeconds,
+					IsKept = seg.IsKept,
+					TrackId = "A1",
+					MediaType = "audio",
+					Title = seg.Title + " (音频)",
+					VolumePercent = 100,
+					LinkedPartnerId = seg.Id
+				};
+				seg.LinkedPartnerId = aSeg.Id;
+				_cutEditSegments.Add(aSeg);
+				RecalculateTimelineTotalDuration();
+				_cutEditTimelineCanvas?.Invalidate();
+				RequestRealAudioWaveform(seg.SourcePath, Color.FromArgb(34, 197, 94));
+				MessageBox.Show(this, "已成功将音频分离至 A1 原声音轨！\n画面与音频现已完全解绑，您可以自由独立剪切或替换画面与音频。", "音视频分离成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			});
+
+			// 2. Transitions Menu for Video Segments
+			ToolStripMenuItem inTransMenu = new ToolStripMenuItem($"⚡ 片头转场 ({GetTransitionName(seg.TransitionInType)})");
+			foreach (var td in TransitionDefinitions)
+			{
+				string tid = td.id;
+				var mi = inTransMenu.DropDownItems.Add(td.name, null, delegate
+				{
+					seg.TransitionInType = tid;
+					_cutEditTimelineCanvas?.Invalidate();
+					UpdateDeliverSummary();
+				});
+				if (seg.TransitionInType == tid) mi.Font = new Font(mi.Font, FontStyle.Bold);
+			}
+			cms.Items.Add(inTransMenu);
+
+			ToolStripMenuItem outTransMenu = new ToolStripMenuItem($"⚡ 片尾转场 ({GetTransitionName(seg.TransitionOutType)})");
+			foreach (var td in TransitionDefinitions)
+			{
+				string tid = td.id;
+				var mi = outTransMenu.DropDownItems.Add(td.name, null, delegate
+				{
+					seg.TransitionOutType = tid;
+					_cutEditTimelineCanvas?.Invalidate();
+					UpdateDeliverSummary();
+				});
+				if (seg.TransitionOutType == tid) mi.Font = new Font(mi.Font, FontStyle.Bold);
+			}
+			cms.Items.Add(outTransMenu);
+
+			ToolStripMenuItem durMenu = new ToolStripMenuItem($"⏱️ 转场时长 ({seg.TransitionInDuration:0.0}s)");
+			double[] durs = new double[] { 0.3, 0.5, 0.8, 1.0, 1.5, 2.0 };
+			foreach (var d in durs)
+			{
+				double curd = d;
+				var mi = durMenu.DropDownItems.Add($"{curd:0.0} 秒", null, delegate
+				{
+					seg.TransitionInDuration = curd;
+					seg.TransitionOutDuration = curd;
+					_cutEditTimelineCanvas?.Invalidate();
+					UpdateDeliverSummary();
+				});
+				if (Math.Abs(seg.TransitionInDuration - curd) < 0.05) mi.Font = new Font(mi.Font, FontStyle.Bold);
+			}
+			cms.Items.Add(durMenu);
+
+			cms.Items.Add(new ToolStripSeparator());
+		}
+		else if (seg.MediaType == "audio")
+		{
+			// Volume Adjustment for Audio Segments
+			ToolStripMenuItem volMenu = new ToolStripMenuItem($"🔊 调节片段音量 ({seg.VolumePercent}%)");
+			int[] vols = new int[] { 150, 120, 100, 80, 50, 20, 0 };
+			foreach (var v in vols)
+			{
+				int curv = v;
+				string label = curv switch { 150 => "150% (增益放大)", 100 => "100% (标准)", 0 => "0% (静音)", _ => $"{curv}%" };
+				var mi = volMenu.DropDownItems.Add(label, null, delegate
+				{
+					seg.VolumePercent = curv;
+					_cutEditTimelineCanvas?.Invalidate();
+					UpdateDeliverSummary();
+				});
+				if (seg.VolumePercent == curv) mi.Font = new Font(mi.Font, FontStyle.Bold);
+			}
+			cms.Items.Add(volMenu);
+			cms.Items.Add(new ToolStripSeparator());
+		}
+
 		var videoTracks = _cutEditTracks.Where(t => t.Type == TrackType.Video).ToList();
-		if (videoTracks.Count > 1)
+		if (videoTracks.Count > 1 && (seg.MediaType == "video" || seg.MediaType == "image"))
 		{
 			ToolStripMenuItem moveTrackMenu = new ToolStripMenuItem("↕️ 转移到指定轨道");
 			foreach (var vt in videoTracks)
@@ -5551,6 +5582,13 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 
 		cms.Show(_cutEditTimelineCanvas, canvasPt);
+	}
+
+	private static string GetTransitionName(string id)
+	{
+		if (string.IsNullOrEmpty(id) || id == "none") return "无";
+		var td = TransitionDefinitions.FirstOrDefault(t => t.id == id);
+		return td.shortName ?? id;
 	}
 
 	private void DeleteSelectedCutSegment()
@@ -5784,7 +5822,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					for (int i = 0; i < _cutEditSegments.Count; i++)
 					{
 						var seg = _cutEditSegments[i];
-						bool matchTrack = (seg.TrackId == trk.Id) || (trk.Id == "A1" && seg.TrackId == "V1" && trk.Type == TrackType.Audio);
+						bool matchTrack = (seg.TrackId == trk.Id);
 						if (!matchTrack) continue;
 
 						int sx = headerW + 2 + (int)((seg.TimelineStartSeconds / dur) * trackW);
@@ -5832,6 +5870,34 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 									using (Brush txtBrush = new SolidBrush(Color.White))
 									{
 										g.DrawString(label, segFont, txtBrush, segRect, sfCenter);
+									}
+								}
+
+								// Transition badges
+								if (!string.IsNullOrEmpty(seg.TransitionInType) && seg.TransitionInType != "none" && sw >= 18)
+								{
+									string inShort = GetTransitionName(seg.TransitionInType);
+									int bW = Math.Min(50, sw / 2);
+									Rectangle inBadge = new Rectangle(sx + 2, curY + 3, bW, 16);
+									using (GraphicsPath bp = CreateRoundedRectanglePath(inBadge, 3))
+									using (Brush bBg = new SolidBrush(Color.FromArgb(168, 85, 247)))
+									using (Brush bText = new SolidBrush(Color.White))
+									{
+										g.FillPath(bBg, bp);
+										g.DrawString($"⚡{inShort}", badgeFont, bText, inBadge, sfCenter);
+									}
+								}
+								if (!string.IsNullOrEmpty(seg.TransitionOutType) && seg.TransitionOutType != "none" && sw >= 18)
+								{
+									string outShort = GetTransitionName(seg.TransitionOutType);
+									int bW = Math.Min(50, sw / 2);
+									Rectangle outBadge = new Rectangle(sx + sw - bW - 2, curY + 3, bW, 16);
+									using (GraphicsPath bp = CreateRoundedRectanglePath(outBadge, 3))
+									using (Brush bBg = new SolidBrush(Color.FromArgb(234, 88, 12)))
+									using (Brush bText = new SolidBrush(Color.White))
+									{
+										g.FillPath(bBg, bp);
+										g.DrawString($"⚡{outShort}", badgeFont, bText, outBadge, sfCenter);
 									}
 								}
 							}
@@ -5896,6 +5962,16 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 												g.DrawLine(pWave, wx, midY - wh, wx, midY + wh);
 											}
 										}
+									}
+								}
+
+								if (sw >= 28)
+								{
+									string audTitle = string.IsNullOrEmpty(seg.Title) ? $"🎵 #{i + 1} {FormatDuration(seg.Duration)}" : $"🎵 #{i + 1} {seg.Title}";
+									if (seg.VolumePercent != 100) audTitle += $" [{seg.VolumePercent}%]";
+									using (Brush txtBrush = new SolidBrush(Color.FromArgb(220, 252, 231)))
+									{
+										g.DrawString(audTitle, segFont, txtBrush, segRect, sfCenter);
 									}
 								}
 
@@ -5966,20 +6042,16 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					}
 				}
 
-				// BGM Track A2
-				if (trk.Id == "A2" && _cutEditBgmVolume > 0 && _cutEditDuration > 0.0)
+				// BGM Track A2 prompt when no segments exist on A2
+				if (trk.Id == "A2" && !_cutEditSegments.Any(s => s.TrackId == "A2") && _cutEditDuration > 0.0)
 				{
 					Rectangle a2Rect = new Rectangle(headerW + 2, curY + 2, trackW, th - 4);
-					using (LinearGradientBrush lgb = new LinearGradientBrush(a2Rect, Color.FromArgb(139, 92, 246), Color.FromArgb(109, 40, 217), LinearGradientMode.Vertical))
-					{
-						g.FillRectangle(lgb, a2Rect);
-					}
-					using (Pen p = new Pen(Color.FromArgb(196, 181, 253), 1f))
+					using (Pen p = new Pen(Color.FromArgb(60, 139, 92, 246), 1f) { DashStyle = DashStyle.Dash })
 					{
 						g.DrawRectangle(p, a2Rect);
 					}
-					string a2Text = $"♫ BGM 背景配乐轨 (音量 {_cutEditBgmVolume}%)";
-					using (Brush bA2 = new SolidBrush(Color.White))
+					string a2Text = $"♫ A2 配乐轨 (音量 {_cutEditBgmVolume}%) | 可从左侧媒体池直接拖入音频/BGM素材";
+					using (Brush bA2 = new SolidBrush(Color.FromArgb(148, 163, 184)))
 					{
 						g.DrawString(a2Text, segFont, bA2, a2Rect, sfCenter);
 					}
@@ -6185,12 +6257,17 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				{
 					toAdd.AddRange(Directory.GetFiles(p, "*" + ext, SearchOption.AllDirectories));
 				}
+				foreach (string ext in AudioExtensions)
+				{
+					toAdd.AddRange(Directory.GetFiles(p, "*" + ext, SearchOption.AllDirectories));
+				}
 			}
 			else if (File.Exists(p))
 			{
 				string ext = Path.GetExtension(p);
 				if (VideoExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)) ||
-				    ImageExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)))
+				    ImageExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)) ||
+				    AudioExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)))
 				{
 					toAdd.Add(p);
 				}
@@ -6329,11 +6406,20 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 						durStr = FormatDuration(info.DurationSeconds);
 						resStr = $"{info.Width}x{info.Height}";
 					}
+					else if (info.HasAudio)
+					{
+						durStr = FormatDuration(info.DurationSeconds);
+						resStr = "音频(BGM)";
+					}
 				}
 			}
 			catch { }
 
-			ListViewItem lvi = new ListViewItem(name);
+			string extP = Path.GetExtension(path);
+			bool isAud = AudioExtensions.Any(e => string.Equals(e, extP, StringComparison.OrdinalIgnoreCase));
+			string iconPrefix = isAud ? "🎵 " : (IsImage(path) ? "🖼️ " : "🎬 ");
+
+			ListViewItem lvi = new ListViewItem(iconPrefix + name);
 			lvi.SubItems.Add(durStr);
 			lvi.SubItems.Add(resStr);
 			lvi.Tag = path;
@@ -6341,7 +6427,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 			if (_cutEditMediaPoolIsThumbView)
 			{
-				lvi.Text = $"{name}\n[{durStr}]";
+				lvi.Text = $"{iconPrefix}{name}\n[{durStr}]";
 			}
 
 			_cutEditMediaPoolList.Items.Add(lvi);
@@ -6414,6 +6500,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			double itemDur = 5.0;
 			int w = 1920, h = 1080;
 			string mediaType = "video";
+			bool hasAudio = false;
+			bool hasVideo = false;
 
 			if (IsImage(path))
 			{
@@ -6434,27 +6522,98 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					if (info.DurationSeconds > 0) itemDur = info.DurationSeconds;
 					if (info.Width > 0) w = info.Width;
 					if (info.Height > 0) h = info.Height;
+					hasAudio = info.HasAudio;
+					hasVideo = info.HasVideo;
 					if (info.HasAudio && !info.HasVideo) mediaType = "audio";
+					else if (info.HasVideo) mediaType = "video";
+				}
+			}
+
+			string extP = Path.GetExtension(path);
+			if (AudioExtensions.Any(e => string.Equals(e, extP, StringComparison.OrdinalIgnoreCase)))
+			{
+				mediaType = "audio";
+			}
+
+			if (mediaType == "audio")
+			{
+				if (string.IsNullOrEmpty(targetTrackId) || targetTrackId.StartsWith("V") || targetTrackId.StartsWith("T"))
+				{
+					targetTrackId = "A2";
+				}
+			}
+			else if (string.IsNullOrEmpty(targetTrackId))
+			{
+				targetTrackId = "V1";
+			}
+
+			// Ripple shift: shift clips at or after targetTime forward by itemDur to prevent any truncation or overwrite
+			if (_cutEditSegments.Count > 0)
+			{
+				foreach (var s in _cutEditSegments)
+				{
+					bool shouldShift = false;
+					if (mediaType == "video" || mediaType == "image")
+					{
+						if (s.TrackId == targetTrackId || (targetTrackId == "V1" && s.TrackId == "A1"))
+						{
+							shouldShift = true;
+						}
+					}
+					else if (mediaType == "audio")
+					{
+						if (s.TrackId == targetTrackId)
+						{
+							shouldShift = true;
+						}
+					}
+
+					if (shouldShift && s.TimelineStartSeconds >= targetTime - 0.05)
+					{
+						s.TimelineStartSeconds += itemDur;
+					}
 				}
 			}
 
 			CutSegment newSeg = new CutSegment
 			{
+				Id = Guid.NewGuid().ToString("N"),
 				SourcePath = path,
 				StartSeconds = 0.0,
 				EndSeconds = itemDur,
 				TimelineStartSeconds = Math.Max(0.0, targetTime),
 				IsKept = true,
-				TrackId = targetTrackId ?? "V1",
+				TrackId = targetTrackId,
 				MediaType = mediaType,
 				Title = Path.GetFileName(path)
 			};
-
 			_cutEditSegments.Add(newSeg);
-			_cutEditSelectedSegmentIndex = _cutEditSegments.Count - 1;
+
+			// Auto-separate audio into A1 track if video has audio and target is V1/V2
+			if (mediaType == "video" && hasAudio && targetTrackId.StartsWith("V"))
+			{
+				CutSegment audioSeg = new CutSegment
+				{
+					Id = Guid.NewGuid().ToString("N"),
+					SourcePath = path,
+					StartSeconds = 0.0,
+					EndSeconds = itemDur,
+					TimelineStartSeconds = Math.Max(0.0, targetTime),
+					IsKept = true,
+					TrackId = "A1",
+					MediaType = "audio",
+					Title = Path.GetFileName(path) + " (音频)",
+					VolumePercent = 100,
+					LinkedPartnerId = newSeg.Id
+				};
+				newSeg.LinkedPartnerId = audioSeg.Id;
+				_cutEditSegments.Add(audioSeg);
+			}
+
+			_cutEditSelectedSegmentIndex = _cutEditSegments.IndexOf(newSeg);
 			_cutEditSelectedTrackId = newSeg.TrackId;
 
-			if (string.IsNullOrEmpty(_cutEditSourcePath) || _cutEditSegments.Count == 1)
+			if (string.IsNullOrEmpty(_cutEditSourcePath) || _cutEditSegments.Count <= 2)
 			{
 				_cutEditSourcePath = path;
 				_cutEditWidth = w;
@@ -6474,7 +6633,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 			RecalculateTimelineTotalDuration();
 
-			if (mediaType == "video" || mediaType == "audio")
+			if (mediaType == "video" || mediaType == "audio" || hasAudio)
 			{
 				RequestRealAudioWaveform(path, Color.FromArgb(34, 197, 94));
 			}
@@ -6868,6 +7027,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			double offsetInSeg = pos - targetSeg.TimelineStartSeconds;
 			CutSegment seg1 = new CutSegment
 			{
+				Id = Guid.NewGuid().ToString("N"),
 				SourcePath = targetSeg.SourcePath,
 				StartSeconds = targetSeg.StartSeconds,
 				EndSeconds = targetSeg.StartSeconds + offsetInSeg,
@@ -6875,10 +7035,16 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				IsKept = targetSeg.IsKept,
 				TrackId = targetSeg.TrackId,
 				MediaType = targetSeg.MediaType,
-				Title = targetSeg.Title
+				Title = targetSeg.Title,
+				VolumePercent = targetSeg.VolumePercent,
+				TransitionInType = targetSeg.TransitionInType,
+				TransitionInDuration = targetSeg.TransitionInDuration,
+				TransitionOutType = "none",
+				TransitionOutDuration = targetSeg.TransitionOutDuration
 			};
 			CutSegment seg2 = new CutSegment
 			{
+				Id = Guid.NewGuid().ToString("N"),
 				SourcePath = targetSeg.SourcePath,
 				StartSeconds = targetSeg.StartSeconds + offsetInSeg,
 				EndSeconds = targetSeg.EndSeconds,
@@ -6886,7 +7052,12 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				IsKept = targetSeg.IsKept,
 				TrackId = targetSeg.TrackId,
 				MediaType = targetSeg.MediaType,
-				Title = targetSeg.Title
+				Title = targetSeg.Title,
+				VolumePercent = targetSeg.VolumePercent,
+				TransitionInType = "none",
+				TransitionInDuration = targetSeg.TransitionInDuration,
+				TransitionOutType = targetSeg.TransitionOutType,
+				TransitionOutDuration = targetSeg.TransitionOutDuration
 			};
 
 			_cutEditSegments.RemoveAt(segIdx);
@@ -8577,13 +8748,18 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					inputs.Add($"-i {QuoteArg(_cutEditSourcePath)}");
 				}
 
+				var keptVideo = kept.Where(s => s.TrackId.StartsWith("V") || s.MediaType == "video" || s.MediaType == "image").OrderBy(s => s.TimelineStartSeconds).ToList();
+				var keptAudio = kept.Where(s => s.TrackId.StartsWith("A") || s.MediaType == "audio").OrderBy(s => s.TimelineStartSeconds).ToList();
+				if (keptVideo.Count == 0) keptVideo = kept;
+
 				StringBuilder fg = new StringBuilder();
 				bool outputAudio = !audioMuted && audioBitrateIndex != 3;
 				float volFactor = (float)audioVolume / 100.0f;
 
-				for (int i = 0; i < kept.Count; i++)
+				// 1. Process Video Clips with Transitions
+				for (int i = 0; i < keptVideo.Count; i++)
 				{
-					var s = kept[i];
+					var s = keptVideo[i];
 					string sp = !string.IsNullOrEmpty(s.SourcePath) ? s.SourcePath : _cutEditSourcePath;
 					int inIdx = (sp != null && srcMap.ContainsKey(sp)) ? srcMap[sp] : 0;
 					bool isImg = (sp != null && IsImage(sp)) || s.MediaType == "image";
@@ -8591,48 +8767,152 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					string et = s.EndSeconds.ToString("0.000", CultureInfo.InvariantCulture);
 					string segDurStr = s.Duration.ToString("0.000", CultureInfo.InvariantCulture);
 
-					if (isImg)
+					string vFilter = isImg
+						? $"trim=duration={segDurStr},setpts=PTS-STARTPTS,scale={targetW}:{targetH}:force_original_aspect_ratio=decrease,pad={targetW}:{targetH}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
+						: $"trim=start={st}:end={et},setpts=PTS-STARTPTS,scale={targetW}:{targetH}:force_original_aspect_ratio=decrease,pad={targetW}:{targetH}:(ow-iw)/2:(oh-ih)/2:black,setsar=1";
+
+					// Transition In (Fade in)
+					if (!string.IsNullOrEmpty(s.TransitionInType) && s.TransitionInType != "none")
 					{
-						fg.Append($"[{inIdx}:v]trim=duration={segDurStr},setpts=PTS-STARTPTS,scale={targetW}:{targetH}:force_original_aspect_ratio=decrease,pad={targetW}:{targetH}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v{i}];");
+						double inD = Math.Max(0.1, Math.Min(s.Duration / 2, s.TransitionInDuration));
+						string inDStr = inD.ToString("0.00", CultureInfo.InvariantCulture);
+						string c = (s.TransitionInType == "fadewhite") ? "white" : "black";
+						vFilter += $",fade=t=in:st=0:d={inDStr}:c={c}";
 					}
-					else
+					// Transition Out (Fade out)
+					if (!string.IsNullOrEmpty(s.TransitionOutType) && s.TransitionOutType != "none")
 					{
-						fg.Append($"[{inIdx}:v]trim=start={st}:end={et},setpts=PTS-STARTPTS,scale={targetW}:{targetH}:force_original_aspect_ratio=decrease,pad={targetW}:{targetH}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v{i}];");
+						double outD = Math.Max(0.1, Math.Min(s.Duration / 2, s.TransitionOutDuration));
+						double outSt = Math.Max(0.0, s.Duration - outD);
+						string outDStr = outD.ToString("0.00", CultureInfo.InvariantCulture);
+						string outStStr = outSt.ToString("0.00", CultureInfo.InvariantCulture);
+						string c = (s.TransitionOutType == "fadewhite") ? "white" : "black";
+						vFilter += $",fade=t=out:st={outStStr}:d={outDStr}:c={c}";
 					}
 
-					if (outputAudio)
-					{
-						if (isImg)
-						{
-							fg.Append($"aevalsrc=0:d={segDurStr}:s=44100[a{i}];");
-						}
-						else
-						{
-							string volFilter = (Math.Abs(volFactor - 1.0f) > 0.01f) ? $",volume={volFactor.ToString("0.00", CultureInfo.InvariantCulture)}" : "";
-							fg.Append($"[{inIdx}:a]atrim=start={st}:end={et},asetpts=PTS-STARTPTS{volFilter}[a{i}];");
-						}
-					}
+					fg.Append($"[{inIdx}:v]{vFilter}[v{i}];");
 				}
 
 				string curV = "[v_concat]";
-				string curA = "[a_concat]";
-				if (kept.Count > 1)
+				if (keptVideo.Count > 1)
 				{
-					if (outputAudio)
-					{
-						for (int i = 0; i < kept.Count; i++) fg.Append($"[v{i}][a{i}]");
-						fg.Append($"concat=n={kept.Count}:v=1:a=1[v_concat][a_concat];");
-					}
-					else
-					{
-						for (int i = 0; i < kept.Count; i++) fg.Append($"[v{i}]");
-						fg.Append($"concat=n={kept.Count}:v=1:a=0[v_concat];");
-					}
+					for (int i = 0; i < keptVideo.Count; i++) fg.Append($"[v{i}]");
+					fg.Append($"concat=n={keptVideo.Count}:v=1:a=0[v_concat];");
 				}
 				else
 				{
 					curV = "[v0]";
-					curA = "[a0]";
+				}
+
+				// 2. Process Audio Streams (A1 Voice + A2 BGM multi-track mixing)
+				string curA = "[a_concat]";
+				if (outputAudio)
+				{
+					if (keptAudio.Count > 0)
+					{
+						var a1Clips = keptAudio.Where(s => s.TrackId == "A1" || !s.TrackId.StartsWith("A2")).ToList();
+						var a2Clips = keptAudio.Where(s => s.TrackId == "A2").ToList();
+
+						string a1Out = null;
+						if (a1Clips.Count > 0)
+						{
+							for (int k = 0; k < a1Clips.Count; k++)
+							{
+								var s = a1Clips[k];
+								string sp = !string.IsNullOrEmpty(s.SourcePath) ? s.SourcePath : _cutEditSourcePath;
+								int inIdx = (sp != null && srcMap.ContainsKey(sp)) ? srcMap[sp] : 0;
+								string st = s.StartSeconds.ToString("0.000", CultureInfo.InvariantCulture);
+								string et = s.EndSeconds.ToString("0.000", CultureInfo.InvariantCulture);
+								float clipVol = ((float)s.VolumePercent / 100.0f) * volFactor;
+								string volFilter = (Math.Abs(clipVol - 1.0f) > 0.01f) ? $",volume={clipVol.ToString("0.00", CultureInfo.InvariantCulture)}" : "";
+								fg.Append($"[{inIdx}:a]atrim=start={st}:end={et},asetpts=PTS-STARTPTS{volFilter}[a1_{k}];");
+							}
+							if (a1Clips.Count > 1)
+							{
+								for (int k = 0; k < a1Clips.Count; k++) fg.Append($"[a1_{k}]");
+								fg.Append($"concat=n={a1Clips.Count}:v=0:a=1[a1_concat];");
+								a1Out = "[a1_concat]";
+							}
+							else
+							{
+								a1Out = "[a1_0]";
+							}
+						}
+
+						string a2Out = null;
+						if (a2Clips.Count > 0)
+						{
+							for (int m = 0; m < a2Clips.Count; m++)
+							{
+								var s = a2Clips[m];
+								string sp = !string.IsNullOrEmpty(s.SourcePath) ? s.SourcePath : _cutEditSourcePath;
+								int inIdx = (sp != null && srcMap.ContainsKey(sp)) ? srcMap[sp] : 0;
+								string st = s.StartSeconds.ToString("0.000", CultureInfo.InvariantCulture);
+								string et = s.EndSeconds.ToString("0.000", CultureInfo.InvariantCulture);
+								float bgmVol = ((float)_cutEditBgmVolume / 100.0f) * ((float)s.VolumePercent / 100.0f);
+								string volFilter = $",volume={bgmVol.ToString("0.00", CultureInfo.InvariantCulture)}";
+								fg.Append($"[{inIdx}:a]atrim=start={st}:end={et},asetpts=PTS-STARTPTS{volFilter}[a2_{m}];");
+							}
+							if (a2Clips.Count > 1)
+							{
+								for (int m = 0; m < a2Clips.Count; m++) fg.Append($"[a2_{m}]");
+								fg.Append($"concat=n={a2Clips.Count}:v=0:a=1[a2_concat];");
+								a2Out = "[a2_concat]";
+							}
+							else
+							{
+								a2Out = "[a2_0]";
+							}
+						}
+
+						if (a1Out != null && a2Out != null)
+						{
+							fg.Append($"{a1Out}{a2Out}amix=inputs=2:duration=first:dropout_transition=2[a_mix];");
+							curA = "[a_mix]";
+						}
+						else if (a1Out != null)
+						{
+							curA = a1Out;
+						}
+						else if (a2Out != null)
+						{
+							curA = a2Out;
+						}
+					}
+					else
+					{
+						// Fallback: extract audio from keptVideo clips
+						for (int i = 0; i < keptVideo.Count; i++)
+						{
+							var s = keptVideo[i];
+							string sp = !string.IsNullOrEmpty(s.SourcePath) ? s.SourcePath : _cutEditSourcePath;
+							int inIdx = (sp != null && srcMap.ContainsKey(sp)) ? srcMap[sp] : 0;
+							bool isImg = (sp != null && IsImage(sp)) || s.MediaType == "image";
+							string st = s.StartSeconds.ToString("0.000", CultureInfo.InvariantCulture);
+							string et = s.EndSeconds.ToString("0.000", CultureInfo.InvariantCulture);
+							string segDurStr = s.Duration.ToString("0.000", CultureInfo.InvariantCulture);
+
+							if (isImg)
+							{
+								fg.Append($"aevalsrc=0:d={segDurStr}:s=44100[a{i}];");
+							}
+							else
+							{
+								string volFilter = (Math.Abs(volFactor - 1.0f) > 0.01f) ? $",volume={volFactor.ToString("0.00", CultureInfo.InvariantCulture)}" : "";
+								fg.Append($"[{inIdx}:a]atrim=start={st}:end={et},asetpts=PTS-STARTPTS{volFilter}[a{i}];");
+							}
+						}
+						if (keptVideo.Count > 1)
+						{
+							for (int i = 0; i < keptVideo.Count; i++) fg.Append($"[a{i}]");
+							fg.Append($"concat=n={keptVideo.Count}:v=0:a=1[a_concat];");
+							curA = "[a_concat]";
+						}
+						else
+						{
+							curA = "[a0]";
+						}
+					}
 				}
 
 				string finalV = curV;
@@ -8837,7 +9117,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			MessageBox.Show(this, "尚未检测到已导出的合并成片，请先完成一次批量合并或直接在剪辑工作台中打开视频。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			return;
 		}
-		LoadVideoIntoCutEditor(target);
+		LoadVideoIntoCutEditor(target, clearExisting: true);
 		SwitchToWorkspace(5);
 	}
 

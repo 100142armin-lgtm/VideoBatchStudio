@@ -15,6 +15,16 @@ internal sealed class CutSegment
 	public string Title { get; set; }
 	public double Duration => Math.Max(0.0, EndSeconds - StartSeconds);
 
+	// Audio settings
+	public int VolumePercent { get; set; } = 100;
+	public string LinkedPartnerId { get; set; }
+
+	// Transition effects
+	public string TransitionInType { get; set; } = "none";
+	public double TransitionInDuration { get; set; } = 1.0;
+	public string TransitionOutType { get; set; } = "none";
+	public double TransitionOutDuration { get; set; } = 1.0;
+
 	public CutSegment Clone()
 	{
 		return new CutSegment
@@ -27,7 +37,13 @@ internal sealed class CutSegment
 			EndSeconds = this.EndSeconds,
 			TimelineStartSeconds = this.TimelineStartSeconds,
 			IsKept = this.IsKept,
-			Title = this.Title
+			Title = this.Title,
+			VolumePercent = this.VolumePercent,
+			LinkedPartnerId = this.LinkedPartnerId,
+			TransitionInType = this.TransitionInType,
+			TransitionInDuration = this.TransitionInDuration,
+			TransitionOutType = this.TransitionOutType,
+			TransitionOutDuration = this.TransitionOutDuration
 		};
 	}
 }
