@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.7.1";
+	public const string CurrentAppVersion = "8.7.2";
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
@@ -4124,9 +4124,13 @@ internal sealed class MainForm : Form
 			{
 				double inSourceSec = activeSeg.StartSeconds + Math.Max(0.0, _cutEditCurrentPos - activeSeg.TimelineStartSeconds);
 				TimeSpan targetPos = TimeSpan.FromSeconds(Math.Max(0.0, inSourceSec));
-				if (Math.Abs((_cutEditMediaElement.Position - targetPos).TotalSeconds) > 0.35)
+				if (Math.Abs((_cutEditMediaElement.Position - targetPos).TotalSeconds) > 1.2)
 				{
 					_cutEditMediaElement.Position = targetPos;
+				}
+				if (_cutEditIsPlaying && _cutEditElementHost != null && _cutEditElementHost.Visible)
+				{
+					try { _cutEditMediaElement.Play(); } catch { }
 				}
 			}
 
@@ -9043,10 +9047,22 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 				if (_cutEditIsPlaying)
 				{
-					if (_cutEditPreviewBox != null) _cutEditPreviewBox.Visible = false;
-					if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed && _cutEditPopoutForm.PreviewBox != null)
+					bool isPopoutOpen = (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed);
+					if (isPopoutOpen)
 					{
-						_cutEditPopoutForm.PreviewBox.Visible = false;
+						if (_cutEditPreviewBox != null)
+						{
+							_cutEditPreviewBox.Visible = true;
+							_cutEditPreviewBox.BringToFront();
+						}
+						if (_cutEditPopoutForm.PreviewBox != null)
+						{
+							_cutEditPopoutForm.PreviewBox.Visible = false;
+						}
+					}
+					else
+					{
+						if (_cutEditPreviewBox != null) _cutEditPreviewBox.Visible = false;
 					}
 					_cutEditElementHost.Visible = true;
 					_cutEditElementHost.BringToFront();
@@ -9190,6 +9206,11 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			_cutEditElementHost.Parent = _cutEditPopoutForm.CanvasPanel;
 			_cutEditElementHost.Dock = DockStyle.Fill;
+			if (_cutEditPreviewBox != null)
+			{
+				_cutEditPreviewBox.Visible = true;
+				_cutEditPreviewBox.BringToFront();
+			}
 			if (_cutEditIsPlaying)
 			{
 				_cutEditElementHost.Visible = true;
@@ -9380,9 +9401,22 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 	{
 		BeginInvoke((MethodInvoker)delegate
 		{
-			if (_cutEditIsPlaying && _cutEditMediaElement != null)
+			if (_cutEditMediaElement != null)
 			{
-				try { _cutEditMediaElement.Play(); } catch { }
+				var activeSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
+				if (activeSeg != null && activeSeg.MediaType != "image")
+				{
+					double inSourceSec = activeSeg.StartSeconds + Math.Max(0.0, _cutEditCurrentPos - activeSeg.TimelineStartSeconds);
+					try { _cutEditMediaElement.Position = TimeSpan.FromSeconds(Math.Max(0.0, inSourceSec)); } catch { }
+				}
+				if (_cutEditIsPlaying)
+				{
+					try { _cutEditMediaElement.Play(); } catch { }
+				}
+				else
+				{
+					try { _cutEditMediaElement.Pause(); } catch { }
+				}
 			}
 			UpdateCutEditTimeLabel();
 			_cutEditTimelineCanvas?.Invalidate();

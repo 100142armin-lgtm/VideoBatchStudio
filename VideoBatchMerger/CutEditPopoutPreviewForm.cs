@@ -109,26 +109,27 @@ internal sealed class CutEditPopoutPreviewForm : Form
 			_titleInfoLabel.Location = new Point(Math.Min(320, Math.Max(12, topBar.ClientSize.Width - 520)), 11);
 		};
 
-		// 2. Bottom Control Panel (Dock Bottom, Height 86)
+		// 2. Bottom Control Panel (Dock Bottom, Height 90)
 		Panel bottomPanel = new Panel
 		{
 			Dock = DockStyle.Bottom,
-			Height = 86,
-			BackColor = Color.FromArgb(18, 24, 34),
-			Padding = new Padding(12, 4, 12, 4)
+			Height = 90,
+			BackColor = Color.FromArgb(18, 24, 34)
 		};
 
-		// Row 1: Scrubber TrackBar
+		// --- Row 1: Scrubber TrackBar & Timecode Label (Y = 6 to 34) ---
 		_scrubber = new TrackBar
 		{
-			Dock = DockStyle.Top,
+			Location = new Point(14, 6),
 			Height = 28,
+			Width = Math.Max(200, bottomPanel.ClientSize.Width - 210),
 			Minimum = 0,
 			Maximum = 1000,
 			Value = 0,
 			TickStyle = TickStyle.None,
 			Cursor = Cursors.Hand,
-			BackColor = Color.FromArgb(18, 24, 34)
+			BackColor = Color.FromArgb(18, 24, 34),
+			Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
 		};
 		_scrubber.MouseDown += delegate { _isDraggingScrubber = true; };
 		_scrubber.MouseUp += delegate
@@ -152,44 +153,30 @@ internal sealed class CutEditPopoutPreviewForm : Form
 		};
 		bottomPanel.Controls.Add(_scrubber);
 
-		// Row 2: Transport & Subtitle Position controls
-		Panel ctrlRow = new Panel
-		{
-			Dock = DockStyle.Fill,
-			BackColor = Color.Transparent,
-			Padding = new Padding(0, 4, 0, 0)
-		};
-
 		_timeLabel = new Label
 		{
 			Text = "00:00.0 / 00:00.0",
 			ForeColor = Color.FromArgb(56, 189, 248),
 			Font = new Font("Consolas", 10.5f, FontStyle.Bold),
-			AutoSize = true,
-			Location = new Point(8, 12)
+			Size = new Size(180, 24),
+			TextAlign = ContentAlignment.MiddleRight,
+			Location = new Point(bottomPanel.ClientSize.Width - 195, 10),
+			Anchor = AnchorStyles.Top | AnchorStyles.Right
 		};
-		ctrlRow.Controls.Add(_timeLabel);
+		bottomPanel.Controls.Add(_timeLabel);
 
-		FlowLayoutPanel btnFlow = new FlowLayoutPanel
-		{
-			Size = new Size(350, 36),
-			FlowDirection = FlowDirection.LeftToRight,
-			WrapContents = false,
-			BackColor = Color.Transparent
-		};
+		// --- Row 2: Playback Controls (Y = 46 to 80) ---
+		Button btnStepBack5 = MakeBtn("⏪ -5s", 56, 14, 46, delegate { _mainForm.StepCutEditTime(-5.0); });
+		bottomPanel.Controls.Add(btnStepBack5);
 
-		Button btnStepBack5 = MakeBtn("⏪ -5s", 58, delegate { _mainForm.StepCutEditTime(-5.0); });
-		btnFlow.Controls.Add(btnStepBack5);
-
-		Button btnStepBack1 = MakeBtn("◀ -1s", 52, delegate { _mainForm.StepCutEditTime(-1.0); });
-		btnStepBack1.Margin = new Padding(4, 0, 0, 0);
-		btnFlow.Controls.Add(btnStepBack1);
+		Button btnStepBack1 = MakeBtn("◀ -1s", 52, 74, 46, delegate { _mainForm.StepCutEditTime(-1.0); });
+		bottomPanel.Controls.Add(btnStepBack1);
 
 		_btnPlayPause = new Button
 		{
-			Text = "▶ 播放",
-			Size = new Size(84, 32),
-			Margin = new Padding(6, 0, 0, 0),
+			Text = "▶ 播放 (空格)",
+			Location = new Point(130, 46),
+			Size = new Size(106, 34),
 			FlatStyle = FlatStyle.Flat,
 			BackColor = Color.FromArgb(37, 99, 235),
 			ForeColor = Color.White,
@@ -198,48 +185,41 @@ internal sealed class CutEditPopoutPreviewForm : Form
 		};
 		_btnPlayPause.FlatAppearance.BorderSize = 0;
 		_btnPlayPause.Click += delegate { _mainForm.ToggleCutEditPlayPause(); };
-		btnFlow.Controls.Add(_btnPlayPause);
+		bottomPanel.Controls.Add(_btnPlayPause);
 
-		Button btnStepFwd1 = MakeBtn("+1s ▶", 52, delegate { _mainForm.StepCutEditTime(1.0); });
-		btnStepFwd1.Margin = new Padding(6, 0, 0, 0);
-		btnFlow.Controls.Add(btnStepFwd1);
+		Button btnStepFwd1 = MakeBtn("+1s ▶", 52, 240, 46, delegate { _mainForm.StepCutEditTime(1.0); });
+		bottomPanel.Controls.Add(btnStepFwd1);
 
-		Button btnStepFwd5 = MakeBtn("+5s ⏩", 58, delegate { _mainForm.StepCutEditTime(5.0); });
-		btnStepFwd5.Margin = new Padding(4, 0, 0, 0);
-		btnFlow.Controls.Add(btnStepFwd5);
+		Button btnStepFwd5 = MakeBtn("+5s ⏩", 56, 296, 46, delegate { _mainForm.StepCutEditTime(5.0); });
+		bottomPanel.Controls.Add(btnStepFwd5);
 
-		ctrlRow.Controls.Add(btnFlow);
+		Button btnFullscreenBottom = MakeBtn("⛶ 全屏", 66, 356, 46, delegate { ToggleFullscreen(); });
+		bottomPanel.Controls.Add(btnFullscreenBottom);
 
-		// Subtitle position slider on right side
-		Panel subPosPanel = new Panel
-		{
-			Dock = DockStyle.Right,
-			Width = 330,
-			Height = 36,
-			BackColor = Color.Transparent
-		};
-
+		// Subtitle position controls on right side (Y = 46)
 		Label subPosLbl = new Label
 		{
 			Text = "字幕高度:",
 			Font = new Font("Microsoft YaHei UI", 8.5f),
 			ForeColor = Color.FromArgb(203, 213, 225),
 			AutoSize = true,
-			Location = new Point(4, 12)
+			Location = new Point(bottomPanel.ClientSize.Width - 360, 52),
+			Anchor = AnchorStyles.Top | AnchorStyles.Right
 		};
-		subPosPanel.Controls.Add(subPosLbl);
+		bottomPanel.Controls.Add(subPosLbl);
 
 		_subtitlePosSlider = new TrackBar
 		{
-			Location = new Point(74, 6),
-			Width = 135,
-			Height = 26,
+			Location = new Point(bottomPanel.ClientSize.Width - 290, 46),
+			Width = 190,
+			Height = 28,
 			Minimum = 20,
 			Maximum = 800,
 			Value = Math.Max(20, Math.Min(800, _mainForm.CutEditSubtitleBottomOffset)),
 			TickStyle = TickStyle.None,
 			BackColor = Color.FromArgb(18, 24, 34),
-			Cursor = Cursors.Hand
+			Cursor = Cursors.Hand,
+			Anchor = AnchorStyles.Top | AnchorStyles.Right
 		};
 		_subtitlePosValLabel = new Label
 		{
@@ -247,27 +227,16 @@ internal sealed class CutEditPopoutPreviewForm : Form
 			Font = new Font("Microsoft YaHei UI", 8.5f),
 			ForeColor = Color.FromArgb(56, 189, 248),
 			AutoSize = true,
-			Location = new Point(216, 12)
+			Location = new Point(bottomPanel.ClientSize.Width - 95, 52),
+			Anchor = AnchorStyles.Top | AnchorStyles.Right
 		};
 		_subtitlePosSlider.ValueChanged += delegate
 		{
 			_subtitlePosValLabel.Text = $"底:{_subtitlePosSlider.Value}px";
 			_mainForm.SetCutEditSubtitleBottomOffset(_subtitlePosSlider.Value);
 		};
-		subPosPanel.Controls.Add(_subtitlePosSlider);
-		subPosPanel.Controls.Add(_subtitlePosValLabel);
-		ctrlRow.Controls.Add(subPosPanel);
-
-		ctrlRow.Resize += delegate
-		{
-			int leftReserved = _timeLabel.Right + 12;
-			int rightReserved = ctrlRow.ClientSize.Width - subPosPanel.Width;
-			int availableWidth = Math.Max(0, rightReserved - leftReserved);
-			int targetX = leftReserved + (availableWidth - btnFlow.Width) / 2;
-			btnFlow.Location = new Point(Math.Max(leftReserved, targetX), 6);
-		};
-
-		bottomPanel.Controls.Add(ctrlRow);
+		bottomPanel.Controls.Add(_subtitlePosSlider);
+		bottomPanel.Controls.Add(_subtitlePosValLabel);
 
 		// 3. Central Canvas Panel (Dock Fill) & PictureBox
 		_canvasPanel = new Panel
@@ -333,12 +302,13 @@ internal sealed class CutEditPopoutPreviewForm : Form
 		};
 	}
 
-	private Button MakeBtn(string text, int width, EventHandler onClick)
+	private Button MakeBtn(string text, int width, int left, int top, EventHandler onClick)
 	{
 		Button btn = new Button
 		{
 			Text = text,
-			Size = new Size(width, 32),
+			Location = new Point(left, top),
+			Size = new Size(width, 34),
 			FlatStyle = FlatStyle.Flat,
 			BackColor = Color.FromArgb(37, 45, 60),
 			ForeColor = Color.White,
