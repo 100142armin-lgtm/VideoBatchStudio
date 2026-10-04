@@ -119,6 +119,7 @@ internal sealed class MainForm : Form
 	private Button _cutEditSnapBtn;
 	private Button _cutEditLinkBtn;
 	private Button _cutEditCloseGapsBtn;
+	private ToolTip _cutEditToolTip;
 
 	// Dragging & Repositioning states
 	private enum TimelineDragMode { None, ScrubPlayhead, MoveClip, TrimIn, TrimOut, PanHand }
@@ -4221,64 +4222,64 @@ internal sealed class MainForm : Form
 			Padding = new Padding(0, 4, 0, 4)
 		};
 
-		_cutEditToolSelectBtn = MakeButton("↖ 选择 (V)", 82);
-		_cutEditToolSelectBtn.Height = 30;
+		_cutEditToolTip = new ToolTip
+		{
+			InitialDelay = 150,
+			ReshowDelay = 100,
+			AutoPopDelay = 10000,
+			ShowAlways = true
+		};
+
+		Control MakeDivider() => new Panel { Width = 1, Height = 18, BackColor = Color.FromArgb(71, 85, 105), Margin = new Padding(3, 6, 3, 0) };
+
+		// Group 1: Editing & trimming tools
+		_cutEditToolSelectBtn = MakeTimelineIconButton("↖", "选择工具 (快捷键: V)\n用于在轨道上选择和拖动素材片段", 32);
 		_cutEditToolSelectBtn.BackColor = Color.FromArgb(14, 165, 233);
 		_cutEditToolSelectBtn.ForeColor = Color.White;
 		_cutEditToolSelectBtn.Click += delegate { SetTimelineToolMode(TimelineToolMode.Select); };
 		tlToolsLeft.Controls.Add(_cutEditToolSelectBtn);
 
-		_cutEditToolRazorBtn = MakeButton("✂ 剃刀 (C)", 82);
-		_cutEditToolRazorBtn.Height = 30;
-		_cutEditToolRazorBtn.Margin = new Padding(2, 0, 0, 0);
+		_cutEditToolRazorBtn = MakeTimelineIconButton("✂", "剃刀切片工具 (快捷键: C)\n在鼠标点击位置快速分割切断素材", 32);
 		_cutEditToolRazorBtn.Click += delegate { SetTimelineToolMode(TimelineToolMode.Razor); };
 		tlToolsLeft.Controls.Add(_cutEditToolRazorBtn);
 
-		_cutEditRippleDeleteBtn = MakeButton("🌊 波纹删除 (Shift+Del)", 140);
-		_cutEditRippleDeleteBtn.Height = 30;
-		_cutEditRippleDeleteBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditSplitButton = MakeTimelineIconButton("✁", "当前位置切片 (快捷键: B)\n在当前播放头指针处截断选中片段", 32);
+		_cutEditSplitButton.Click += delegate { SplitCutEditCurrentPosition(); };
+		tlToolsLeft.Controls.Add(_cutEditSplitButton);
+
+		_cutEditRippleDeleteBtn = MakeTimelineIconButton("🌊", "波纹删除 (快捷键: Shift+Del)\n删除所选片段并自动将后方所有素材向前吸附闭合间隙", 32);
 		_cutEditRippleDeleteBtn.ForeColor = Color.FromArgb(251, 146, 60);
 		_cutEditRippleDeleteBtn.Click += delegate { DeleteSelectedCutSegment(isRipple: true); };
 		tlToolsLeft.Controls.Add(_cutEditRippleDeleteBtn);
 
-		_cutEditSnapBtn = MakeButton("🧲 磁吸:开 (S)", 92);
-		_cutEditSnapBtn.Height = 30;
-		_cutEditSnapBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditDeleteBtn = MakeTimelineIconButton("🗑️", "常规删除 (快捷键: Delete)\n删除选中的素材片段（保留原位空白间隙）", 32);
+		_cutEditDeleteBtn.ForeColor = Color.FromArgb(248, 113, 113);
+		_cutEditDeleteBtn.Click += delegate { DeleteSelectedCutSegment(isRipple: false); };
+		tlToolsLeft.Controls.Add(_cutEditDeleteBtn);
+
+		tlToolsLeft.Controls.Add(MakeDivider());
+
+		// Group 2: Snapping, Linking & Gap closing
+		_cutEditSnapBtn = MakeTimelineIconButton("🧲", "自动磁吸对齐 (快捷键: S)\n当前状态: 已开启\n开启后移动片段或播放头时会自动吸附到素材边缘", 32);
 		_cutEditSnapBtn.BackColor = Color.FromArgb(6, 182, 212);
 		_cutEditSnapBtn.ForeColor = Color.Black;
 		_cutEditSnapBtn.Click += delegate { ToggleSnapping(); };
 		tlToolsLeft.Controls.Add(_cutEditSnapBtn);
 
-		_cutEditLinkBtn = MakeButton("🔗 联动:开 (L)", 92);
-		_cutEditLinkBtn.Height = 30;
-		_cutEditLinkBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditLinkBtn = MakeTimelineIconButton("🔗", "视音频联动选择 (快捷键: L)\n当前状态: 已开启\n开启后选中视频片段会自动联动选中对应音频", 32);
 		_cutEditLinkBtn.BackColor = Color.FromArgb(59, 130, 246);
 		_cutEditLinkBtn.ForeColor = Color.White;
 		_cutEditLinkBtn.Click += delegate { ToggleLinkedSelection(); };
 		tlToolsLeft.Controls.Add(_cutEditLinkBtn);
 
-		_cutEditSplitButton = MakeButton("✂️ 切片 (B)", 82);
-		_cutEditSplitButton.Height = 30;
-		_cutEditSplitButton.Margin = new Padding(3, 0, 0, 0);
-		_cutEditSplitButton.Click += delegate { SplitCutEditCurrentPosition(); };
-		tlToolsLeft.Controls.Add(_cutEditSplitButton);
-
-		_cutEditDeleteBtn = MakeButton("🗑️ 删除 (Del)", 86);
-		_cutEditDeleteBtn.Height = 30;
-		_cutEditDeleteBtn.Margin = new Padding(3, 0, 0, 0);
-		_cutEditDeleteBtn.ForeColor = Color.FromArgb(248, 113, 113);
-		_cutEditDeleteBtn.Click += delegate { DeleteSelectedCutSegment(isRipple: false); };
-		tlToolsLeft.Controls.Add(_cutEditDeleteBtn);
-
-		_cutEditCloseGapsBtn = MakeButton("🧲 闭合间隙", 86);
-		_cutEditCloseGapsBtn.Height = 30;
-		_cutEditCloseGapsBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditCloseGapsBtn = MakeTimelineIconButton("⏩", "闭合所有间隙\n自动扫描轨道并将所有素材向前拼接消除空隙", 32);
 		_cutEditCloseGapsBtn.Click += delegate { CloseAllTimelineGaps(); };
 		tlToolsLeft.Controls.Add(_cutEditCloseGapsBtn);
 
-		_cutEditAddTrackBtn = MakeButton("➕ 轨道 ▼", 78);
-		_cutEditAddTrackBtn.Height = 30;
-		_cutEditAddTrackBtn.Margin = new Padding(3, 0, 0, 0);
+		tlToolsLeft.Controls.Add(MakeDivider());
+
+		// Group 3: Tracks & Segment State
+		_cutEditAddTrackBtn = MakeTimelineIconButton("➕", "添加新轨道\n点击弹出菜单新建视频轨道、音频轨道或字幕轨道", 32);
 		_cutEditAddTrackBtn.Click += delegate
 		{
 			ContextMenuStrip cms = new ContextMenuStrip();
@@ -4289,159 +4290,46 @@ internal sealed class MainForm : Form
 		};
 		tlToolsLeft.Controls.Add(_cutEditAddTrackBtn);
 
-		_cutEditToggleSegmentButton = MakeButton("🚫 剔除/保留", 90);
-		_cutEditToggleSegmentButton.Height = 30;
-		_cutEditToggleSegmentButton.Margin = new Padding(3, 0, 0, 0);
+		_cutEditToggleSegmentButton = MakeTimelineIconButton("🚫", "剔除 / 保留切换\n将选中片段切换为禁用（不参与导出）或启用", 32);
 		_cutEditToggleSegmentButton.Click += delegate { ToggleSelectedSegmentKept(); };
 		tlToolsLeft.Controls.Add(_cutEditToggleSegmentButton);
 
-		_cutEditResetSegmentsButton = MakeButton("↺ 恢复全部", 78);
-		_cutEditResetSegmentsButton.Height = 30;
-		_cutEditResetSegmentsButton.Margin = new Padding(3, 0, 0, 0);
+		_cutEditResetSegmentsButton = MakeTimelineIconButton("↺", "恢复全部片段\n重置所有片段的剔除与裁剪为初始完整状态", 32);
 		_cutEditResetSegmentsButton.Click += delegate { ResetCutEditSegments(); };
 		tlToolsLeft.Controls.Add(_cutEditResetSegmentsButton);
 
-		_cutEditClearAllBtn = MakeButton("🗑️ 清空所有轨道", 115);
-		_cutEditClearAllBtn.Height = 30;
-		_cutEditClearAllBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditClearAllBtn = MakeTimelineIconButton("🧨", "清空所有轨道\n清空时间轴上的所有剪辑素材与轨道工程", 32);
 		_cutEditClearAllBtn.ForeColor = Color.FromArgb(248, 113, 113);
 		_cutEditClearAllBtn.Click += delegate { ClearCutEditorProject(suppressPrompt: false); };
 		tlToolsLeft.Controls.Add(_cutEditClearAllBtn);
 
-		_cutEditUndoButton = MakeButton("↶ 撤销 (Ctrl+Z)", 105);
-		_cutEditUndoButton.Height = 30;
-		_cutEditUndoButton.Margin = new Padding(4, 0, 0, 0);
+		tlToolsLeft.Controls.Add(MakeDivider());
+
+		// Group 4: Undo, Redo, Save
+		_cutEditUndoButton = MakeTimelineIconButton("↶", "撤销操作 (快捷键: Ctrl+Z)", 32);
 		_cutEditUndoButton.Enabled = false;
 		_cutEditUndoButton.Click += delegate { UndoCutEditAction(); };
 		tlToolsLeft.Controls.Add(_cutEditUndoButton);
 
-		_cutEditRedoButton = MakeButton("↷ 重做 (Ctrl+Y)", 105);
-		_cutEditRedoButton.Height = 30;
-		_cutEditRedoButton.Margin = new Padding(3, 0, 0, 0);
+		_cutEditRedoButton = MakeTimelineIconButton("↷", "重做操作 (快捷键: Ctrl+Y)", 32);
 		_cutEditRedoButton.Enabled = false;
 		_cutEditRedoButton.Click += delegate { RedoCutEditAction(); };
 		tlToolsLeft.Controls.Add(_cutEditRedoButton);
 
-		_cutEditSaveProjectButton = MakeButton("💾 保存 (Ctrl+S)", 110);
-		_cutEditSaveProjectButton.Height = 30;
-		_cutEditSaveProjectButton.Margin = new Padding(4, 0, 0, 0);
+		_cutEditSaveProjectButton = MakeTimelineIconButton("💾", "保存工程 (快捷键: Ctrl+S)", 32);
 		_cutEditSaveProjectButton.Click += delegate { SaveCutEditProject(); };
 		tlToolsLeft.Controls.Add(_cutEditSaveProjectButton);
 
-		_cutEditSetInButton = MakeButton("[ 设入点 (I)", 84);
-		_cutEditSetInButton.Height = 30;
-		_cutEditSetInButton.Margin = new Padding(3, 0, 0, 0);
+		tlToolsLeft.Controls.Add(MakeDivider());
+
+		// Group 5: Mark In / Mark Out
+		_cutEditSetInButton = MakeTimelineIconButton("[", "设置入点 (快捷键: I)\n以当前播放头位置标记工程导出或剪辑入点", 30);
 		_cutEditSetInButton.Click += delegate { SetCutEditInPoint(); };
 		tlToolsLeft.Controls.Add(_cutEditSetInButton);
 
-		_cutEditSetOutButton = MakeButton("] 设出点 (O)", 84);
-		_cutEditSetOutButton.Height = 30;
-		_cutEditSetOutButton.Margin = new Padding(3, 0, 0, 0);
+		_cutEditSetOutButton = MakeTimelineIconButton("]", "设置出点 (快捷键: O)\n以当前播放头位置标记工程导出或剪辑出点", 30);
 		_cutEditSetOutButton.Click += delegate { SetCutEditOutPoint(); };
 		tlToolsLeft.Controls.Add(_cutEditSetOutButton);
-
-		timelineTools.Controls.Add(tlToolsLeft);
-
-		// Right Audio mixing & Timeline Zoom controls
-		FlowLayoutPanel tlToolsRight = new FlowLayoutPanel
-		{
-			Dock = DockStyle.Right,
-			AutoSize = true,
-			FlowDirection = FlowDirection.LeftToRight,
-			WrapContents = false,
-			Padding = new Padding(0, 4, 4, 4)
-		};
-
-		Label lblSpd = new Label { Text = "速度:", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(2, 6, 0, 0) };
-		tlToolsRight.Controls.Add(lblSpd);
-
-		_cutEditSpeedCombo = new ComboBox { Width = 66, Height = 26, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Microsoft YaHei UI", 8.5f) };
-		_cutEditSpeedCombo.Items.AddRange(new object[] { "1.00x", "0.50x", "0.75x", "1.25x", "1.50x", "2.00x" });
-		_cutEditSpeedCombo.SelectedIndex = 0;
-		tlToolsRight.Controls.Add(_cutEditSpeedCombo);
-
-		_cutEditKeepOriginalAudioCheckBox = new CheckBox { Text = "保留原声", AutoSize = true, Checked = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 4, 0, 0) };
-		_cutEditKeepOriginalAudioCheckBox.CheckedChanged += delegate
-		{
-			_cutEditAudioMuted = !_cutEditKeepOriginalAudioCheckBox.Checked;
-			if (_cutEditMediaElement != null) _cutEditMediaElement.IsMuted = _cutEditAudioMuted;
-			_cutEditTimelineCanvas?.Invalidate();
-		};
-		tlToolsRight.Controls.Add(_cutEditKeepOriginalAudioCheckBox);
-
-		_cutEditBgmVolumeLabel = new Label { Text = $"🎵 配乐: {_cutEditBgmVolume}%", AutoSize = true, ForeColor = Color.FromArgb(192, 132, 252), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 5, 0, 0) };
-		tlToolsRight.Controls.Add(_cutEditBgmVolumeLabel);
-
-		_cutEditBgmVolumeTrackBar = new TrackBar { Width = 76, Height = 24, Minimum = 0, Maximum = 100, Value = _cutEditBgmVolume, TickStyle = TickStyle.None };
-		_cutEditBgmVolumeTrackBar.ValueChanged += delegate
-		{
-			_cutEditBgmVolume = _cutEditBgmVolumeTrackBar.Value;
-			_cutEditBgmVolumeLabel.Text = $"🎵 配乐: {_cutEditBgmVolume}%";
-			_cutEditTimelineCanvas?.Invalidate();
-		};
-		tlToolsRight.Controls.Add(_cutEditBgmVolumeTrackBar);
-
-		// Zoom controls (轨道长短 / 缩放拉杆)
-		_cutEditZoomLabel = new Label { Text = "🔍 100%", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 6, 1, 0), Cursor = Cursors.Hand };
-		ToolTip tipZoom = new ToolTip();
-		tipZoom.SetToolTip(_cutEditZoomLabel, "双击或右键重置为100% (支持Ctrl/Alt+滚轮缩放)");
-		_cutEditZoomLabel.MouseDoubleClick += delegate { SetCutEditZoom(100); };
-		_cutEditZoomLabel.MouseDown += (s, e) => { if (e.Button == MouseButtons.Right) SetCutEditZoom(100); };
-		tlToolsRight.Controls.Add(_cutEditZoomLabel);
-
-		_cutEditZoomOutBtn = MakeMiniStepButton("➖");
-		_cutEditZoomOutBtn.Click += delegate { SetCutEditZoom((int)Math.Round(_cutEditTimelineZoom * 100) - 15); };
-		tipZoom.SetToolTip(_cutEditZoomOutBtn, "缩小时间轴 (长短缩短)");
-		tlToolsRight.Controls.Add(_cutEditZoomOutBtn);
-
-		_cutEditZoomSlider = new TrackBar { Width = 78, Height = 24, Minimum = 20, Maximum = 600, Value = 100, TickStyle = TickStyle.None };
-		_cutEditZoomSlider.ValueChanged += delegate
-		{
-			SetCutEditZoom(_cutEditZoomSlider.Value);
-		};
-		tipZoom.SetToolTip(_cutEditZoomSlider, "轨道时间长短拉杆 (20% - 600%)");
-		tlToolsRight.Controls.Add(_cutEditZoomSlider);
-
-		_cutEditZoomInBtn = MakeMiniStepButton("➕");
-		_cutEditZoomInBtn.Click += delegate { SetCutEditZoom((int)Math.Round(_cutEditTimelineZoom * 100) + 15); };
-		tipZoom.SetToolTip(_cutEditZoomInBtn, "放大时间轴 (长短拉长)");
-		tlToolsRight.Controls.Add(_cutEditZoomInBtn);
-
-		// Track Height controls (轨道宽窄 / 高度调节拉杆)
-		_cutEditTrackHeightLabel = new Label { Text = $"↕️ {_cutEditBaseTrackHeight}px", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 6, 1, 0), Cursor = Cursors.Hand };
-		ToolTip tipHeight = new ToolTip();
-		tipHeight.SetToolTip(_cutEditTrackHeightLabel, "双击或右键重置为标准36px (支持Shift+滚轮调节)");
-		_cutEditTrackHeightLabel.MouseDoubleClick += delegate { SetCutEditTrackHeight(36); };
-		_cutEditTrackHeightLabel.MouseDown += (s, e) => { if (e.Button == MouseButtons.Right) SetCutEditTrackHeight(36); };
-		tlToolsRight.Controls.Add(_cutEditTrackHeightLabel);
-
-		_cutEditHeightDownBtn = MakeMiniStepButton("➖");
-		_cutEditHeightDownBtn.Click += delegate { SetCutEditTrackHeight(_cutEditBaseTrackHeight - 4); };
-		tipHeight.SetToolTip(_cutEditHeightDownBtn, "轨道变窄/变矮");
-		tlToolsRight.Controls.Add(_cutEditHeightDownBtn);
-
-		_cutEditTrackHeightSlider = new TrackBar { Width = 72, Height = 24, Minimum = 24, Maximum = 110, Value = _cutEditBaseTrackHeight, TickStyle = TickStyle.None };
-		_cutEditTrackHeightSlider.ValueChanged += delegate
-		{
-			SetCutEditTrackHeight(_cutEditTrackHeightSlider.Value);
-		};
-		tipHeight.SetToolTip(_cutEditTrackHeightSlider, "轨道宽窄拉杆 (24px - 110px)");
-		tlToolsRight.Controls.Add(_cutEditTrackHeightSlider);
-
-		_cutEditHeightUpBtn = MakeMiniStepButton("➕");
-		_cutEditHeightUpBtn.Click += delegate { SetCutEditTrackHeight(_cutEditBaseTrackHeight + 4); };
-		tipHeight.SetToolTip(_cutEditHeightUpBtn, "轨道加宽/加高");
-		tlToolsRight.Controls.Add(_cutEditHeightUpBtn);
-
-		_cutEditFitWindowBtn = MakeButton("⛶ 适合窗口", 78);
-		_cutEditFitWindowBtn.Height = 28;
-		_cutEditFitWindowBtn.Margin = new Padding(4, 0, 0, 0);
-		_cutEditFitWindowBtn.Click += delegate
-		{
-			_cutEditScrollX = 0;
-			SetCutEditZoom(100);
-		};
-		tlToolsRight.Controls.Add(_cutEditFitWindowBtn);
 
 		_cutEditEstimatedDurationLabel = new Label
 		{
@@ -4450,10 +4338,120 @@ internal sealed class MainForm : Form
 			Text = "预计时长: 00:00.0",
 			ForeColor = MutedColor,
 			Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Regular),
-			Margin = new Padding(8, 7, 4, 0)
+			Margin = new Padding(6, 7, 4, 0)
 		};
 		tlToolsLeft.Controls.Add(_cutEditEstimatedDurationLabel);
+
+		// Right Audio mixing & Timeline Zoom & Track Height controls
+		FlowLayoutPanel tlToolsRight = new FlowLayoutPanel
+		{
+			Dock = DockStyle.Right,
+			AutoSize = true,
+			FlowDirection = FlowDirection.LeftToRight,
+			WrapContents = false,
+			Padding = new Padding(0, 4, 6, 4)
+		};
+
+		Label lblSpd = new Label { Text = "速度:", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(2, 6, 0, 0) };
+		tlToolsRight.Controls.Add(lblSpd);
+
+		_cutEditSpeedCombo = new ComboBox { Width = 64, Height = 26, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(2, 2, 2, 0) };
+		_cutEditSpeedCombo.Items.AddRange(new object[] { "1.00x", "0.50x", "0.75x", "1.25x", "1.50x", "2.00x" });
+		_cutEditSpeedCombo.SelectedIndex = 0;
+		_cutEditToolTip.SetToolTip(_cutEditSpeedCombo, "选择时间轴整体播放速度");
+		tlToolsRight.Controls.Add(_cutEditSpeedCombo);
+
+		_cutEditKeepOriginalAudioCheckBox = new CheckBox { Text = "原声", AutoSize = true, Checked = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(4, 5, 2, 0) };
+		_cutEditKeepOriginalAudioCheckBox.CheckedChanged += delegate
+		{
+			_cutEditAudioMuted = !_cutEditKeepOriginalAudioCheckBox.Checked;
+			if (_cutEditMediaElement != null) _cutEditMediaElement.IsMuted = _cutEditAudioMuted;
+			_cutEditTimelineCanvas?.Invalidate();
+		};
+		_cutEditToolTip.SetToolTip(_cutEditKeepOriginalAudioCheckBox, "勾选保留原视频音频，取消则全局静音原声");
+		tlToolsRight.Controls.Add(_cutEditKeepOriginalAudioCheckBox);
+
+		_cutEditBgmVolumeLabel = new Label { Text = $"🎵 配乐: {_cutEditBgmVolume}%", AutoSize = true, ForeColor = Color.FromArgb(192, 132, 252), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(4, 6, 0, 0) };
+		tlToolsRight.Controls.Add(_cutEditBgmVolumeLabel);
+
+		_cutEditBgmVolumeTrackBar = new TrackBar { Width = 64, Height = 24, Minimum = 0, Maximum = 100, Value = _cutEditBgmVolume, TickStyle = TickStyle.None, Margin = new Padding(1, 4, 4, 0) };
+		_cutEditBgmVolumeTrackBar.ValueChanged += delegate
+		{
+			_cutEditBgmVolume = _cutEditBgmVolumeTrackBar.Value;
+			_cutEditBgmVolumeLabel.Text = $"🎵 配乐: {_cutEditBgmVolume}%";
+			_cutEditTimelineCanvas?.Invalidate();
+		};
+		_cutEditToolTip.SetToolTip(_cutEditBgmVolumeTrackBar, "调节背景配乐音量大小 (0% - 100%)");
+		tlToolsRight.Controls.Add(_cutEditBgmVolumeTrackBar);
+
+		tlToolsRight.Controls.Add(new Panel { Width = 1, Height = 18, BackColor = Color.FromArgb(71, 85, 105), Margin = new Padding(4, 6, 4, 0) });
+
+		// Zoom controls (轨道长短 / 缩放拉杆)
+		_cutEditZoomLabel = new Label { Text = "🔍 100%", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(4, 6, 1, 0), Cursor = Cursors.Hand };
+		_cutEditToolTip.SetToolTip(_cutEditZoomLabel, "时间轴缩放比例 (双击或右键重置为100%)\n支持快捷键: Ctrl + 滚轮 或 Alt + 滚轮");
+		_cutEditZoomLabel.MouseDoubleClick += delegate { SetCutEditZoom(100); };
+		_cutEditZoomLabel.MouseDown += (s, e) => { if (e.Button == MouseButtons.Right) SetCutEditZoom(100); };
+		tlToolsRight.Controls.Add(_cutEditZoomLabel);
+
+		_cutEditZoomOutBtn = MakeMiniStepButton("➖");
+		_cutEditZoomOutBtn.Click += delegate { SetCutEditZoom((int)Math.Round(_cutEditTimelineZoom * 100) - 15); };
+		_cutEditToolTip.SetToolTip(_cutEditZoomOutBtn, "缩小时间轴 (长短缩短)");
+		tlToolsRight.Controls.Add(_cutEditZoomOutBtn);
+
+		_cutEditZoomSlider = new TrackBar { Width = 72, Height = 24, Minimum = 20, Maximum = 600, Value = 100, TickStyle = TickStyle.None, Margin = new Padding(0, 4, 0, 0) };
+		_cutEditZoomSlider.ValueChanged += delegate
+		{
+			SetCutEditZoom(_cutEditZoomSlider.Value);
+		};
+		_cutEditToolTip.SetToolTip(_cutEditZoomSlider, "轨道时间长短拉杆 (20% - 600%)\n快捷键: Ctrl + 滚轮 或 Alt + 滚轮");
+		tlToolsRight.Controls.Add(_cutEditZoomSlider);
+
+		_cutEditZoomInBtn = MakeMiniStepButton("➕");
+		_cutEditZoomInBtn.Click += delegate { SetCutEditZoom((int)Math.Round(_cutEditTimelineZoom * 100) + 15); };
+		_cutEditToolTip.SetToolTip(_cutEditZoomInBtn, "放大时间轴 (长短拉长)");
+		tlToolsRight.Controls.Add(_cutEditZoomInBtn);
+
+		tlToolsRight.Controls.Add(new Panel { Width = 1, Height = 18, BackColor = Color.FromArgb(71, 85, 105), Margin = new Padding(4, 6, 4, 0) });
+
+		// Track Height controls (轨道宽窄 / 高度调节拉杆)
+		_cutEditTrackHeightLabel = new Label { Text = $"↕️ {_cutEditBaseTrackHeight}px", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(4, 6, 1, 0), Cursor = Cursors.Hand };
+		_cutEditToolTip.SetToolTip(_cutEditTrackHeightLabel, "轨道高度 (双击或右键重置为标准36px)\n支持快捷键: Shift + 滚轮");
+		_cutEditTrackHeightLabel.MouseDoubleClick += delegate { SetCutEditTrackHeight(36); };
+		_cutEditTrackHeightLabel.MouseDown += (s, e) => { if (e.Button == MouseButtons.Right) SetCutEditTrackHeight(36); };
+		tlToolsRight.Controls.Add(_cutEditTrackHeightLabel);
+
+		_cutEditHeightDownBtn = MakeMiniStepButton("➖");
+		_cutEditHeightDownBtn.Click += delegate { SetCutEditTrackHeight(_cutEditBaseTrackHeight - 4); };
+		_cutEditToolTip.SetToolTip(_cutEditHeightDownBtn, "轨道变窄/变矮");
+		tlToolsRight.Controls.Add(_cutEditHeightDownBtn);
+
+		_cutEditTrackHeightSlider = new TrackBar { Width = 68, Height = 24, Minimum = 24, Maximum = 110, Value = _cutEditBaseTrackHeight, TickStyle = TickStyle.None, Margin = new Padding(0, 4, 0, 0) };
+		_cutEditTrackHeightSlider.ValueChanged += delegate
+		{
+			SetCutEditTrackHeight(_cutEditTrackHeightSlider.Value);
+		};
+		_cutEditToolTip.SetToolTip(_cutEditTrackHeightSlider, "轨道宽窄拉杆 (24px - 110px)\n快捷键: Shift + 滚轮");
+		tlToolsRight.Controls.Add(_cutEditTrackHeightSlider);
+
+		_cutEditHeightUpBtn = MakeMiniStepButton("➕");
+		_cutEditHeightUpBtn.Click += delegate { SetCutEditTrackHeight(_cutEditBaseTrackHeight + 4); };
+		_cutEditToolTip.SetToolTip(_cutEditHeightUpBtn, "轨道加宽/加高");
+		tlToolsRight.Controls.Add(_cutEditHeightUpBtn);
+
+		_cutEditFitWindowBtn = MakeButton("⛶ 适合", 64);
+		_cutEditFitWindowBtn.Height = 28;
+		_cutEditFitWindowBtn.Margin = new Padding(4, 1, 0, 0);
+		_cutEditFitWindowBtn.Click += delegate
+		{
+			_cutEditScrollX = 0;
+			SetCutEditZoom(100);
+		};
+		_cutEditToolTip.SetToolTip(_cutEditFitWindowBtn, "适合窗口: 一键将时间轴重置为100%并对齐开头");
+		tlToolsRight.Controls.Add(_cutEditFitWindowBtn);
+
+		// CRITICAL: DockStyle.Right MUST be added FIRST so it always stays docked on the right side!
 		timelineTools.Controls.Add(tlToolsRight);
+		timelineTools.Controls.Add(tlToolsLeft);
 		bottomTimelineHost.Controls.Add(timelineTools);
 
 		// Multi-Track Timeline Canvas (DockStyle.Fill - fully occupying bottom panel)
@@ -5342,9 +5340,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_cutEditSnappingEnabled = !_cutEditSnappingEnabled;
 		if (_cutEditSnapBtn != null)
 		{
-			_cutEditSnapBtn.Text = _cutEditSnappingEnabled ? "🧲 磁吸:开 (S)" : "🧲 磁吸:关 (S)";
+			_cutEditSnapBtn.Text = "🧲";
 			_cutEditSnapBtn.BackColor = _cutEditSnappingEnabled ? Color.FromArgb(6, 182, 212) : Color.FromArgb(30, 41, 59);
 			_cutEditSnapBtn.ForeColor = _cutEditSnappingEnabled ? Color.Black : Color.FromArgb(148, 163, 184);
+			_cutEditToolTip?.SetToolTip(_cutEditSnapBtn, _cutEditSnappingEnabled ? "自动磁吸: 已开启 (快捷键: S)\n移动片段或指针时自动吸附对齐\n点击切换关闭" : "自动磁吸: 已关闭 (快捷键: S)\n移动片段或指针时自由移动\n点击切换开启");
 		}
 		_snapGuideScreenX = -1;
 		_cutEditTimelineCanvas?.Invalidate();
@@ -5355,11 +5354,26 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_cutEditLinkedSelectionEnabled = !_cutEditLinkedSelectionEnabled;
 		if (_cutEditLinkBtn != null)
 		{
-			_cutEditLinkBtn.Text = _cutEditLinkedSelectionEnabled ? "🔗 联动:开 (L)" : "🔗 联动:关 (L)";
+			_cutEditLinkBtn.Text = "🔗";
 			_cutEditLinkBtn.BackColor = _cutEditLinkedSelectionEnabled ? Color.FromArgb(59, 130, 246) : Color.FromArgb(30, 41, 59);
 			_cutEditLinkBtn.ForeColor = _cutEditLinkedSelectionEnabled ? Color.White : Color.FromArgb(148, 163, 184);
+			_cutEditToolTip?.SetToolTip(_cutEditLinkBtn, _cutEditLinkedSelectionEnabled ? "视音频联动: 已开启 (快捷键: L)\n选中视频时同步联动选中对应音频\n点击切换关闭" : "视音频联动: 已关闭 (快捷键: L)\n视频与音频独立选中\n点击切换开启");
 		}
 		_cutEditTimelineCanvas?.Invalidate();
+	}
+
+	private Button MakeTimelineIconButton(string icon, string tooltipText, int width = 32)
+	{
+		Button btn = MakeButton(icon, width);
+		btn.Height = 28;
+		btn.Margin = new Padding(2, 2, 0, 0);
+		btn.Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
+		btn.TextAlign = ContentAlignment.MiddleCenter;
+		if (_cutEditToolTip != null && !string.IsNullOrEmpty(tooltipText))
+		{
+			_cutEditToolTip.SetToolTip(btn, tooltipText);
+		}
+		return btn;
 	}
 
 	private Button MakeMiniStepButton(string text)
