@@ -86,6 +86,10 @@ internal sealed class UpdateNotificationForm : Form
 			try
 			{
 				string url = string.IsNullOrEmpty(downloadUrl) ? "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/latest" : downloadUrl;
+				if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+				{
+					url = "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/latest";
+				}
 				Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 			}
 			catch (Exception ex)
@@ -113,6 +117,10 @@ internal sealed class UpdateNotificationForm : Form
 			try
 			{
 				string url = string.IsNullOrEmpty(downloadUrl) ? "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/latest" : downloadUrl;
+				if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+				{
+					url = "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/latest";
+				}
 				Clipboard.SetText(url);
 				MessageBox.Show(this, "下载链接已复制到剪贴板！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			}

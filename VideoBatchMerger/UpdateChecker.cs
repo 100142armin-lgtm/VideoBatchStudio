@@ -37,10 +37,10 @@ internal static class UpdateChecker
 		{
 			try
 			{
-				// Enable TLS 1.2
+				// Enable TLS 1.2 and TLS 1.3
 				try
 				{
-					ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+					ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12 | (SecurityProtocolType)12288;
 				}
 				catch { }
 
@@ -128,6 +128,11 @@ internal static class UpdateChecker
 				string downloadUrl = ExtractJsonString(json, "downloadUrl");
 				if (string.IsNullOrEmpty(downloadUrl)) downloadUrl = ExtractJsonString(json, "html_url");
 				if (string.IsNullOrEmpty(downloadUrl)) downloadUrl = RepoUrl + "/releases/latest";
+				if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var validatedUri) ||
+				    (validatedUri.Scheme != Uri.UriSchemeHttp && validatedUri.Scheme != Uri.UriSchemeHttps))
+				{
+					downloadUrl = RepoUrl + "/releases/latest";
+				}
 
 				List<string> changelog = ExtractJsonArray(json, "changelog");
 				if (changelog.Count == 0)

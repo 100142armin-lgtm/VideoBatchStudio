@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 using System.Windows.Forms.Integration;
 using System.Windows.Controls;
@@ -233,6 +234,13 @@ public sealed class VideoPreviewForm : Form
 			{
 				if (File.Exists(_videoPath))
 				{
+					string ext = Path.GetExtension(_videoPath)?.ToLowerInvariant() ?? "";
+					string[] blockedExts = { ".exe", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".wsf", ".scr", ".com", ".pif", ".msi", ".dll", ".hta", ".cpl" };
+					if (blockedExts.Contains(ext))
+					{
+						MessageBox.Show(this, "检测到不可信的可执行文件类型，已安全拦截。", "安全提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+						return;
+					}
 					Process.Start(new ProcessStartInfo(_videoPath) { UseShellExecute = true });
 				}
 			}

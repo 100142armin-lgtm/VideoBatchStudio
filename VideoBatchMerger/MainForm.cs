@@ -5027,7 +5027,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			}
 			else if (Directory.Exists(_deliverOutputFolder.Text))
 			{
-				Process.Start("explorer.exe", _deliverOutputFolder.Text);
+				Process.Start("explorer.exe", QuoteArg(_deliverOutputFolder.Text));
 			}
 		};
 		histBtnRow.Controls.Add(_deliverOpenFolderButton);
@@ -7576,7 +7576,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 				string tempWavePng = Path.Combine(Path.GetTempPath(), $"wave_{Guid.NewGuid():N}.png");
 				string hexColor = $"0x{waveColor.R:X2}{waveColor.G:X2}{waveColor.B:X2}";
-				string args = "-y -i \"" + mediaPath + "\" -filter_complex \"aformat=channel_layouts=mono,showwavespic=s=1600x64:colors=" + hexColor + "\" -frames:v 1 -update 1 \"" + tempWavePng + "\"";
+				string args = "-y -i " + QuoteArg(mediaPath) + " -filter_complex " + QuoteArg("aformat=channel_layouts=mono,showwavespic=s=1600x64:colors=" + hexColor) + " -frames:v 1 -update 1 " + QuoteArg(tempWavePng);
 
 				ProcessStartInfo psi = new ProcessStartInfo(ffmpeg, args)
 				{
@@ -7738,7 +7738,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					if (!string.IsNullOrEmpty(ffmpeg))
 					{
 						string tempJpg = Path.Combine(Path.GetTempPath(), $"thumb_{Guid.NewGuid():N}.jpg");
-						string args = "-y -ss 00:00:01 -i \"" + path + "\" -vframes 1 -vf \"scale=96:64:force_original_aspect_ratio=decrease,pad=96:64:(ow-iw)/2:(oh-ih)/2:black\" -update 1 \"" + tempJpg + "\"";
+						string args = "-y -ss 00:00:01 -i " + QuoteArg(path) + " -vframes 1 -vf " + QuoteArg("scale=96:64:force_original_aspect_ratio=decrease,pad=96:64:(ow-iw)/2:(oh-ih)/2:black") + " -update 1 " + QuoteArg(tempJpg);
 						ProcessStartInfo psi = new ProcessStartInfo(ffmpeg, args) { CreateNoWindow = true, UseShellExecute = false };
 						using (var proc = Process.Start(psi)) proc.WaitForExit(4000);
 						if (File.Exists(tempJpg))
@@ -11395,7 +11395,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			if (File.Exists(path))
 			{
-				ProcessStartInfo psi = new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"")
+				ProcessStartInfo psi = new ProcessStartInfo("explorer.exe", "/select," + QuoteArg(path))
 				{
 					UseShellExecute = true
 				};
@@ -24511,7 +24511,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		StringBuilder stringBuilder = new StringBuilder();
 		foreach (string file in files)
 		{
-			string value = Path.GetFullPath(file).Replace('\\', '/').Replace("'", "'\\''");
+			string value = Path.GetFullPath(file).Replace("\r", "").Replace("\n", "").Replace('\\', '/').Replace("'", "'\\''");
 			stringBuilder.Append("file '").Append(value).AppendLine("'");
 		}
 		File.WriteAllText(listPath, stringBuilder.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -26214,7 +26214,34 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	private static string QuoteArg(string value)
 	{
-		return "\"" + value.Replace("\"", "\\\"") + "\"";
+		if (string.IsNullOrEmpty(value)) return "\"\"";
+		StringBuilder sb = new StringBuilder("\"", value.Length + 16);
+		for (int i = 0; i < value.Length; i++)
+		{
+			int backslashCount = 0;
+			while (i < value.Length && value[i] == '\\')
+			{
+				backslashCount++;
+				i++;
+			}
+			if (i == value.Length)
+			{
+				sb.Append('\\', backslashCount * 2);
+				break;
+			}
+			if (value[i] == '"')
+			{
+				sb.Append('\\', backslashCount * 2 + 1);
+				sb.Append('"');
+			}
+			else
+			{
+				sb.Append('\\', backslashCount);
+				sb.Append(value[i]);
+			}
+		}
+		sb.Append('"');
+		return sb.ToString();
 	}
 
 	[System.Runtime.InteropServices.DllImport("user32.dll")]
