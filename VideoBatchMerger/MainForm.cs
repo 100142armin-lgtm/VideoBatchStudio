@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.5.0";
+	public const string CurrentAppVersion = "8.6.0";
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
@@ -936,6 +936,18 @@ internal sealed class MainForm : Form
 	private NumericUpDown _splitScreenWatermarkOffsetY;
 
 	private Button _splitScreenWatermarkRefreshButton;
+
+	private CheckBox _splitScreenTitleEnabled;
+	private ComboBox _splitScreenTitleStyleCombo;
+	private ComboBox _splitScreenTitlePositionCombo;
+	private TextBox _splitScreenTitleTextBox;
+	private NumericUpDown _splitScreenTitleDurationNum;
+	private Button _splitScreenTitleStyleBtn;
+	private MergeTitlePlan _splitScreenTitlePlan = new MergeTitlePlan
+	{
+		Position = "中间分割线",
+		DurationSeconds = 0.0
+	};
 
 	private readonly List<int> _splitScreenWatermarkLayerKeys = new List<int>();
 
@@ -11312,6 +11324,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 		WatermarkProfile splitScreenWatermark = CaptureWatermarkProfile(_watermarkOnSplitScreen.Checked);
 		BgmPlan bgmPlan = CaptureBgmPlan(_splitScreenBgm);
+		SyncSplitScreenTitlePlanFromUi();
+		MergeTitlePlan splitScreenTitle = _splitScreenTitlePlan?.Clone();
 
 		string tempDir = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_DirectCut");
 		try { Directory.CreateDirectory(tempDir); } catch { }
@@ -11332,6 +11346,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				ok = RenderSplitScreenOutput(ffmpeg, directPlan, normalizedRects, sources, tempComposite, delegate { }, out error, isFastPreview: false);
 				if (ok && File.Exists(tempComposite))
 				{
+					if (splitScreenTitle != null && splitScreenTitle.Enabled)
+					{
+						ApplyTitleToSplitScreenOutput(ffmpeg, tempComposite, splitScreenTitle, sources, 0, directPlan.DurationSeconds, delegate { }, out _);
+					}
 					if (splitScreenWatermark.Enabled)
 					{
 						ApplyWatermarkToSplitScreenOutput(ffmpeg, tempComposite, splitScreenWatermark, directPlan.DurationSeconds, delegate { }, out _);
@@ -12240,36 +12258,152 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		label3.ForeColor = MutedColor;
 		label3.Width = 430;
 		settings.Controls.Add(label3);
-		_splitScreenBgm = InstallBgmControls(settings, 18, 164);
+		_splitScreenTitleEnabled = new CheckBox
+		{
+			Text = "🎬 拼屏标题与隔断花字",
+			Location = new Point(18, 166),
+			AutoSize = true,
+			Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
+			ForeColor = AccentColor
+		};
+		settings.Controls.Add(_splitScreenTitleEnabled);
+
+		settings.Controls.Add(MakeLabel("风格", 212, 169));
+		_splitScreenTitleStyleCombo = new ComboBox
+		{
+			Location = new Point(248, 165),
+			Width = 175,
+			DropDownStyle = ComboBoxStyle.DropDownList
+		};
+		foreach (var s in MergeTitleStyleCatalog.Styles)
+		{
+			_splitScreenTitleStyleCombo.Items.Add(s.Name);
+		}
+		_splitScreenTitleStyleCombo.SelectedIndex = 0;
+		settings.Controls.Add(_splitScreenTitleStyleCombo);
+
+		settings.Controls.Add(MakeLabel("位置", 432, 169));
+		_splitScreenTitlePositionCombo = new ComboBox
+		{
+			Location = new Point(468, 165),
+			Width = 150,
+			DropDownStyle = ComboBoxStyle.DropDownList
+		};
+		_splitScreenTitlePositionCombo.Items.AddRange(new object[]
+		{
+			"中间分割线 (隔断花字)",
+			"顶部居中 (大标题)",
+			"居中偏上",
+			"居中偏下",
+			"底部居中"
+		});
+		_splitScreenTitlePositionCombo.SelectedIndex = 0;
+		settings.Controls.Add(_splitScreenTitlePositionCombo);
+
+		settings.Controls.Add(MakeLabel("主标题", 628, 169));
+		_splitScreenTitleTextBox = new TextBox
+		{
+			Location = new Point(676, 165),
+			Width = 145,
+			Text = "{文件名}"
+		};
+		settings.Controls.Add(_splitScreenTitleTextBox);
+
+		_splitScreenTitleStyleBtn = MakeButton("🎨 样式与微调…", 112);
+		_splitScreenTitleStyleBtn.Location = new Point(830, 162);
+		settings.Controls.Add(_splitScreenTitleStyleBtn);
+
+		settings.Controls.Add(MakeLabel("呈现", 950, 169));
+		_splitScreenTitleDurationNum = new NumericUpDown
+		{
+			Location = new Point(984, 165),
+			Width = 56,
+			Minimum = 0m,
+			Maximum = 3600m,
+			Value = 0m,
+			DecimalPlaces = 1
+		};
+		settings.Controls.Add(_splitScreenTitleDurationNum);
+		settings.Controls.Add(MakeLabel("秒(0为全程)", 1044, 169));
+
+		_splitScreenTitleEnabled.CheckedChanged += delegate
+		{
+			SyncSplitScreenTitlePlanFromUi();
+			SaveUserSettings();
+			RefreshSplitScreenPreview();
+		};
+		_splitScreenTitleStyleCombo.SelectedIndexChanged += delegate
+		{
+			SyncSplitScreenTitlePlanFromUi();
+			SaveUserSettings();
+			RefreshSplitScreenPreview();
+		};
+		_splitScreenTitlePositionCombo.SelectedIndexChanged += delegate
+		{
+			SyncSplitScreenTitlePlanFromUi();
+			SaveUserSettings();
+			RefreshSplitScreenPreview();
+		};
+		_splitScreenTitleTextBox.TextChanged += delegate
+		{
+			SyncSplitScreenTitlePlanFromUi();
+			SaveUserSettings();
+			RefreshSplitScreenPreview();
+		};
+		_splitScreenTitleDurationNum.ValueChanged += delegate
+		{
+			SyncSplitScreenTitlePlanFromUi();
+			SaveUserSettings();
+		};
+		_splitScreenTitleStyleBtn.Click += delegate
+		{
+			string sampleText = _splitScreenTitleTextBox?.Text?.Trim();
+			if (string.IsNullOrEmpty(sampleText) || sampleText == "{文件名}")
+			{
+				string firstFile = _splitScreenRegionVideos.Where(x => x != null && x.Count > 0).Select(x => x[0]).FirstOrDefault();
+				sampleText = !string.IsNullOrEmpty(firstFile) ? MergeTitleStyleCatalog.CleanFilenameForTitle(firstFile) : "🔥 热门拼屏对比标题示例";
+			}
+			using (var dlg = new MergeTitleStyleDialog(_splitScreenTitlePlan, sampleText, _isDarkMode))
+			{
+				if (dlg.ShowDialog(this) == DialogResult.OK)
+				{
+					SyncSplitScreenTitleUiFromPlan();
+					SaveUserSettings();
+					RefreshSplitScreenPreview();
+				}
+			}
+		};
+
+		_splitScreenBgm = InstallBgmControls(settings, 18, 204);
 		_splitScreenBgmList = new ListBox
 		{
-			Location = new Point(18, 200),
+			Location = new Point(18, 240),
 			Size = new Size(740, 40),
 			IntegralHeight = false,
 			HorizontalScrollbar = true,
 			Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right)
 		};
 		settings.Controls.Add(_splitScreenBgmList);
-		settings.Controls.Add(MakeLabel("音乐池（可多首）", 770, 210));
-		settings.Controls.Add(MakeLabel("总输出目录", 18, 252));
+		settings.Controls.Add(MakeLabel("音乐池（可多首）", 770, 250));
+		settings.Controls.Add(MakeLabel("总输出目录", 18, 292));
 		_splitScreenOutputFolder = new TextBox
 		{
-			Location = new Point(106, 248),
+			Location = new Point(106, 288),
 			Width = 710,
 			Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right)
 		};
 		settings.Controls.Add(_splitScreenOutputFolder);
 		_splitScreenOutputBrowseButton = MakeButton("选择…", 72);
-		_splitScreenOutputBrowseButton.Location = new Point(828, 245);
+		_splitScreenOutputBrowseButton.Location = new Point(828, 285);
 		_splitScreenOutputBrowseButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
 		settings.Controls.Add(_splitScreenOutputBrowseButton);
 		_splitScreenOutputOpenButton = MakeButton("打开", 64);
-		_splitScreenOutputOpenButton.Location = new Point(908, 245);
+		_splitScreenOutputOpenButton.Location = new Point(908, 285);
 		_splitScreenOutputOpenButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
 		settings.Controls.Add(_splitScreenOutputOpenButton);
 		_splitScreenProgressBar = new ProgressBar
 		{
-			Location = new Point(18, 285),
+			Location = new Point(18, 325),
 			Height = 15,
 			Width = 954,
 			Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right)
@@ -12277,7 +12411,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		settings.Controls.Add(_splitScreenProgressBar);
 		_splitScreenStatusLabel = new Label
 		{
-			Location = new Point(18, 305),
+			Location = new Point(18, 345),
 			Size = new Size(954, 22),
 			Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right),
 			ForeColor = MutedColor,
@@ -12285,15 +12419,15 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			Text = "先选模板，再给每个编号区域添加至少一个视频。"
 		};
 		settings.Controls.Add(_splitScreenStatusLabel);
-		_splitScreenStartButton = MakePrimaryButton("开始视频拼屏", 18, 330, 150);
+		_splitScreenStartButton = MakePrimaryButton("开始视频拼屏", 18, 370, 150);
 		settings.Controls.Add(_splitScreenStartButton);
 		_splitScreenCancelButton = MakeButton("取消", 88);
-		_splitScreenCancelButton.Location = new Point(180, 330);
+		_splitScreenCancelButton.Location = new Point(180, 370);
 		_splitScreenCancelButton.Height = 42;
 		_splitScreenCancelButton.Enabled = false;
 		settings.Controls.Add(_splitScreenCancelButton);
 		_splitScreenSendToCutBtn = MakeButton("🎬 发送最新成品至剪辑", 175);
-		_splitScreenSendToCutBtn.Location = new Point(280, 330);
+		_splitScreenSendToCutBtn.Location = new Point(280, 370);
 		_splitScreenSendToCutBtn.Height = 42;
 		_splitScreenSendToCutBtn.Tag = "accent";
 		_splitScreenSendToCutBtn.Click += delegate
@@ -12301,7 +12435,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			SendLatestSplitScreenToCutEditor();
 		};
 		settings.Controls.Add(_splitScreenSendToCutBtn);
-		Label label4 = MakeLabel("主区域模式会逐条完整导出主视频；其他区域自动顺序或随机循环配合。", 468, 344);
+		Label label4 = MakeLabel("主区域模式会逐条完整导出主视频；其他区域自动顺序或随机循环配合。", 468, 384);
 		label4.ForeColor = MutedColor;
 		settings.Controls.Add(label4);
 		settings.Resize += delegate
@@ -12309,7 +12443,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			LayoutSplitScreenOutputPanel(settings);
 		};
 		settings.Dock = DockStyle.Top;
-		settings.Height = 390;
+		settings.Height = 430;
 		splitScreenBottomScrollHost.Controls.Add(settings);
 		tabPage2.HandleCreated += delegate
 		{
@@ -12343,7 +12477,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					{
 						splitScreenMainSplitter.Panel1MinSize = 120;
 						splitScreenMainSplitter.Panel2MinSize = 140;
-						int targetDist = Math.Max(180, splitScreenMainSplitter.ClientSize.Height - 395);
+						int targetDist = Math.Max(180, splitScreenMainSplitter.ClientSize.Height - 435);
 						if (targetDist >= splitScreenMainSplitter.Panel1MinSize &&
 						    targetDist <= splitScreenMainSplitter.ClientSize.Height - splitScreenMainSplitter.Panel2MinSize)
 						{
@@ -12457,6 +12591,62 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 	private static RectangleF NormalizedToRectangle(RectangleF normalized, RectangleF canvas)
 	{
 		return new RectangleF(canvas.X + normalized.X * canvas.Width, canvas.Y + normalized.Y * canvas.Height, normalized.Width * canvas.Width, normalized.Height * canvas.Height);
+	}
+
+	private void SyncSplitScreenTitlePlanFromUi()
+	{
+		if (_splitScreenTitlePlan == null) _splitScreenTitlePlan = new MergeTitlePlan { Position = "中间分割线", DurationSeconds = 0.0 };
+		_splitScreenTitlePlan.Enabled = _splitScreenTitleEnabled?.Checked ?? false;
+		if (_splitScreenTitleStyleCombo != null && _splitScreenTitleStyleCombo.SelectedIndex >= 0 && _splitScreenTitleStyleCombo.SelectedIndex < MergeTitleStyleCatalog.Styles.Count)
+		{
+			_splitScreenTitlePlan.StyleId = MergeTitleStyleCatalog.Styles[_splitScreenTitleStyleCombo.SelectedIndex].Id;
+		}
+		if (_splitScreenTitlePositionCombo != null && _splitScreenTitlePositionCombo.SelectedItem != null)
+		{
+			_splitScreenTitlePlan.Position = _splitScreenTitlePositionCombo.SelectedItem.ToString();
+		}
+		_splitScreenTitlePlan.MainTitleTemplate = _splitScreenTitleTextBox?.Text ?? "{文件名}";
+		_splitScreenTitlePlan.DurationSeconds = (double)(_splitScreenTitleDurationNum?.Value ?? 0m);
+
+		bool en = _splitScreenTitlePlan.Enabled;
+		if (_splitScreenTitleStyleCombo != null) _splitScreenTitleStyleCombo.Enabled = en;
+		if (_splitScreenTitlePositionCombo != null) _splitScreenTitlePositionCombo.Enabled = en;
+		if (_splitScreenTitleTextBox != null) _splitScreenTitleTextBox.Enabled = en;
+		if (_splitScreenTitleDurationNum != null) _splitScreenTitleDurationNum.Enabled = en;
+		if (_splitScreenTitleStyleBtn != null) _splitScreenTitleStyleBtn.Enabled = en;
+	}
+
+	private void SyncSplitScreenTitleUiFromPlan()
+	{
+		if (_splitScreenTitlePlan == null) return;
+		if (_splitScreenTitleEnabled != null) _splitScreenTitleEnabled.Checked = _splitScreenTitlePlan.Enabled;
+		if (_splitScreenTitleStyleCombo != null)
+		{
+			int idx = MergeTitleStyleCatalog.Styles.ToList().FindIndex(x => x.Id == _splitScreenTitlePlan.StyleId);
+			_splitScreenTitleStyleCombo.SelectedIndex = Math.Max(0, idx);
+		}
+		if (_splitScreenTitlePositionCombo != null)
+		{
+			int pidx = -1;
+			for (int i = 0; i < _splitScreenTitlePositionCombo.Items.Count; i++)
+			{
+				if (_splitScreenTitlePositionCombo.Items[i].ToString().Contains(_splitScreenTitlePlan.Position) || _splitScreenTitlePlan.Position.Contains(_splitScreenTitlePositionCombo.Items[i].ToString()))
+				{
+					pidx = i;
+					break;
+				}
+			}
+			_splitScreenTitlePositionCombo.SelectedIndex = pidx >= 0 ? pidx : 0;
+		}
+		if (_splitScreenTitleTextBox != null) _splitScreenTitleTextBox.Text = _splitScreenTitlePlan.MainTitleTemplate;
+		if (_splitScreenTitleDurationNum != null) _splitScreenTitleDurationNum.Value = Math.Min(3600m, Math.Max(0m, (decimal)_splitScreenTitlePlan.DurationSeconds));
+
+		bool en = _splitScreenTitlePlan.Enabled;
+		if (_splitScreenTitleStyleCombo != null) _splitScreenTitleStyleCombo.Enabled = en;
+		if (_splitScreenTitlePositionCombo != null) _splitScreenTitlePositionCombo.Enabled = en;
+		if (_splitScreenTitleTextBox != null) _splitScreenTitleTextBox.Enabled = en;
+		if (_splitScreenTitleDurationNum != null) _splitScreenTitleDurationNum.Enabled = en;
+		if (_splitScreenTitleStyleBtn != null) _splitScreenTitleStyleBtn.Enabled = en;
 	}
 
 	private void LayoutSplitScreenOutputPanel(Panel panel)
@@ -13689,6 +13879,13 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_latestSplitScreenOutputFolder = null;
 		_splitScreenProgressBar.Value = 0;
 		RefreshSplitScreenBgmList();
+		if (_splitScreenTitleEnabled != null) _splitScreenTitleEnabled.Checked = false;
+		if (_splitScreenTitleStyleCombo != null) _splitScreenTitleStyleCombo.SelectedIndex = 0;
+		if (_splitScreenTitlePositionCombo != null) _splitScreenTitlePositionCombo.SelectedIndex = 0;
+		if (_splitScreenTitleTextBox != null) _splitScreenTitleTextBox.Text = "{文件名}";
+		if (_splitScreenTitleDurationNum != null) _splitScreenTitleDurationNum.Value = 0m;
+		_splitScreenTitlePlan = new MergeTitlePlan { Position = "中间分割线", DurationSeconds = 0.0 };
+		SyncSplitScreenTitlePlanFromUi();
 	}
 
 	private RectangleF[] GetSplitScreenNormalizedRects(SplitScreenLayoutDefinition definition)
@@ -13970,6 +14167,24 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					}
 					DrawSplitScreenRegionBadge(graphics, rectangleF3, (j == activeSplitScreenMainRegion) ? "主" : (j + 1).ToString(CultureInfo.InvariantCulture), j == _splitScreenSelectedRegion);
 				}
+			}
+			if (_splitScreenTitlePlan != null && _splitScreenTitlePlan.Enabled && !string.IsNullOrWhiteSpace(_splitScreenTitleTextBox?.Text))
+			{
+				try
+				{
+					List<string> sampleFiles = _splitScreenRegionVideos.Where(x => x != null && x.Count > 0).Select(x => x[0]).ToList();
+					string previewMain = MergeTitleStyleCatalog.ResolveTitleText(_splitScreenTitleTextBox.Text, sampleFiles, 0);
+					string previewSub = MergeTitleStyleCatalog.ResolveTitleText(_splitScreenTitlePlan.SubTitleTemplate, sampleFiles, 0);
+					if (!string.IsNullOrWhiteSpace(previewMain))
+					{
+						Size canvasSize = GetSplitScreenCanvasSize();
+						using (Bitmap titleBmp = MergeTitleStyleCatalog.RenderTitleBitmap(_splitScreenTitlePlan, canvasSize.Width, canvasSize.Height, previewMain, previewSub))
+						{
+							graphics.DrawImage(titleBmp, splitScreenPreviewCanvas, new RectangleF(0f, 0f, titleBmp.Width, titleBmp.Height), GraphicsUnit.Pixel);
+						}
+					}
+				}
+				catch { }
 			}
 		}
 		Image image2 = _splitScreenPreview.Image;
@@ -14325,6 +14540,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 		WatermarkProfile splitScreenWatermark = CaptureWatermarkProfile(_watermarkOnSplitScreen.Checked);
 		BgmPlan bgmPlan = CaptureBgmPlan(_splitScreenBgm);
+		SyncSplitScreenTitlePlanFromUi();
+		MergeTitlePlan splitScreenTitle = _splitScreenTitlePlan?.Clone();
 
 		string tempPreviewFile = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_SplitPreview_" + Guid.NewGuid().ToString("N") + ".mp4");
 
@@ -14342,6 +14559,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				ok = RenderSplitScreenOutput(ffmpeg, previewPlan, normalizedRects, sources, tempPreviewFile, delegate { }, out error, isFastPreview: true);
 				if (ok && File.Exists(tempPreviewFile))
 				{
+					if (splitScreenTitle != null && splitScreenTitle.Enabled)
+					{
+						ApplyTitleToSplitScreenOutput(ffmpeg, tempPreviewFile, splitScreenTitle, sources, 0, previewPlan.DurationSeconds, delegate { }, out _);
+					}
 					if (splitScreenWatermark.Enabled)
 					{
 						ApplyWatermarkToSplitScreenOutput(ffmpeg, tempPreviewFile, splitScreenWatermark, previewPlan.DurationSeconds, delegate { }, out _);
@@ -14452,6 +14673,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 		List<WatermarkProfile> splitScreenWatermarkAssignments = CreateWatermarkAssignments(splitScreenWatermark, plan.OutputCount);
 		_activeSplitScreenBgmPlan = CaptureBgmPlan(_splitScreenBgm);
+		SyncSplitScreenTitlePlanFromUi();
+		MergeTitlePlan splitScreenTitle = _splitScreenTitlePlan?.Clone();
 		_cancelRequested = false;
 		_splitScreenProgressBar.Value = 0;
 		_splitScreenStatusLabel.Text = "正在准备视频拼屏…";
@@ -14498,10 +14721,16 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					}
 					string text = FindAvailableSplitScreenOutput(batchFolder, k + 1);
 					int completedBefore = k;
-					bool enabled = splitScreenWatermark.Enabled;
-					double renderPortion = ((!enabled) ? (_activeSplitScreenBgmPlan.Enabled ? 0.86 : 1.0) : (_activeSplitScreenBgmPlan.Enabled ? 0.72 : 0.82));
-					double watermarkPortion = ((!enabled) ? 0.0 : (_activeSplitScreenBgmPlan.Enabled ? 0.16 : 0.18));
-					double bgmStart = renderPortion + watermarkPortion;
+					bool titleEnabled = splitScreenTitle != null && splitScreenTitle.Enabled;
+					bool wmEnabled = splitScreenWatermark.Enabled;
+					bool bgmEnabled = _activeSplitScreenBgmPlan.Enabled;
+					double titlePortion = titleEnabled ? 0.12 : 0.0;
+					double wmPortion = wmEnabled ? 0.12 : 0.0;
+					double bgmPortion = bgmEnabled ? 0.12 : 0.0;
+					double renderPortion = 1.0 - titlePortion - wmPortion - bgmPortion;
+					double titleStart = renderPortion;
+					double wmStart = titleStart + titlePortion;
+					double bgmStart = wmStart + wmPortion;
 					string error2;
 					if (!RenderSplitScreenOutput(ffmpeg, splitScreenRenderPlan, normalizedRects, array, text, delegate(double p)
 					{
@@ -14512,9 +14741,18 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 						lastError = error;
 						TryDelete(text);
 					}
-					else if (enabled && !_cancelRequested && !ApplyWatermarkToSplitScreenOutput(ffmpeg, text, splitScreenWatermarkAssignments[Math.Min(k, splitScreenWatermarkAssignments.Count - 1)], splitScreenRenderPlan.DurationSeconds, delegate(double p)
+					else if (titleEnabled && !_cancelRequested && !ApplyTitleToSplitScreenOutput(ffmpeg, text, splitScreenTitle, array, k, splitScreenRenderPlan.DurationSeconds, delegate(double p)
 					{
-						ReportSplitScreenProgress(completedBefore, plan.OutputCount, renderPortion + p * watermarkPortion, "正在为第 " + (completedBefore + 1) + "/" + plan.OutputCount + " 个拼屏成品添加水印");
+						ReportSplitScreenProgress(completedBefore, plan.OutputCount, titleStart + p * titlePortion, "正在为第 " + (completedBefore + 1) + "/" + plan.OutputCount + " 个拼屏成品合成标题");
+					}, out var errorTitle))
+					{
+						failed++;
+						lastError = errorTitle;
+						TryDelete(text);
+					}
+					else if (wmEnabled && !_cancelRequested && !ApplyWatermarkToSplitScreenOutput(ffmpeg, text, splitScreenWatermarkAssignments[Math.Min(k, splitScreenWatermarkAssignments.Count - 1)], splitScreenRenderPlan.DurationSeconds, delegate(double p)
+					{
+						ReportSplitScreenProgress(completedBefore, plan.OutputCount, wmStart + p * wmPortion, "正在为第 " + (completedBefore + 1) + "/" + plan.OutputCount + " 个拼屏成品添加水印");
 					}, out error2))
 					{
 						failed++;
@@ -14602,6 +14840,70 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 		catch
 		{
+		}
+	}
+
+	private bool ApplyTitleToSplitScreenOutput(string ffmpeg, string outputPath, MergeTitlePlan titlePlan, IReadOnlyList<string> regionFiles, int outputIndex, double expectedDuration, Action<double> progress, out string error)
+	{
+		error = null;
+		if (titlePlan == null || !titlePlan.Enabled) return true;
+		string text = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_SplitTitle_" + Guid.NewGuid().ToString("N"));
+		string tempOutput = Path.Combine(text, "titled.mp4");
+		string titlePng = Path.Combine(text, "title_overlay.png");
+		try
+		{
+			Directory.CreateDirectory(text);
+			VideoInfo videoInfo = Probe(ffmpeg, outputPath);
+			if (!videoInfo.HasVideo || videoInfo.Width <= 0 || videoInfo.Height <= 0)
+			{
+				error = "无法读取刚生成的拼屏成品。";
+				return false;
+			}
+			string resolvedMain = MergeTitleStyleCatalog.ResolveTitleText(titlePlan.MainTitleTemplate, regionFiles, outputIndex);
+			string resolvedSub = MergeTitleStyleCatalog.ResolveTitleText(titlePlan.SubTitleTemplate, regionFiles, outputIndex);
+			if (string.IsNullOrWhiteSpace(resolvedMain)) return true;
+
+			using (Bitmap bmp = MergeTitleStyleCatalog.RenderTitleBitmap(titlePlan, videoInfo.Width, videoInfo.Height, resolvedMain, resolvedSub))
+			{
+				bmp.Save(titlePng, System.Drawing.Imaging.ImageFormat.Png);
+			}
+
+			StringBuilder stringBuilder = new StringBuilder("-hide_banner -y -i ").Append(QuoteArg(outputPath));
+			stringBuilder.Append(" -loop 1 -framerate 30 -i ").Append(QuoteArg(titlePng));
+
+			List<string> filters = new List<string>();
+			string currentVideo = "0:v";
+			AppendTitleFilter(filters, ref currentVideo, 1, titlePlan);
+			filters.Add("[" + currentVideo + "]trim=duration=" + FfmpegNumber(expectedDuration) + ",setpts=PTS-STARTPTS,format=yuv420p[vout]");
+
+			stringBuilder.Append(" -filter_complex ").Append(QuoteArg(string.Join(";", filters.ToArray())))
+				.Append(" -map [vout] -map 0:a:0? -c:v libx264 -preset fast -crf 17 -pix_fmt yuv420p")
+				.Append(" -metadata:s:v:0 rotate=0 -c:a copy -t ")
+				.Append(FfmpegNumber(expectedDuration))
+				.Append(" -movflags +faststart -progress pipe:1 -nostats ")
+				.Append(QuoteArg(tempOutput));
+
+			int num = RunFfmpeg(ffmpeg, stringBuilder.ToString(), expectedDuration, progress, out var errorText);
+			string reason = null;
+			if (num == 0 && ValidateExactDurationOutput(ffmpeg, tempOutput, expectedDuration, out reason))
+			{
+				File.Copy(tempOutput, outputPath, overwrite: true);
+				TryDelete(tempOutput);
+				return true;
+			}
+			error = "拼屏标题添加失败：" + LastUsefulLines(errorText, 6);
+			return false;
+		}
+		catch (Exception ex)
+		{
+			error = "拼屏标题添加异常：" + ex.Message;
+			return false;
+		}
+		finally
+		{
+			TryDelete(tempOutput);
+			TryDelete(titlePng);
+			TryDelete(text);
 		}
 	}
 
@@ -24782,6 +25084,17 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			SaveNumericSetting(values, "splitScreen.pipOffsetY", _splitScreenPipOffsetY);
 			PutSetting(values, "splitScreen.outputFolder", _splitScreenOutputFolder.Text);
 			SaveBgmSettings(values, "splitScreen.bgm.", _splitScreenBgm);
+			PutSetting(values, "splitScreen.title.enabled", _splitScreenTitleEnabled?.Checked ?? false);
+			PutSetting(values, "splitScreen.title.style", _splitScreenTitleStyleCombo?.SelectedIndex ?? 0);
+			PutSetting(values, "splitScreen.title.position", _splitScreenTitlePositionCombo?.SelectedIndex ?? 0);
+			PutSetting(values, "splitScreen.title.template", _splitScreenTitleTextBox?.Text ?? "{文件名}");
+			SaveNumericSetting(values, "splitScreen.title.duration", _splitScreenTitleDurationNum);
+			if (_splitScreenTitlePlan != null)
+			{
+				PutSetting(values, "splitScreen.title.subTemplate", _splitScreenTitlePlan.SubTitleTemplate);
+				PutSetting(values, "splitScreen.title.fontScale", _splitScreenTitlePlan.FontSizeScale.ToString(CultureInfo.InvariantCulture));
+				PutSetting(values, "splitScreen.title.offsetY", _splitScreenTitlePlan.CustomOffsetY);
+			}
 			foreach (SplitScreenLayoutDefinition splitScreenLayout in _splitScreenLayouts)
 			{
 				EnsureSplitScreenLayoutSettings(splitScreenLayout);
@@ -25069,6 +25382,18 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			LoadNumericSetting(values, "splitScreen.pipOffsetY", _splitScreenPipOffsetY);
 			LoadTextSetting(values, "splitScreen.outputFolder", _splitScreenOutputFolder);
 			LoadBgmSettings(values, "splitScreen.bgm.", _splitScreenBgm);
+			LoadCheckSetting(values, "splitScreen.title.enabled", _splitScreenTitleEnabled);
+			LoadComboIndexSetting(values, "splitScreen.title.style", _splitScreenTitleStyleCombo);
+			LoadComboIndexSetting(values, "splitScreen.title.position", _splitScreenTitlePositionCombo);
+			LoadTextSetting(values, "splitScreen.title.template", _splitScreenTitleTextBox);
+			LoadNumericSetting(values, "splitScreen.title.duration", _splitScreenTitleDurationNum);
+			string spSubT = GetSetting(values, "splitScreen.title.subTemplate", null);
+			if (spSubT != null && _splitScreenTitlePlan != null) _splitScreenTitlePlan.SubTitleTemplate = spSubT;
+			string spFontScale = GetSetting(values, "splitScreen.title.fontScale", null);
+			if (spFontScale != null && _splitScreenTitlePlan != null && float.TryParse(spFontScale, NumberStyles.Float, CultureInfo.InvariantCulture, out var spFs)) _splitScreenTitlePlan.FontSizeScale = spFs;
+			string spOffY = GetSetting(values, "splitScreen.title.offsetY", null);
+			if (spOffY != null && _splitScreenTitlePlan != null && int.TryParse(spOffY, NumberStyles.Integer, CultureInfo.InvariantCulture, out var spOy)) _splitScreenTitlePlan.CustomOffsetY = spOy;
+			SyncSplitScreenTitlePlanFromUi();
 			foreach (SplitScreenLayoutDefinition splitScreenLayout in _splitScreenLayouts)
 			{
 				EnsureSplitScreenLayoutSettings(splitScreenLayout);
@@ -25660,6 +25985,12 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 		_splitScreenCancelButton.Enabled = running;
 		SetBgmControlsEnabled(_splitScreenBgm, !running);
+		if (_splitScreenTitleEnabled != null) _splitScreenTitleEnabled.Enabled = !running;
+		if (_splitScreenTitleStyleCombo != null) _splitScreenTitleStyleCombo.Enabled = !running && (_splitScreenTitleEnabled?.Checked ?? false);
+		if (_splitScreenTitlePositionCombo != null) _splitScreenTitlePositionCombo.Enabled = !running && (_splitScreenTitleEnabled?.Checked ?? false);
+		if (_splitScreenTitleTextBox != null) _splitScreenTitleTextBox.Enabled = !running && (_splitScreenTitleEnabled?.Checked ?? false);
+		if (_splitScreenTitleDurationNum != null) _splitScreenTitleDurationNum.Enabled = !running && (_splitScreenTitleEnabled?.Checked ?? false);
+		if (_splitScreenTitleStyleBtn != null) _splitScreenTitleStyleBtn.Enabled = !running && (_splitScreenTitleEnabled?.Checked ?? false);
 		SetVideoAdjustmentEditorEnabled(_mergeAdjustmentEditor, !running);
 		SetVideoAdjustmentEditorEnabled(_splitAdjustmentEditor, !running);
 		SetVideoAdjustmentEditorEnabled(_watermarkAdjustmentEditor, !running);
