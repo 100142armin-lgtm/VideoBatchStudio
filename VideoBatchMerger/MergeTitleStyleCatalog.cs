@@ -321,9 +321,10 @@ namespace VideoBatchMerger
 
 				MergeTitleStyle style = GetStyle(plan.StyleId);
 
-				float resScale = Math.Min(targetW, targetH) / 1080f;
+				float refDim = Math.Min(targetW, targetH);
+				float resScale = refDim / 1080f;
 				float userScale = Math.Max(0.2f, Math.Min(2.5f, plan.FontSizeScale));
-				float baseFontSize = targetH * 0.048f * resScale * userScale;
+				float baseFontSize = (targetH >= targetW ? 92f : 64f) * resScale * userScale;
 				if (baseFontSize < 14f * resScale) baseFontSize = 14f * resScale;
 
 				// Resolve Font
