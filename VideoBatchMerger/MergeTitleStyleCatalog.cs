@@ -5,6 +5,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace VideoBatchMerger
@@ -321,18 +322,37 @@ namespace VideoBatchMerger
 				MergeTitleStyle style = GetStyle(plan.StyleId);
 
 				float resScale = Math.Min(targetW, targetH) / 1080f;
-				float baseFontSize = targetH * 0.050f * resScale * Math.Max(0.5f, Math.Min(2.0f, plan.FontSizeScale));
-				if (baseFontSize < 18f * resScale) baseFontSize = 18f * resScale;
+				float userScale = Math.Max(0.2f, Math.Min(2.5f, plan.FontSizeScale));
+				float baseFontSize = targetH * 0.048f * resScale * userScale;
+				if (baseFontSize < 14f * resScale) baseFontSize = 14f * resScale;
 
 				// Resolve Font
 				Font fontMain = CreateSafeFont(style.FontFamily, baseFontSize, style.FontStyle);
-				float maxAllowedW = targetW * 0.84f; // Safe margin
+				float maxAllowedW = targetW * 0.82f; // Safe margin: 82% of target width
 
 				List<string> lines = WrapTextToBalancedLines(g, resolvedMainText, fontMain, maxAllowedW);
-				// If text has more than 2 lines, scale down font size
-				while (lines.Count > 2 && baseFontSize > 18f * resScale)
+
+				// Safety Auto-Downscale Loop:
+				// As long as any line exceeds maxAllowedW, or lines > 3, reduce font size until it fits perfectly!
+				float minAllowedFontSize = 12f * resScale;
+				while (baseFontSize > minAllowedFontSize)
 				{
-					baseFontSize -= 3f * resScale;
+					bool anyLineOverflows = false;
+					foreach (var l in lines)
+					{
+						if (g.MeasureString(l, fontMain).Width > maxAllowedW)
+						{
+							anyLineOverflows = true;
+							break;
+						}
+					}
+
+					if (!anyLineOverflows && lines.Count <= 3)
+					{
+						break;
+					}
+
+					baseFontSize -= Math.Max(1.5f * resScale, baseFontSize * 0.05f);
 					fontMain.Dispose();
 					fontMain = CreateSafeFont(style.FontFamily, baseFontSize, style.FontStyle);
 					lines = WrapTextToBalancedLines(g, resolvedMainText, fontMain, maxAllowedW);
@@ -373,26 +393,34 @@ namespace VideoBatchMerger
 
 						// Determine Center Y based on position
 						float targetCenterY;
-						string pos = plan.Position ?? "居中偏上";
-						if (pos.Contains("顶部"))
+						string pos = plan.Position ?? "中间分割线";
+						if (pos.Contains("中间分割线") || pos.Contains("分割线"))
+						{
+							targetCenterY = targetH * 0.50f;
+						}
+						else if (pos.Contains("偏上")) // "居中偏上"
+						{
+							targetCenterY = targetH * 0.25f;
+						}
+						else if (pos.Contains("偏下")) // "居中偏下"
+						{
+							targetCenterY = targetH * 0.75f;
+						}
+						else if (pos.Contains("顶部") || pos.Contains("顶端"))
 						{
 							targetCenterY = targetH * 0.12f;
 						}
-						else if (pos.Contains("居中偏下"))
-						{
-							targetCenterY = targetH * 0.72f;
-						}
-						else if (pos.Contains("居中"))
-						{
-							targetCenterY = targetH * 0.48f;
-						}
 						else if (pos.Contains("底部"))
 						{
-							targetCenterY = targetH * 0.84f;
+							targetCenterY = targetH * 0.86f;
 						}
-						else // "居中偏上" (Short-video Golden Zone)
+						else if (pos.Contains("居中") || pos.Contains("中央"))
 						{
-							targetCenterY = targetH * 0.23f;
+							targetCenterY = targetH * 0.50f;
+						}
+						else
+						{
+							targetCenterY = targetH * 0.50f;
 						}
 
 						targetCenterY += plan.CustomOffsetY * resScale;
@@ -595,55 +623,142 @@ namespace VideoBatchMerger
 		private static List<string> WrapTextToBalancedLines(Graphics g, string text, Font font, float maxWidth)
 		{
 			List<string> result = new List<string>();
-			if (string.IsNullOrEmpty(text)) return result;
+			if (string.IsNullOrWhiteSpace(text)) return result;
 
-			float singleW = g.MeasureString(text, font).Width;
-			if (singleW <= maxWidth)
+			text = text.Trim();
+			float totalW = g.MeasureString(text, font).Width;
+			if (totalW <= maxWidth)
 			{
 				result.Add(text);
 				return result;
 			}
 
-			// Try splitting into 2 lines
-			int len = text.Length;
-			int bestSplit = len / 2;
-			float minDiff = float.MaxValue;
-			string bestL1 = text;
-			string bestL2 = "";
-
-			for (int i = Math.Max(1, len / 2 - 6); i <= Math.Min(len - 1, len / 2 + 6); i++)
+			// Check if text has spaces (Western words like Portuguese / English / Spanish)
+			bool hasSpaces = text.Contains(" ");
+			if (hasSpaces)
 			{
-				string p1 = text.Substring(0, i).Trim();
-				string p2 = text.Substring(i).Trim();
-				float w1 = g.MeasureString(p1, font).Width;
-				float w2 = g.MeasureString(p2, font).Width;
+				string[] words = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+				StringBuilder currentLine = new StringBuilder();
 
-				if (w1 <= maxWidth && w2 <= maxWidth)
+				foreach (string word in words)
 				{
-					float diff = Math.Abs(w1 - w2);
-					if (diff < minDiff)
+					string testLine = currentLine.Length == 0 ? word : currentLine + " " + word;
+					float testW = g.MeasureString(testLine, font).Width;
+
+					if (testW <= maxWidth)
 					{
-						minDiff = diff;
-						bestSplit = i;
-						bestL1 = p1;
-						bestL2 = p2;
+						currentLine.Append(currentLine.Length == 0 ? word : " " + word);
+					}
+					else
+					{
+						if (currentLine.Length > 0)
+						{
+							result.Add(currentLine.ToString());
+							currentLine.Clear();
+						}
+
+						// If single word itself exceeds maxWidth, hard break by characters
+						if (g.MeasureString(word, font).Width > maxWidth)
+						{
+							StringBuilder wordPart = new StringBuilder();
+							for (int ci = 0; ci < word.Length; ci++)
+							{
+								string testPart = wordPart.ToString() + word[ci];
+								if (g.MeasureString(testPart, font).Width <= maxWidth)
+								{
+									wordPart.Append(word[ci]);
+								}
+								else
+								{
+									if (wordPart.Length > 0)
+									{
+										result.Add(wordPart.ToString());
+										wordPart.Clear();
+									}
+									wordPart.Append(word[ci]);
+								}
+							}
+							if (wordPart.Length > 0)
+							{
+								currentLine.Append(wordPart.ToString());
+							}
+						}
+						else
+						{
+							currentLine.Append(word);
+						}
+					}
+				}
+
+				if (currentLine.Length > 0)
+				{
+					result.Add(currentLine.ToString());
+				}
+			}
+			else
+			{
+				// Chinese / CJK characters without spaces
+				StringBuilder currentLine = new StringBuilder();
+				for (int i = 0; i < text.Length; i++)
+				{
+					char c = text[i];
+					string testLine = currentLine.ToString() + c;
+					float testW = g.MeasureString(testLine, font).Width;
+
+					if (testW <= maxWidth)
+					{
+						currentLine.Append(c);
+					}
+					else
+					{
+						if (currentLine.Length > 0)
+						{
+							result.Add(currentLine.ToString());
+							currentLine.Clear();
+						}
+						currentLine.Append(c);
+					}
+				}
+				if (currentLine.Length > 0)
+				{
+					result.Add(currentLine.ToString());
+				}
+			}
+
+			// If wrapped into 2 lines, try to balance their lengths for aesthetics
+			if (result.Count == 2 && hasSpaces)
+			{
+				float w1 = g.MeasureString(result[0], font).Width;
+				float w2 = g.MeasureString(result[1], font).Width;
+				if (Math.Abs(w1 - w2) > maxWidth * 0.25f)
+				{
+					string[] words = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+					int bestSplit = -1;
+					float minDiff = float.MaxValue;
+					for (int si = 1; si < words.Length; si++)
+					{
+						string l1 = string.Join(" ", words.Take(si));
+						string l2 = string.Join(" ", words.Skip(si));
+						float cw1 = g.MeasureString(l1, font).Width;
+						float cw2 = g.MeasureString(l2, font).Width;
+						if (cw1 <= maxWidth && cw2 <= maxWidth)
+						{
+							float diff = Math.Abs(cw1 - cw2);
+							if (diff < minDiff)
+							{
+								minDiff = diff;
+								bestSplit = si;
+							}
+						}
+					}
+					if (bestSplit > 0)
+					{
+						result[0] = string.Join(" ", words.Take(bestSplit));
+						result[1] = string.Join(" ", words.Skip(bestSplit));
 					}
 				}
 			}
 
-			if (!string.IsNullOrEmpty(bestL2))
-			{
-				result.Add(bestL1);
-				result.Add(bestL2);
-			}
-			else
-			{
-				// Hard split if needed
-				string p1 = text.Substring(0, len / 2).Trim();
-				string p2 = text.Substring(len / 2).Trim();
-				result.Add(p1);
-				result.Add(p2);
-			}
 			return result;
 		}
 	}

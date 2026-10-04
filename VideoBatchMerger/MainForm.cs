@@ -12294,6 +12294,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			"中间分割线 (隔断花字)",
 			"顶部居中 (大标题)",
 			"居中偏上",
+			"居中 (画面正中央)",
 			"居中偏下",
 			"底部居中"
 		});
@@ -12601,9 +12602,18 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			_splitScreenTitlePlan.StyleId = MergeTitleStyleCatalog.Styles[_splitScreenTitleStyleCombo.SelectedIndex].Id;
 		}
-		if (_splitScreenTitlePositionCombo != null && _splitScreenTitlePositionCombo.SelectedItem != null)
+		if (_splitScreenTitlePositionCombo != null && _splitScreenTitlePositionCombo.SelectedIndex >= 0)
 		{
-			_splitScreenTitlePlan.Position = _splitScreenTitlePositionCombo.SelectedItem.ToString();
+			_splitScreenTitlePlan.Position = _splitScreenTitlePositionCombo.SelectedIndex switch
+			{
+				0 => "中间分割线",
+				1 => "顶部居中",
+				2 => "居中偏上",
+				3 => "居中",
+				4 => "居中偏下",
+				5 => "底部居中",
+				_ => "中间分割线"
+			};
 		}
 		_splitScreenTitlePlan.MainTitleTemplate = _splitScreenTitleTextBox?.Text ?? "{文件名}";
 		_splitScreenTitlePlan.DurationSeconds = (double)(_splitScreenTitleDurationNum?.Value ?? 0m);
@@ -12627,16 +12637,15 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 		if (_splitScreenTitlePositionCombo != null)
 		{
-			int pidx = -1;
-			for (int i = 0; i < _splitScreenTitlePositionCombo.Items.Count; i++)
-			{
-				if (_splitScreenTitlePositionCombo.Items[i].ToString().Contains(_splitScreenTitlePlan.Position) || _splitScreenTitlePlan.Position.Contains(_splitScreenTitlePositionCombo.Items[i].ToString()))
-				{
-					pidx = i;
-					break;
-				}
-			}
-			_splitScreenTitlePositionCombo.SelectedIndex = pidx >= 0 ? pidx : 0;
+			string targetPos = _splitScreenTitlePlan.Position ?? "中间分割线";
+			int pidx = 0;
+			if (targetPos.Contains("分割线")) pidx = 0;
+			else if (targetPos.Contains("顶部") || targetPos.Contains("顶端")) pidx = 1;
+			else if (targetPos.Contains("偏上")) pidx = 2;
+			else if (targetPos.Contains("中央") || (targetPos.Contains("居中") && !targetPos.Contains("偏") && !targetPos.Contains("顶") && !targetPos.Contains("底"))) pidx = 3;
+			else if (targetPos.Contains("偏下")) pidx = 4;
+			else if (targetPos.Contains("底部")) pidx = 5;
+			_splitScreenTitlePositionCombo.SelectedIndex = pidx;
 		}
 		if (_splitScreenTitleTextBox != null) _splitScreenTitleTextBox.Text = _splitScreenTitlePlan.MainTitleTemplate;
 		if (_splitScreenTitleDurationNum != null) _splitScreenTitleDurationNum.Value = Math.Min(3600m, Math.Max(0m, (decimal)_splitScreenTitlePlan.DurationSeconds));

@@ -87,11 +87,12 @@ namespace VideoBatchMerger
 			};
 			_positionCombo.Items.AddRange(new object[]
 			{
+				"中间分割线 (拼屏隔断专用)",
 				"居中偏上 (短视频黄金视觉区，推荐)",
 				"居中 (画面正中央大字)",
 				"居中偏下 (适合无底部字幕时)",
-				"顶部 (视频顶端通栏)",
-				"底部 (下三分之一解说栏)"
+				"顶部居中 (视频顶端通栏)",
+				"底部居中 (下三分之一解说栏)"
 			});
 			_positionCombo.SelectedIndexChanged += (s, e) => UpdatePreview();
 			this.Controls.Add(_positionCombo);
@@ -104,8 +105,8 @@ namespace VideoBatchMerger
 			{
 				Location = new Point(190, y - 3),
 				Width = 90,
-				Minimum = 60m,
-				Maximum = 180m,
+				Minimum = 20m,
+				Maximum = 250m,
 				Value = 100m,
 				Increment = 5m,
 				BackColor = _isDarkMode ? Color.FromArgb(30, 36, 48) : Color.White,
@@ -115,7 +116,7 @@ namespace VideoBatchMerger
 			_fontSizeNum.ValueChanged += (s, e) => UpdatePreview();
 			this.Controls.Add(_fontSizeNum);
 
-			Label tipScale = new Label { Text = "% (默认 100% 最佳自动适配)", Location = new Point(290, y), AutoSize = true, ForeColor = Color.FromArgb(120, 130, 145) };
+			Label tipScale = new Label { Text = "% (范围 20%~250%，智能防溢出自动适配)", Location = new Point(290, y), AutoSize = true, ForeColor = Color.FromArgb(120, 130, 145) };
 			this.Controls.Add(tipScale);
 
 			y += 38;
@@ -175,17 +176,18 @@ namespace VideoBatchMerger
 		private void LoadFromPlan()
 		{
 			_subTitleBox.Text = _plan.SubTitleTemplate ?? "";
-			string pos = _plan.Position ?? "居中偏上";
-			if (pos.Contains("偏上")) _positionCombo.SelectedIndex = 0;
-			else if (pos.Contains("中央") || (pos.Contains("居中") && !pos.Contains("偏"))) _positionCombo.SelectedIndex = 1;
-			else if (pos.Contains("偏下")) _positionCombo.SelectedIndex = 2;
-			else if (pos.Contains("顶部")) _positionCombo.SelectedIndex = 3;
-			else if (pos.Contains("底部")) _positionCombo.SelectedIndex = 4;
+			string pos = _plan.Position ?? "中间分割线";
+			if (pos.Contains("分割线")) _positionCombo.SelectedIndex = 0;
+			else if (pos.Contains("偏上")) _positionCombo.SelectedIndex = 1;
+			else if (pos.Contains("中央") || (pos.Contains("居中") && !pos.Contains("偏") && !pos.Contains("顶") && !pos.Contains("底"))) _positionCombo.SelectedIndex = 2;
+			else if (pos.Contains("偏下")) _positionCombo.SelectedIndex = 3;
+			else if (pos.Contains("顶部") || pos.Contains("顶端")) _positionCombo.SelectedIndex = 4;
+			else if (pos.Contains("底部")) _positionCombo.SelectedIndex = 5;
 			else _positionCombo.SelectedIndex = 0;
 
 			int scalePercent = (int)Math.Round(_plan.FontSizeScale * 100);
-			if (scalePercent < 60) scalePercent = 60;
-			if (scalePercent > 180) scalePercent = 180;
+			if (scalePercent < 20) scalePercent = 20;
+			if (scalePercent > 250) scalePercent = 250;
 			_fontSizeNum.Value = scalePercent;
 
 			int offY = _plan.CustomOffsetY;
@@ -199,12 +201,13 @@ namespace VideoBatchMerger
 			_plan.SubTitleTemplate = _subTitleBox.Text.Trim();
 			_plan.Position = _positionCombo.SelectedIndex switch
 			{
-				0 => "居中偏上",
-				1 => "居中",
-				2 => "居中偏下",
-				3 => "顶部",
-				4 => "底部",
-				_ => "居中偏上"
+				0 => "中间分割线",
+				1 => "居中偏上",
+				2 => "居中",
+				3 => "居中偏下",
+				4 => "顶部居中",
+				5 => "底部居中",
+				_ => "中间分割线"
 			};
 			_plan.FontSizeScale = (float)_fontSizeNum.Value / 100f;
 			_plan.CustomOffsetY = (int)_offsetYNum.Value;
@@ -218,22 +221,57 @@ namespace VideoBatchMerger
 				tempPlan.SubTitleTemplate = _subTitleBox.Text.Trim();
 				tempPlan.Position = _positionCombo.SelectedIndex switch
 				{
-					0 => "居中偏上",
-					1 => "居中",
-					2 => "居中偏下",
-					3 => "顶部",
-					4 => "底部",
-					_ => "居中偏上"
+					0 => "中间分割线",
+					1 => "居中偏上",
+					2 => "居中",
+					3 => "居中偏下",
+					4 => "顶部居中",
+					5 => "底部居中",
+					_ => "中间分割线"
 				};
 				tempPlan.FontSizeScale = (float)_fontSizeNum.Value / 100f;
 				tempPlan.CustomOffsetY = (int)_offsetYNum.Value;
 
-				Bitmap bmp = MergeTitleStyleCatalog.RenderTitleBitmap(tempPlan, 1080, 1920, _sampleMainText, tempPlan.SubTitleTemplate);
+				Bitmap fullBmp = MergeTitleStyleCatalog.RenderTitleBitmap(tempPlan, 1080, 1920, _sampleMainText, tempPlan.SubTitleTemplate);
+				Bitmap croppedBmp = CropTitleArea(fullBmp, tempPlan.Position, tempPlan.CustomOffsetY);
+				fullBmp.Dispose();
+
 				var old = _previewBox.Image;
-				_previewBox.Image = bmp;
+				_previewBox.Image = croppedBmp;
 				old?.Dispose();
 			}
 			catch { }
+		}
+
+		private static Bitmap CropTitleArea(Bitmap fullBmp, string pos, int customOffsetY)
+		{
+			float targetCenterY = fullBmp.Height * 0.50f;
+			if (pos != null)
+			{
+				if (pos.Contains("分割线") || pos.Contains("中央") || (pos.Contains("居中") && !pos.Contains("偏") && !pos.Contains("顶") && !pos.Contains("底")))
+					targetCenterY = fullBmp.Height * 0.50f;
+				else if (pos.Contains("偏上"))
+					targetCenterY = fullBmp.Height * 0.25f;
+				else if (pos.Contains("偏下"))
+					targetCenterY = fullBmp.Height * 0.75f;
+				else if (pos.Contains("顶部") || pos.Contains("顶端"))
+					targetCenterY = fullBmp.Height * 0.12f;
+				else if (pos.Contains("底部"))
+					targetCenterY = fullBmp.Height * 0.86f;
+			}
+			targetCenterY += customOffsetY;
+
+			int cropH = 460;
+			int cropW = fullBmp.Width;
+			int topY = Math.Max(0, Math.Min(fullBmp.Height - cropH, (int)(targetCenterY - cropH / 2f)));
+
+			Bitmap cropped = new Bitmap(cropW, cropH, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+			using (Graphics g = Graphics.FromImage(cropped))
+			{
+				g.Clear(Color.FromArgb(20, 26, 38));
+				g.DrawImage(fullBmp, new Rectangle(0, 0, cropW, cropH), new Rectangle(0, topY, cropW, cropH), GraphicsUnit.Pixel);
+			}
+			return cropped;
 		}
 
 		protected override void OnFormClosed(FormClosedEventArgs e)
