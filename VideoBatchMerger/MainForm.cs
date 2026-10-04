@@ -92,7 +92,12 @@ internal sealed class MainForm : Form
 	private int _cutEditBaseTrackHeight = 36;
 	private TrackBar _cutEditZoomSlider;
 	private Label _cutEditZoomLabel;
-	private ComboBox _cutEditTrackHeightCombo;
+	private Button _cutEditZoomOutBtn;
+	private Button _cutEditZoomInBtn;
+	private TrackBar _cutEditTrackHeightSlider;
+	private Label _cutEditTrackHeightLabel;
+	private Button _cutEditHeightDownBtn;
+	private Button _cutEditHeightUpBtn;
 	private Button _cutEditAddTrackBtn;
 
 	// Professional timeline tools and ergonomic navigation
@@ -4376,52 +4381,65 @@ internal sealed class MainForm : Form
 		};
 		tlToolsRight.Controls.Add(_cutEditBgmVolumeTrackBar);
 
-		// Zoom controls
-		_cutEditZoomLabel = new Label { Text = "🔍 100%", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 5, 0, 0) };
+		// Zoom controls (轨道长短 / 缩放拉杆)
+		_cutEditZoomLabel = new Label { Text = "🔍 100%", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 6, 1, 0), Cursor = Cursors.Hand };
+		ToolTip tipZoom = new ToolTip();
+		tipZoom.SetToolTip(_cutEditZoomLabel, "双击或右键重置为100% (支持Ctrl/Alt+滚轮缩放)");
+		_cutEditZoomLabel.MouseDoubleClick += delegate { SetCutEditZoom(100); };
+		_cutEditZoomLabel.MouseDown += (s, e) => { if (e.Button == MouseButtons.Right) SetCutEditZoom(100); };
 		tlToolsRight.Controls.Add(_cutEditZoomLabel);
 
-		_cutEditZoomSlider = new TrackBar { Width = 64, Height = 24, Minimum = 30, Maximum = 300, Value = 100, TickStyle = TickStyle.None };
+		_cutEditZoomOutBtn = MakeMiniStepButton("➖");
+		_cutEditZoomOutBtn.Click += delegate { SetCutEditZoom((int)Math.Round(_cutEditTimelineZoom * 100) - 15); };
+		tipZoom.SetToolTip(_cutEditZoomOutBtn, "缩小时间轴 (长短缩短)");
+		tlToolsRight.Controls.Add(_cutEditZoomOutBtn);
+
+		_cutEditZoomSlider = new TrackBar { Width = 78, Height = 24, Minimum = 20, Maximum = 600, Value = 100, TickStyle = TickStyle.None };
 		_cutEditZoomSlider.ValueChanged += delegate
 		{
-			_cutEditTimelineZoom = _cutEditZoomSlider.Value / 100.0;
-			_cutEditZoomLabel.Text = $"🔍 {_cutEditZoomSlider.Value}%";
-			ClampTimelineScroll(_cutEditTimelineCanvas?.ClientSize.Width ?? 800);
-			_cutEditTimelineCanvas?.Invalidate();
+			SetCutEditZoom(_cutEditZoomSlider.Value);
 		};
+		tipZoom.SetToolTip(_cutEditZoomSlider, "轨道时间长短拉杆 (20% - 600%)");
 		tlToolsRight.Controls.Add(_cutEditZoomSlider);
 
-		// Track Height selector
-		_cutEditTrackHeightCombo = new ComboBox { Width = 84, Height = 26, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Microsoft YaHei UI", 8.5f) };
-		_cutEditTrackHeightCombo.Items.AddRange(new object[] { "高度:标准", "高度:紧凑", "高度:宽大", "高度:超大" });
-		_cutEditTrackHeightCombo.SelectedIndex = 0;
-		_cutEditTrackHeightCombo.SelectedIndexChanged += delegate
-		{
-			int h = _cutEditTrackHeightCombo.SelectedIndex switch
-			{
-				1 => 26,
-				2 => 50,
-				3 => 68,
-				_ => 36
-			};
-			_cutEditBaseTrackHeight = h;
-			foreach (var trk in _cutEditTracks)
-			{
-				trk.Height = (trk.Type == TrackType.Subtitle) ? Math.Max(22, h - 8) : h;
-			}
-			_cutEditTimelineCanvas?.Invalidate();
-		};
-		tlToolsRight.Controls.Add(_cutEditTrackHeightCombo);
+		_cutEditZoomInBtn = MakeMiniStepButton("➕");
+		_cutEditZoomInBtn.Click += delegate { SetCutEditZoom((int)Math.Round(_cutEditTimelineZoom * 100) + 15); };
+		tipZoom.SetToolTip(_cutEditZoomInBtn, "放大时间轴 (长短拉长)");
+		tlToolsRight.Controls.Add(_cutEditZoomInBtn);
 
-		_cutEditFitWindowBtn = MakeButton("⛶ 适合窗口", 80);
+		// Track Height controls (轨道宽窄 / 高度调节拉杆)
+		_cutEditTrackHeightLabel = new Label { Text = $"↕️ {_cutEditBaseTrackHeight}px", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(6, 6, 1, 0), Cursor = Cursors.Hand };
+		ToolTip tipHeight = new ToolTip();
+		tipHeight.SetToolTip(_cutEditTrackHeightLabel, "双击或右键重置为标准36px (支持Shift+滚轮调节)");
+		_cutEditTrackHeightLabel.MouseDoubleClick += delegate { SetCutEditTrackHeight(36); };
+		_cutEditTrackHeightLabel.MouseDown += (s, e) => { if (e.Button == MouseButtons.Right) SetCutEditTrackHeight(36); };
+		tlToolsRight.Controls.Add(_cutEditTrackHeightLabel);
+
+		_cutEditHeightDownBtn = MakeMiniStepButton("➖");
+		_cutEditHeightDownBtn.Click += delegate { SetCutEditTrackHeight(_cutEditBaseTrackHeight - 4); };
+		tipHeight.SetToolTip(_cutEditHeightDownBtn, "轨道变窄/变矮");
+		tlToolsRight.Controls.Add(_cutEditHeightDownBtn);
+
+		_cutEditTrackHeightSlider = new TrackBar { Width = 72, Height = 24, Minimum = 24, Maximum = 110, Value = _cutEditBaseTrackHeight, TickStyle = TickStyle.None };
+		_cutEditTrackHeightSlider.ValueChanged += delegate
+		{
+			SetCutEditTrackHeight(_cutEditTrackHeightSlider.Value);
+		};
+		tipHeight.SetToolTip(_cutEditTrackHeightSlider, "轨道宽窄拉杆 (24px - 110px)");
+		tlToolsRight.Controls.Add(_cutEditTrackHeightSlider);
+
+		_cutEditHeightUpBtn = MakeMiniStepButton("➕");
+		_cutEditHeightUpBtn.Click += delegate { SetCutEditTrackHeight(_cutEditBaseTrackHeight + 4); };
+		tipHeight.SetToolTip(_cutEditHeightUpBtn, "轨道加宽/加高");
+		tlToolsRight.Controls.Add(_cutEditHeightUpBtn);
+
+		_cutEditFitWindowBtn = MakeButton("⛶ 适合窗口", 78);
 		_cutEditFitWindowBtn.Height = 28;
 		_cutEditFitWindowBtn.Margin = new Padding(4, 0, 0, 0);
 		_cutEditFitWindowBtn.Click += delegate
 		{
-			_cutEditTimelineZoom = 1.0;
 			_cutEditScrollX = 0;
-			if (_cutEditZoomSlider != null) _cutEditZoomSlider.Value = 100;
-			if (_cutEditZoomLabel != null) _cutEditZoomLabel.Text = "🔍 100%";
-			_cutEditTimelineCanvas?.Invalidate();
+			SetCutEditZoom(100);
 		};
 		tlToolsRight.Controls.Add(_cutEditFitWindowBtn);
 
@@ -5344,29 +5362,91 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_cutEditTimelineCanvas?.Invalidate();
 	}
 
+	private Button MakeMiniStepButton(string text)
+	{
+		Button btn = new Button
+		{
+			Text = text,
+			Width = 20,
+			Height = 22,
+			FlatStyle = FlatStyle.Flat,
+			Cursor = Cursors.Hand,
+			Font = new Font("Microsoft YaHei UI", 7f, FontStyle.Bold),
+			ForeColor = Color.FromArgb(203, 213, 225),
+			BackColor = Color.FromArgb(45, 55, 72),
+			Margin = new Padding(1, 4, 1, 0),
+			Padding = Padding.Empty
+		};
+		btn.FlatAppearance.BorderSize = 0;
+		btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(71, 85, 105);
+		btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(30, 41, 59);
+		return btn;
+	}
+
+	private void SetCutEditTrackHeight(int h)
+	{
+		h = Math.Max(24, Math.Min(110, h));
+		_cutEditBaseTrackHeight = h;
+		if (_cutEditTrackHeightSlider != null && _cutEditTrackHeightSlider.Value != h)
+		{
+			_cutEditTrackHeightSlider.Value = h;
+		}
+		if (_cutEditTrackHeightLabel != null)
+		{
+			_cutEditTrackHeightLabel.Text = $"↕️ {h}px";
+		}
+		foreach (var trk in _cutEditTracks)
+		{
+			trk.Height = (trk.Type == TrackType.Subtitle) ? Math.Max(20, h - 8) : h;
+		}
+		_cutEditTimelineCanvas?.Invalidate();
+	}
+
+	private void SetCutEditZoom(int zoomPercent)
+	{
+		zoomPercent = Math.Max(20, Math.Min(600, zoomPercent));
+		_cutEditTimelineZoom = zoomPercent / 100.0;
+		if (_cutEditZoomSlider != null && _cutEditZoomSlider.Value != zoomPercent)
+		{
+			_cutEditZoomSlider.Value = zoomPercent;
+		}
+		if (_cutEditZoomLabel != null)
+		{
+			_cutEditZoomLabel.Text = $"🔍 {zoomPercent}%";
+		}
+		ClampTimelineScroll(_cutEditTimelineCanvas?.ClientSize.Width ?? 800);
+		_cutEditTimelineCanvas?.Invalidate();
+	}
+
 	private void HandleTimelineMouseWheel(object sender, MouseEventArgs e)
 	{
 		if (_cutEditTimelineCanvas == null || _cutEditDuration <= 0.0) return;
 		int w = _cutEditTimelineCanvas.ClientSize.Width;
 
-		if (Control.ModifierKeys.HasFlag(Keys.Alt))
+		if (Control.ModifierKeys.HasFlag(Keys.Shift))
 		{
-			// Zoom at mouse cursor
+			// Shift + 滚轮: 垂直调节轨道宽窄/高度
+			int step = e.Delta > 0 ? 4 : -4;
+			SetCutEditTrackHeight(_cutEditBaseTrackHeight + step);
+		}
+		else if (Control.ModifierKeys.HasFlag(Keys.Alt) || Control.ModifierKeys.HasFlag(Keys.Control))
+		{
+			// Ctrl/Alt + 滚轮: 以鼠标所指时间点为中心缩放时间轴 (20% - 600%)
 			int headerW = 92;
 			int padR = 14;
 			double mouseTime = ScreenXToTime(e.X, w);
 			double oldZoom = _cutEditTimelineZoom;
 			double factor = e.Delta > 0 ? 1.2 : 0.8333;
-			double newZoom = Math.Max(0.3, Math.Min(5.0, oldZoom * factor));
+			double newZoom = Math.Max(0.2, Math.Min(6.0, oldZoom * factor));
 			_cutEditTimelineZoom = newZoom;
-			if (_cutEditZoomSlider != null)
+			int val = (int)Math.Round(newZoom * 100);
+			if (_cutEditZoomSlider != null && _cutEditZoomSlider.Value != val)
 			{
-				int val = (int)Math.Round(newZoom * 100);
 				_cutEditZoomSlider.Value = Math.Max(_cutEditZoomSlider.Minimum, Math.Min(_cutEditZoomSlider.Maximum, val));
 			}
 			if (_cutEditZoomLabel != null)
 			{
-				_cutEditZoomLabel.Text = $"🔍 {(int)(newZoom * 100)}%";
+				_cutEditZoomLabel.Text = $"🔍 {val}%";
 			}
 
 			// Keep mouseTime at the same screen X
@@ -5380,7 +5460,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 		else
 		{
-			// Horizontal Pan
+			// 水平平移
 			int headerW = 92;
 			int padR = 14;
 			int trackW = Math.Max(10, (int)((w - headerW - padR) * _cutEditTimelineZoom));
