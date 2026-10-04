@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.4.1";
+	public const string CurrentAppVersion = "8.5.0";
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
@@ -440,6 +440,20 @@ internal sealed class MainForm : Form
 	private Button _openOutputButton;
 
 	private Button _mergeResetButton;
+
+	private CheckBox _mergeTitleEnabled;
+
+	private ComboBox _mergeTitleStyleCombo;
+
+	private TextBox _mergeTitleMainTextBox;
+
+	private NumericUpDown _mergeTitleDurationNum;
+
+	private Button _mergeTitleTweakBtn;
+
+	private MergeTitlePlan _mergeTitlePlan = new MergeTitlePlan();
+
+	private MergeTitlePlan _activeMergeTitlePlan;
 
 	private CheckBox _autoFallback;
 
@@ -1441,25 +1455,103 @@ internal sealed class MainForm : Form
 		_mergeCanvasFitMode.SelectedIndex = 0;
 		panel5.Controls.Add(_mergeCanvasFitMode);
 		_mergeBgm = InstallBgmControls(panel5, 20, 268);
-		panel5.Controls.Add(MakeLabel("总输出目录", 20, 317));
+
+		// Video Title Packaging Row
+		_mergeTitleEnabled = new CheckBox
+		{
+			Text = "🏷️ 视频标题包装",
+			AutoSize = true,
+			Location = new Point(20, 305),
+			Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold)
+		};
+		panel5.Controls.Add(_mergeTitleEnabled);
+
+		_mergeTitleStyleCombo = new ComboBox
+		{
+			Location = new Point(160, 302),
+			Width = 310,
+			DropDownStyle = ComboBoxStyle.DropDownList
+		};
+		_mergeTitleStyleCombo.Items.AddRange(MergeTitleStyleCatalog.Styles.Select(s => (object)s.Name).ToArray());
+		_mergeTitleStyleCombo.SelectedIndex = 0;
+		panel5.Controls.Add(_mergeTitleStyleCombo);
+
+		panel5.Controls.Add(MakeLabel("标题内容", 482, 306));
+		_mergeTitleMainTextBox = new TextBox
+		{
+			Location = new Point(542, 302),
+			Width = 150,
+			Text = "{文件名}"
+		};
+		panel5.Controls.Add(_mergeTitleMainTextBox);
+
+		Button btnInsertFileName = MakeButton("+首素材名", 76);
+		btnInsertFileName.Location = new Point(698, 300);
+		btnInsertFileName.Height = 26;
+		btnInsertFileName.Click += delegate
+		{
+			_mergeTitleMainTextBox.Paste("{文件名}");
+		};
+		panel5.Controls.Add(btnInsertFileName);
+
+		Button btnInsertIndex = MakeButton("+序号", 56);
+		btnInsertIndex.Location = new Point(780, 300);
+		btnInsertIndex.Height = 26;
+		btnInsertIndex.Click += delegate
+		{
+			_mergeTitleMainTextBox.Paste("{序号}");
+		};
+		panel5.Controls.Add(btnInsertIndex);
+
+		panel5.Controls.Add(MakeLabel("时长", 846, 306));
+		_mergeTitleDurationNum = new NumericUpDown
+		{
+			Location = new Point(880, 302),
+			Width = 56,
+			Minimum = 0m,
+			Maximum = 30m,
+			Value = 4.0m,
+			Increment = 0.5m,
+			DecimalPlaces = 1,
+			TextAlign = HorizontalAlignment.Center
+		};
+		panel5.Controls.Add(_mergeTitleDurationNum);
+		panel5.Controls.Add(MakeLabel("秒(0=全程)", 940, 306));
+
+		_mergeTitleTweakBtn = MakeButton("🎨 样式微调...", 96);
+		_mergeTitleTweakBtn.Location = new Point(1022, 300);
+		_mergeTitleTweakBtn.Height = 26;
+		_mergeTitleTweakBtn.Click += delegate
+		{
+			ShowMergeTitleTweakDialog();
+		};
+		panel5.Controls.Add(_mergeTitleTweakBtn);
+
+		_mergeTitleEnabled.CheckedChanged += delegate
+		{
+			UpdateMergeTitleControlsEnabled();
+		};
+		UpdateMergeTitleControlsEnabled();
+
+		panel5.Controls.Add(MakeLabel("总输出目录", 20, 340));
 		_outputFolder = new TextBox
 		{
-			Location = new Point(110, 313),
+			Location = new Point(110, 336),
 			Width = 708,
 			Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right)
 		};
 		panel5.Controls.Add(_outputFolder);
 		_browseOutputButton = MakeButton("选择…", 72);
-		_browseOutputButton.Location = new Point(830, 310);
+		_browseOutputButton.Location = new Point(830, 333);
 		_browseOutputButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
 		panel5.Controls.Add(_browseOutputButton);
 		_openOutputButton = MakeButton("打开", 64);
-		_openOutputButton.Location = new Point(910, 310);
+		_openOutputButton.Location = new Point(910, 333);
 		_openOutputButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
 		panel5.Controls.Add(_openOutputButton);
 		_progressBar = new ProgressBar
 		{
-			Location = new Point(20, 356),
+			Location = new Point(20, 374),
 			Height = 18,
 			Width = 954,
 			Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right)
@@ -1467,7 +1559,7 @@ internal sealed class MainForm : Form
 		panel5.Controls.Add(_progressBar);
 		_statusLabel = new Label
 		{
-			Location = new Point(20, 381),
+			Location = new Point(20, 398),
 			Size = new Size(954, 24),
 			Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right),
 			ForeColor = Color.FromArgb(77, 87, 101),
@@ -1475,19 +1567,19 @@ internal sealed class MainForm : Form
 			Text = "就绪：可拖入视频文件或包含视频的文件夹"
 		};
 		panel5.Controls.Add(_statusLabel);
-		_startButton = MakePrimaryButton("开始批量合并", 20, 417, 150);
+		_startButton = MakePrimaryButton("开始批量合并", 20, 430, 150);
 		panel5.Controls.Add(_startButton);
 		_cancelButton = MakeButton("取消", 90);
-		_cancelButton.Location = new Point(180, 417);
+		_cancelButton.Location = new Point(180, 430);
 		_cancelButton.Height = 42;
 		_cancelButton.Enabled = false;
 		panel5.Controls.Add(_cancelButton);
 		_mergePreviewButton = MakeButton("▶ 播放合并预览 (第1组)", 175);
-		_mergePreviewButton.Location = new Point(280, 417);
+		_mergePreviewButton.Location = new Point(280, 430);
 		_mergePreviewButton.Height = 42;
 		panel5.Controls.Add(_mergePreviewButton);
 		Button mergeSendToCutBtn = MakeButton("🎬 发送最新成品至剪辑", 175);
-		mergeSendToCutBtn.Location = new Point(465, 417);
+		mergeSendToCutBtn.Location = new Point(465, 430);
 		mergeSendToCutBtn.Height = 42;
 		mergeSendToCutBtn.Tag = "accent";
 		mergeSendToCutBtn.Click += delegate
@@ -1512,7 +1604,7 @@ internal sealed class MainForm : Form
 		base.Shown += delegate { CenterMergeActionButtons(); };
 		CenterMergeActionButtons();
 
-		Label label = MakeLabel("每批会自动创建“日期_批量合并_编号”文件夹；原视频不会被修改。", 650, 431);
+		Label label = MakeLabel("每批会自动创建“日期_批量合并_编号”文件夹；原视频不会被修改。", 650, 444);
 		label.ForeColor = Color.FromArgb(110, 119, 132);
 		SplitContainer mergeMainSplitter = new SplitContainer
 		{
@@ -1532,7 +1624,7 @@ internal sealed class MainForm : Form
 			Padding = new Padding(0)
 		};
 		panel5.Dock = DockStyle.Top;
-		panel5.Height = 475;
+		panel5.Height = 495;
 		mergeBottomScrollHost.Controls.Add(panel5);
 		mergeMainSplitter.Panel2.Controls.Add(mergeBottomScrollHost);
 
@@ -19705,6 +19797,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_activeMergeBgmPlan = CaptureBgmPlan(_mergeBgm);
 		_activeMergeOutputFrame = CaptureOutputFrameSettings(_mergeOutputFrameControls);
 		_activeMergeFillCanvas = _mergeCanvasFitMode.SelectedIndex != 1;
+		_activeMergeTitlePlan = CaptureMergeTitlePlan();
 		bool fallback = _autoFallback.Checked;
 		SetRunningState(running: true);
 		_cancelRequested = false;
@@ -19749,6 +19842,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_activeMergeBgmPlan = CaptureBgmPlan(_mergeBgm);
 		_activeMergeOutputFrame = CaptureOutputFrameSettings(_mergeOutputFrameControls);
 		_activeMergeFillCanvas = _mergeCanvasFitMode.SelectedIndex != 1;
+		_activeMergeTitlePlan = CaptureMergeTitlePlan();
 		bool fallback = _autoFallback.Checked;
 
 		int groupCount = Math.Max(1, Math.Min(planning.MaxItemsPerGroup, validFiles.Count));
@@ -19784,7 +19878,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 						previewLimit,
 						planning.RandomClipRanges,
 						delegate { },
-						dummyLog
+						dummyLog,
+						0
 					);
 				}
 
@@ -20854,6 +20949,52 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		return transitionPlan;
 	}
 
+	private void UpdateMergeTitleControlsEnabled()
+	{
+		bool en = _mergeTitleEnabled?.Checked == true;
+		if (_mergeTitleStyleCombo != null) _mergeTitleStyleCombo.Enabled = en;
+		if (_mergeTitleMainTextBox != null) _mergeTitleMainTextBox.Enabled = en;
+		if (_mergeTitleDurationNum != null) _mergeTitleDurationNum.Enabled = en;
+		if (_mergeTitleTweakBtn != null) _mergeTitleTweakBtn.Enabled = en;
+	}
+
+	private void ShowMergeTitleTweakDialog()
+	{
+		var plan = CaptureMergeTitlePlan();
+		string sampleText = _mergeTitleMainTextBox.Text.Trim();
+		if (sampleText.Contains("{文件名}") || sampleText.Contains("{filename}") || sampleText.Contains("{name}"))
+		{
+			string firstFile = _videos.FirstOrDefault(File.Exists);
+			sampleText = !string.IsNullOrEmpty(firstFile) ? MergeTitleStyleCatalog.CleanFilenameForTitle(firstFile) : "🔥 热门短视频标题示例";
+		}
+		using (var dlg = new MergeTitleStyleDialog(plan, sampleText, _isDarkMode))
+		{
+			if (dlg.ShowDialog(this) == DialogResult.OK)
+			{
+				_mergeTitlePlan = plan;
+			}
+		}
+	}
+
+	private MergeTitlePlan CaptureMergeTitlePlan()
+	{
+		var plan = _mergeTitlePlan?.Clone() ?? new MergeTitlePlan();
+		plan.Enabled = _mergeTitleEnabled?.Checked ?? false;
+		if (_mergeTitleStyleCombo != null && _mergeTitleStyleCombo.SelectedIndex >= 0 && _mergeTitleStyleCombo.SelectedIndex < MergeTitleStyleCatalog.Styles.Count)
+		{
+			plan.StyleId = MergeTitleStyleCatalog.Styles[_mergeTitleStyleCombo.SelectedIndex].Id;
+		}
+		if (_mergeTitleMainTextBox != null)
+		{
+			plan.MainTitleTemplate = _mergeTitleMainTextBox.Text.Trim();
+		}
+		if (_mergeTitleDurationNum != null)
+		{
+			plan.DurationSeconds = (double)_mergeTitleDurationNum.Value;
+		}
+		return plan;
+	}
+
 	private static List<TransitionSpec> CreateTransitionCatalog(double durationSeconds)
 	{
 		string customExpression = "A*(1-max(0,min(1,P+0.08*sin(4*PI*Y/H-3*PI*P)*sin(PI*P))))+B*max(0,min(1,P+0.08*sin(4*PI*Y/H-3*PI*P)*sin(PI*P)))";
@@ -21473,7 +21614,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 						{
 							double ratio = 0.2 + 0.8 * ((double)capturedIndex + Math.Max(0.0, Math.Min(1.0, groupProgress))) / (double)totalGroups;
 							UiProgress(ratio, "第 " + (capturedIndex + 1) + "/" + totalGroups + " 组 · " + stage);
-						}, streamWriter);
+						}, streamWriter, capturedIndex);
 						string reason = null;
 						double expectedDuration = ((num5 > 0.0) ? num5 : ((mergeResult.RenderedDurationSeconds > 0.0) ? mergeResult.RenderedDurationSeconds : num4));
 						if (mergeResult.Success && ((num5 > 0.0) ? ValidateExactDurationOutput(ffmpeg, text2, expectedDuration, out reason) : ValidateVideoOutput(ffmpeg, text2, expectedDuration, out reason)))
@@ -22167,7 +22308,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		return MergeGroupWithProfileCapped(ffmpeg, files, outputPath, allowFallback, transition, watermark, 0.0, randomClipRanges: false, progress, log);
 	}
 
-	private MergeResult MergeGroupWithProfileCapped(string ffmpeg, List<string> files, string outputPath, bool allowFallback, TransitionPlan transition, WatermarkProfile watermark, double outputLimitSeconds, bool randomClipRanges, Action<double, string> progress, StreamWriter log)
+	private MergeResult MergeGroupWithProfileCapped(string ffmpeg, List<string> files, string outputPath, bool allowFallback, TransitionPlan transition, WatermarkProfile watermark, double outputLimitSeconds, bool randomClipRanges, Action<double, string> progress, StreamWriter log, int groupIndex = 0)
 	{
 		List<VideoInfo> list = new List<VideoInfo>();
 		foreach (string file in files)
@@ -22284,7 +22425,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				VideoAdjustmentSettings videoAdjustment4 = GetVideoAdjustment(_activeMergeVideoAdjustments, x.Path);
 				return !videoAdjustment4.IsIdentity || ShouldCenterCropPortrait(x, videoAdjustment4);
 			}) || (_activeMergeOutputFrame != null && _activeMergeOutputFrame.ForceAspect);
-			bool flag3 = renderTransition.Enabled || watermark.Enabled || exactDurationOutput || flag2;
+			bool flag3 = renderTransition.Enabled || watermark.Enabled || exactDurationOutput || flag2 || (_activeMergeTitlePlan != null && _activeMergeTitlePlan.Enabled);
 			if (flag && !flag3)
 			{
 				WriteConcatList(text2, files);
@@ -22320,7 +22461,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				}
 				if (flag3)
 				{
-					log.WriteLine("  已启用素材调整、统一时长、转场或水印，将使用兼容转换和重新编码。");
+					log.WriteLine("  已启用素材调整、统一时长、转场、水印或视频标题，将使用兼容转换和重新编码。");
 				}
 			}
 			if (!allowFallback && !flag3)
@@ -22451,7 +22592,29 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 						return mergeResult13;
 					}
 				}
-				arguments3 = BuildAdvancedMergeArguments(list5, list6, outputPath, renderTransition, watermark, watermarkLayers, outputLimitSeconds, out renderedDuration, log);
+				string tempTitlePng = null;
+				if (_activeMergeTitlePlan != null && _activeMergeTitlePlan.Enabled)
+				{
+					try
+					{
+						string resolvedMain = MergeTitleStyleCatalog.ResolveTitleText(_activeMergeTitlePlan.MainTitleTemplate, files, groupIndex);
+						string resolvedSub = MergeTitleStyleCatalog.ResolveTitleText(_activeMergeTitlePlan.SubTitleTemplate, files, groupIndex);
+						if (!string.IsNullOrWhiteSpace(resolvedMain))
+						{
+							tempTitlePng = Path.Combine(text, $"MergeTitle_Group{groupIndex}_" + Guid.NewGuid().ToString("N") + ".png");
+							using (Bitmap bmp = MergeTitleStyleCatalog.RenderTitleBitmap(_activeMergeTitlePlan, num7, num8, resolvedMain, resolvedSub))
+							{
+								bmp.Save(tempTitlePng, System.Drawing.Imaging.ImageFormat.Png);
+							}
+							log.WriteLine($"  已生成视频标题：【{resolvedMain}】({_activeMergeTitlePlan.Position}，呈现 {_activeMergeTitlePlan.DurationSeconds:0.#} 秒)");
+						}
+					}
+					catch (Exception ex)
+					{
+						log.WriteLine("  生成视频标题失败: " + ex.Message);
+					}
+				}
+				arguments3 = BuildAdvancedMergeArguments(list5, list6, outputPath, renderTransition, watermark, watermarkLayers, _activeMergeTitlePlan, tempTitlePng, outputLimitSeconds, out renderedDuration, log);
 			}
 			else
 			{
@@ -22460,7 +22623,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			}
 			int num15 = RunFfmpeg(ffmpeg, arguments3, renderedDuration, delegate(double p)
 			{
-				progress(normalizationWeight + p * (1.0 - normalizationWeight), renderTransition.Enabled ? "正在渲染转场" : (watermark.Enabled ? "正在添加水印" : "正在生成输出文件"));
+				progress(normalizationWeight + p * (1.0 - normalizationWeight), renderTransition.Enabled ? "正在渲染转场" : ((_activeMergeTitlePlan != null && _activeMergeTitlePlan.Enabled) ? "正在合成标题" : (watermark.Enabled ? "正在添加水印" : "正在生成输出文件")));
 			}, out var errorText3);
 			if (_cancelRequested)
 			{
@@ -22576,7 +22739,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		return list;
 	}
 
-	private string BuildAdvancedMergeArguments(List<string> normalized, List<VideoInfo> infos, string outputPath, TransitionPlan transition, WatermarkProfile watermark, List<PreparedWatermarkLayer> watermarkLayers, double outputLimitSeconds, out double renderedDuration, StreamWriter log)
+	private string BuildAdvancedMergeArguments(List<string> normalized, List<VideoInfo> infos, string outputPath, TransitionPlan transition, WatermarkProfile watermark, List<PreparedWatermarkLayer> watermarkLayers, MergeTitlePlan titlePlan, string titlePngPath, double outputLimitSeconds, out double renderedDuration, StreamWriter log)
 	{
 		StringBuilder stringBuilder = new StringBuilder("-hide_banner -y");
 		foreach (string item in normalized)
@@ -22586,6 +22749,13 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		if (watermark.Enabled)
 		{
 			AppendWatermarkInputs(stringBuilder, watermarkLayers);
+		}
+		int watermarkInputCount = watermark.Enabled ? watermarkLayers.Count : 0;
+		int titleInputIndex = normalized.Count + watermarkInputCount;
+		bool hasTitle = titlePlan != null && titlePlan.Enabled && !string.IsNullOrEmpty(titlePngPath) && File.Exists(titlePngPath);
+		if (hasTitle)
+		{
+			stringBuilder.Append(" -loop 1 -framerate 30 -i ").Append(QuoteArg(titlePngPath));
 		}
 		List<string> list = new List<string>();
 		int count = normalized.Count;
@@ -22668,6 +22838,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		if (watermark.Enabled)
 		{
 			AppendAnimatedWatermarkFilters(list, ref currentVideo, count, watermarkLayers);
+		}
+		if (hasTitle)
+		{
+			AppendTitleFilter(list, ref currentVideo, titleInputIndex, titlePlan);
 		}
 		if (list.Count == 0)
 		{
@@ -22846,6 +23020,31 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			args.Append(" -loop 1 -framerate 30 -i ").Append(QuoteArg(layer.ImagePath));
 		}
+	}
+
+	private static void AppendTitleFilter(List<string> filters, ref string currentVideo, int titleInputIndex, MergeTitlePlan titlePlan)
+	{
+		double dur = titlePlan.DurationSeconds;
+		string titleIn = titleInputIndex + ":v";
+		string nextVideo = "vtitle";
+
+		if (dur <= 0.05)
+		{
+			filters.Add("[" + currentVideo + "][" + titleIn + "]overlay=0:0:format=auto[" + nextVideo + "]");
+		}
+		else
+		{
+			double fadeOutDur = Math.Min(0.4, dur * 0.25);
+			double fadeOutStart = Math.Max(0.0, dur - fadeOutDur);
+			string durStr = FfmpegNumber(dur);
+			string foStartStr = FfmpegNumber(fadeOutStart);
+			string foDurStr = FfmpegNumber(fadeOutDur);
+
+			string titleFaded = "tfaded";
+			filters.Add("[" + titleIn + "]format=rgba,fade=t=out:st=" + foStartStr + ":d=" + foDurStr + ":alpha=1[" + titleFaded + "]");
+			filters.Add("[" + currentVideo + "][" + titleFaded + "]overlay=0:0:enable='lte(t\\," + durStr + ")':format=auto[" + nextVideo + "]");
+		}
+		currentVideo = nextVideo;
 	}
 
 	private static void AppendAnimatedWatermarkFilters(List<string> filters, ref string currentVideo, int firstInputIndex, List<PreparedWatermarkLayer> layers)
@@ -24248,6 +24447,12 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_transitionLockSingleEffect.Checked = false;
 		_autoFallback.Checked = true;
 		ResetBgmParameters(_mergeBgm);
+		if (_mergeTitleEnabled != null) _mergeTitleEnabled.Checked = false;
+		if (_mergeTitleStyleCombo != null) _mergeTitleStyleCombo.SelectedIndex = 0;
+		if (_mergeTitleMainTextBox != null) _mergeTitleMainTextBox.Text = "{文件名}";
+		if (_mergeTitleDurationNum != null) _mergeTitleDurationNum.Value = 4.0m;
+		_mergeTitlePlan = new MergeTitlePlan();
+		UpdateMergeTitleControlsEnabled();
 		_outputFolder.Text = DefaultOutputFolder("批量合并输出");
 		_latestMergeOutputFolder = null;
 		ResetVideoAdjustmentParameters(_videos, _mergeVideoAdjustments, _mergeAdjustmentEditor);
@@ -24448,6 +24653,17 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			PutSetting(values, "merge.autoFallback", _autoFallback.Checked);
 			PutSetting(values, "merge.outputFolder", _outputFolder.Text);
 			SaveBgmSettings(values, "merge.bgm.", _mergeBgm);
+			PutSetting(values, "merge.title.enabled", _mergeTitleEnabled?.Checked ?? false);
+			PutSetting(values, "merge.title.style", _mergeTitleStyleCombo?.SelectedIndex ?? 0);
+			PutSetting(values, "merge.title.template", _mergeTitleMainTextBox?.Text ?? "{文件名}");
+			SaveNumericSetting(values, "merge.title.duration", _mergeTitleDurationNum);
+			if (_mergeTitlePlan != null)
+			{
+				PutSetting(values, "merge.title.subTemplate", _mergeTitlePlan.SubTitleTemplate);
+				PutSetting(values, "merge.title.position", _mergeTitlePlan.Position);
+				PutSetting(values, "merge.title.fontScale", _mergeTitlePlan.FontSizeScale.ToString(CultureInfo.InvariantCulture));
+				PutSetting(values, "merge.title.offsetY", _mergeTitlePlan.CustomOffsetY);
+			}
 			PutSetting(values, "merge.transitions", string.Join(",", from int x in _transitionEffects.CheckedIndices
 				select x.ToString(CultureInfo.InvariantCulture)));
 			PutSetting(values, "split.mode", _splitMode.SelectedIndex);
@@ -24640,6 +24856,19 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			LoadCheckSetting(values, "merge.autoFallback", _autoFallback);
 			LoadTextSetting(values, "merge.outputFolder", _outputFolder);
 			LoadBgmSettings(values, "merge.bgm.", _mergeBgm);
+			LoadCheckSetting(values, "merge.title.enabled", _mergeTitleEnabled);
+			LoadComboIndexSetting(values, "merge.title.style", _mergeTitleStyleCombo);
+			LoadTextSetting(values, "merge.title.template", _mergeTitleMainTextBox);
+			LoadNumericSetting(values, "merge.title.duration", _mergeTitleDurationNum);
+			string subT = GetSetting(values, "merge.title.subTemplate", null);
+			if (subT != null) _mergeTitlePlan.SubTitleTemplate = subT;
+			string pos = GetSetting(values, "merge.title.position", null);
+			if (pos != null) _mergeTitlePlan.Position = pos;
+			string fontScale = GetSetting(values, "merge.title.fontScale", null);
+			if (fontScale != null && float.TryParse(fontScale, NumberStyles.Float, CultureInfo.InvariantCulture, out var fs)) _mergeTitlePlan.FontSizeScale = fs;
+			string offY = GetSetting(values, "merge.title.offsetY", null);
+			if (offY != null && int.TryParse(offY, NumberStyles.Integer, CultureInfo.InvariantCulture, out var oy)) _mergeTitlePlan.CustomOffsetY = oy;
+			UpdateMergeTitleControlsEnabled();
 			string setting = GetSetting(values, "merge.transitions", null);
 			if (setting != null)
 			{
