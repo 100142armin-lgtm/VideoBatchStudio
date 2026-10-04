@@ -40,10 +40,12 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.7.0";
+	public const string CurrentAppVersion = "8.7.1";
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
+	private Panel _cutEditVideoHostPanel;
+	private double _cutEditPlaybackStartPos = 0.0;
 
 	private string _cutEditSourcePath;
 	private double _cutEditDuration;
@@ -64,7 +66,6 @@ internal sealed class MainForm : Form
 	private bool _cutEditIsPlaying;
 	private bool _cutEditIsDraggingScrubber;
 	private readonly System.Diagnostics.Stopwatch _cutEditPlaybackSw = new System.Diagnostics.Stopwatch();
-	private long _lastStopwatchMs;
 	private TrackBar _cutEditTimeScrubber;
 	private Label _cutEditTimeLabel;
 	private Button _cutEditPlayPauseButton;
@@ -3998,6 +3999,7 @@ internal sealed class MainForm : Form
 			Dock = DockStyle.Fill,
 			BackColor = Color.FromArgb(10, 14, 20)
 		};
+		_cutEditVideoHostPanel = videoHostPanel;
 
 		_cutEditPreviewBox = new PictureBox
 		{
@@ -4084,101 +4086,47 @@ internal sealed class MainForm : Form
 		splitMain.Panel1.Controls.Add(mediaPoolPanel);
 		splitMain.Panel1.Controls.Add(titlePanel);
 
-		// Play Timer setup - Master Clock Architecture for ultra-smooth playback
+		// Play Timer setup - High Precision Master Clock Architecture
 		_cutEditPlayTimer = new System.Windows.Forms.Timer { Interval = 33 };
 		_cutEditPlayTimer.Tick += delegate
 		{
 			if (!_cutEditIsPlaying || _cutEditIsDraggingScrubber || _cutEditDuration <= 0.0)
 				return;
 
-			var activeSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
+			double elapsed = _cutEditPlaybackSw.Elapsed.TotalSeconds;
+			_cutEditCurrentPos = _cutEditPlaybackStartPos + elapsed;
 
-			if (activeSeg != null && activeSeg.MediaType != "image")
+			if (_cutEditCurrentPos >= _cutEditDuration)
 			{
-				// Video track: WPF MediaElement is the MASTER CLOCK
-				if (_lastActiveSegment != activeSeg)
+				if (_cutEditLoopCheckBox?.Checked == true)
 				{
-					_lastActiveSegment = activeSeg;
+					_cutEditCurrentPos = 0.0;
+					_cutEditPlaybackStartPos = 0.0;
+					_cutEditPlaybackSw.Restart();
+					_lastActiveSegment = null;
 					SyncPlayerAtCurrentPos(forceReload: false);
+				}
+				else
+				{
+					_cutEditCurrentPos = _cutEditDuration;
+					ToggleCutEditPlayPause();
 					return;
 				}
-
-				if (_cutEditMediaElement != null && _cutEditMediaElement.Source != null)
-				{
-					double mediaPos = _cutEditMediaElement.Position.TotalSeconds;
-					double segStartInSource = activeSeg.StartSeconds;
-					double inSourceElapsed = Math.Max(0.0, mediaPos - segStartInSource);
-					double currentTimelinePos = activeSeg.TimelineStartSeconds + inSourceElapsed;
-
-					double segEndTimeline = activeSeg.TimelineStartSeconds + activeSeg.Duration;
-					if (currentTimelinePos >= segEndTimeline || currentTimelinePos >= _cutEditDuration)
-					{
-						if (currentTimelinePos >= _cutEditDuration)
-						{
-							if (_cutEditLoopCheckBox?.Checked == true)
-							{
-								_cutEditCurrentPos = 0.0;
-								_lastActiveSegment = null;
-								SyncPlayerAtCurrentPos(forceReload: false);
-							}
-							else
-							{
-								_cutEditCurrentPos = _cutEditDuration;
-								ToggleCutEditPlayPause();
-								return;
-							}
-						}
-						else
-						{
-							// Current clip segment finished, transition to next segment
-							_cutEditCurrentPos = segEndTimeline;
-							var nextSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
-							_lastActiveSegment = nextSeg;
-							SyncPlayerAtCurrentPos(forceReload: false);
-						}
-					}
-					else
-					{
-						// Smooth continuous playback driven strictly by video decoder clock
-						_cutEditCurrentPos = currentTimelinePos;
-					}
-				}
-				else
-				{
-					_cutEditCurrentPos += 0.033;
-				}
 			}
-			else
-			{
-				// In Gap or Image: use high-precision stopwatch
-				long nowMs = _cutEditPlaybackSw.ElapsedMilliseconds;
-				double dt = Math.Max(0.005, (nowMs - _lastStopwatchMs) / 1000.0);
-				_lastStopwatchMs = nowMs;
-				_cutEditCurrentPos += dt;
 
-				if (_cutEditCurrentPos >= _cutEditDuration)
+			var activeSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
+			if (activeSeg != _lastActiveSegment)
+			{
+				_lastActiveSegment = activeSeg;
+				SyncPlayerAtCurrentPos(forceReload: false);
+			}
+			else if (activeSeg != null && activeSeg.MediaType != "image" && _cutEditMediaElement != null)
+			{
+				double inSourceSec = activeSeg.StartSeconds + Math.Max(0.0, _cutEditCurrentPos - activeSeg.TimelineStartSeconds);
+				TimeSpan targetPos = TimeSpan.FromSeconds(Math.Max(0.0, inSourceSec));
+				if (Math.Abs((_cutEditMediaElement.Position - targetPos).TotalSeconds) > 0.35)
 				{
-					if (_cutEditLoopCheckBox?.Checked == true)
-					{
-						_cutEditCurrentPos = 0.0;
-						_lastActiveSegment = null;
-						SyncPlayerAtCurrentPos(forceReload: false);
-					}
-					else
-					{
-						_cutEditCurrentPos = _cutEditDuration;
-						ToggleCutEditPlayPause();
-						return;
-					}
-				}
-				else
-				{
-					var newSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
-					if (newSeg != _lastActiveSegment)
-					{
-						_lastActiveSegment = newSeg;
-						SyncPlayerAtCurrentPos(forceReload: false);
-					}
+					_cutEditMediaElement.Position = targetPos;
 				}
 			}
 
@@ -4195,6 +4143,11 @@ internal sealed class MainForm : Form
 			UpdateCutEditTimeLabel();
 			UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
 			_cutEditTimelineCanvas?.Invalidate();
+
+			if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed)
+			{
+				_cutEditPopoutForm.UpdateTimeAndScrubber(_cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
+			}
 		};
 
 		// --- Panel2: Bottom section (Multi-track Timeline Canvas - Full Workspace) ---
@@ -8976,31 +8929,32 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			if (_cutEditPlayPauseButton != null) _cutEditPlayPauseButton.Text = "▶ 播放 (空格)";
 			_cutEditPlayTimer?.Stop();
 
-			var activeSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
-			if (activeSeg != null && activeSeg.MediaType != "image")
-			{
-				_cutEditPreviewBox.Visible = false;
-				_cutEditElementHost.Visible = true;
-				_cutEditElementHost.BringToFront();
-				UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
-			}
-			else
+			if (_cutEditElementHost != null)
 			{
 				_cutEditElementHost.Visible = false;
+			}
+			if (_cutEditPreviewBox != null)
+			{
 				_cutEditPreviewBox.Visible = true;
 				_cutEditPreviewBox.BringToFront();
-				UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: _cutEditRealtimePreviewCheckBox?.Checked == true);
 			}
+			if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed && _cutEditPopoutForm.PreviewBox != null)
+			{
+				_cutEditPopoutForm.PreviewBox.Visible = true;
+				_cutEditPopoutForm.PreviewBox.BringToFront();
+			}
+			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: _cutEditRealtimePreviewCheckBox?.Checked == true);
 		}
 		else
 		{
+			if (_cutEditEmptyPlaceholder != null) _cutEditEmptyPlaceholder.Visible = false;
 			if (_cutEditCurrentPos >= _cutEditDuration - 0.05)
 			{
 				_cutEditCurrentPos = 0.0;
 			}
 			_cutEditIsPlaying = true;
+			_cutEditPlaybackStartPos = _cutEditCurrentPos;
 			_cutEditPlaybackSw.Restart();
-			_lastStopwatchMs = 0;
 			if (_cutEditPlayPauseButton != null) _cutEditPlayPauseButton.Text = "⏸ 暂停 (空格)";
 			SyncPlayerAtCurrentPos(forceReload: false);
 			_cutEditPlayTimer?.Start();
@@ -9008,7 +8962,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 		if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed)
 		{
-			_cutEditPopoutForm.UpdateFrame(_cutEditPreviewBox.Image, _cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
+			_cutEditPopoutForm.UpdateTimeAndScrubber(_cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
 		}
 	}
 
@@ -9032,6 +8986,11 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	private void SyncPlayerAtCurrentPos(bool forceReload)
 	{
+		if (_cutEditEmptyPlaceholder != null && _cutEditEmptyPlaceholder.Visible)
+		{
+			_cutEditEmptyPlaceholder.Visible = false;
+		}
+
 		var activeSeg = GetActiveVideoSegmentAtTime(_cutEditCurrentPos);
 		_lastActiveSegment = activeSeg;
 
@@ -9066,28 +9025,48 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			try
 			{
-				Uri targetUri = new Uri(activeSeg.SourcePath);
+				string fullPath = Path.GetFullPath(activeSeg.SourcePath);
+				Uri targetUri = new Uri(fullPath);
 				bool needNewSource = (_cutEditMediaElement.Source == null || !_cutEditMediaElement.Source.Equals(targetUri));
 				if (needNewSource || forceReload)
 				{
 					_cutEditMediaElement.Source = targetUri;
 				}
 				double inSourceSec = activeSeg.StartSeconds + Math.Max(0.0, _cutEditCurrentPos - activeSeg.TimelineStartSeconds);
-				_cutEditMediaElement.Position = TimeSpan.FromSeconds(Math.Max(0, inSourceSec));
-				_cutEditMediaElement.Volume = (_cutEditVolumeTrackBar?.Value ?? 100) / 100.0;
+				TimeSpan targetPos = TimeSpan.FromSeconds(Math.Max(0, inSourceSec));
+				if (Math.Abs((_cutEditMediaElement.Position - targetPos).TotalSeconds) > 0.35 || forceReload || needNewSource)
+				{
+					_cutEditMediaElement.Position = targetPos;
+				}
+				_cutEditMediaElement.Volume = _cutEditAudioMuted ? 0.0 : ((_cutEditVolumeTrackBar?.Value ?? 100) / 100.0);
 				_cutEditMediaElement.IsMuted = _cutEditAudioMuted;
-
-				_cutEditPreviewBox.Visible = false;
-				_cutEditElementHost.Visible = true;
-				_cutEditElementHost.BringToFront();
 
 				if (_cutEditIsPlaying)
 				{
+					if (_cutEditPreviewBox != null) _cutEditPreviewBox.Visible = false;
+					if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed && _cutEditPopoutForm.PreviewBox != null)
+					{
+						_cutEditPopoutForm.PreviewBox.Visible = false;
+					}
+					_cutEditElementHost.Visible = true;
+					_cutEditElementHost.BringToFront();
 					_cutEditMediaElement.Play();
 				}
 				else
 				{
+					_cutEditElementHost.Visible = false;
+					if (_cutEditPreviewBox != null)
+					{
+						_cutEditPreviewBox.Visible = true;
+						_cutEditPreviewBox.BringToFront();
+					}
+					if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed && _cutEditPopoutForm.PreviewBox != null)
+					{
+						_cutEditPopoutForm.PreviewBox.Visible = true;
+						_cutEditPopoutForm.PreviewBox.BringToFront();
+					}
 					_cutEditMediaElement.Pause();
+					UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: _cutEditRealtimePreviewCheckBox?.Checked == true);
 				}
 				UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
 			}
@@ -9119,6 +9098,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		var old = _cutEditPreviewBox.Image;
 		_cutEditPreviewBox.Image = bmp;
 		old?.Dispose();
+		if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed)
+		{
+			_cutEditPopoutForm.UpdateFrame(bmp, _cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
+		}
 	}
 
 	private void RenderImageClipPreview(CutSegment seg)
@@ -9139,6 +9122,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					var old = _cutEditPreviewBox.Image;
 					_cutEditPreviewBox.Image = bmp;
 					old?.Dispose();
+					if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed)
+					{
+						_cutEditPopoutForm.UpdateFrame(bmp, _cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
+					}
 					return;
 				}
 			}
@@ -9151,9 +9138,18 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 	{
 		if (_cutEditDuration <= 0.0) return;
 		_cutEditCurrentPos = Math.Max(0.0, Math.Min(_cutEditDuration, targetSec));
+		if (_cutEditIsPlaying)
+		{
+			_cutEditPlaybackStartPos = _cutEditCurrentPos;
+			_cutEditPlaybackSw.Restart();
+		}
 		UpdateCutEditTimeLabel();
 		SyncPlayerAtCurrentPos(forceReload: false);
 		_cutEditTimelineCanvas?.Invalidate();
+		if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed)
+		{
+			_cutEditPopoutForm.UpdateTimeAndScrubber(_cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
+		}
 	}
 
 	internal void StepCutEditTime(double deltaSec)
@@ -9188,9 +9184,61 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 	}
 
+	private void AttachCutEditPlayerToPopout()
+	{
+		if (_cutEditPopoutForm != null && !_cutEditPopoutForm.IsDisposed && _cutEditElementHost != null)
+		{
+			_cutEditElementHost.Parent = _cutEditPopoutForm.CanvasPanel;
+			_cutEditElementHost.Dock = DockStyle.Fill;
+			if (_cutEditIsPlaying)
+			{
+				_cutEditElementHost.Visible = true;
+				_cutEditElementHost.BringToFront();
+			}
+			else
+			{
+				_cutEditElementHost.Visible = false;
+				if (_cutEditPopoutForm.PreviewBox != null)
+				{
+					_cutEditPopoutForm.PreviewBox.Visible = true;
+					_cutEditPopoutForm.PreviewBox.BringToFront();
+				}
+			}
+		}
+	}
+
+	internal void OnCutEditPopoutClosing()
+	{
+		DetachCutEditPlayerFromPopout();
+	}
+
 	internal void OnCutEditPopoutClosed()
 	{
+		DetachCutEditPlayerFromPopout();
 		_cutEditPopoutForm = null;
+	}
+
+	private void DetachCutEditPlayerFromPopout()
+	{
+		if (_cutEditElementHost != null && _cutEditVideoHostPanel != null)
+		{
+			_cutEditElementHost.Parent = _cutEditVideoHostPanel;
+			_cutEditElementHost.Dock = DockStyle.Fill;
+			if (_cutEditIsPlaying)
+			{
+				_cutEditElementHost.Visible = true;
+				_cutEditElementHost.BringToFront();
+			}
+			else
+			{
+				_cutEditElementHost.Visible = false;
+				if (_cutEditPreviewBox != null)
+				{
+					_cutEditPreviewBox.Visible = true;
+					_cutEditPreviewBox.BringToFront();
+				}
+			}
+		}
 	}
 
 	private void OpenCutEditPopoutPreview()
@@ -9209,9 +9257,16 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			_cutEditPopoutForm.BringToFront();
 		}
+
+		AttachCutEditPlayerToPopout();
+
 		if (_cutEditPreviewBox?.Image != null)
 		{
 			_cutEditPopoutForm.UpdateFrame(_cutEditPreviewBox.Image, _cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
+		}
+		else
+		{
+			_cutEditPopoutForm.UpdateTimeAndScrubber(_cutEditCurrentPos, _cutEditDuration, _cutEditIsPlaying);
 		}
 	}
 
