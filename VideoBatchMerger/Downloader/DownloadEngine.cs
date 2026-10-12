@@ -626,28 +626,34 @@ public sealed class DownloadEngine
 
 		if (parseOnly)
 		{
-			sb.Append("--no-playlist --encoding UTF-8 --dump-single-json --print \"%(title)s|%(duration_string)s|%(filesize_approx_str)s\" ");
+			sb.Append("--no-playlist --encoding UTF-8 --dump-single-json --js-runtimes node --extractor-args \"youtube:player_client=default,mweb,web\" --print \"%(title)s|%(duration_string)s|%(filesize_approx_str)s\" ");
 		}
 		else
 		{
 			sb.Append("--no-playlist --newline --encoding UTF-8 ");
 			if (resume) sb.Append("-c ");
 			if (skipExisting) sb.Append("--no-overwrites ");
+			// 网络传输与分片重试防御（解决长视频 403 Forbidden / 片段中断）
+			sb.Append("--retries 15 --fragment-retries 20 --file-access-retries 10 ");
+			sb.Append("--extractor-args \"youtube:player_client=default,mweb,web\" ");
 
-			// 画质选择
+			// 自动挂载 node.js 运行时以应对复杂的 YouTube 签名加密挑战
+			sb.Append("--js-runtimes node ");
+
+			// 画质选择：优先选取直连 HTTP/HTTPS 流，完美避开 YouTube 易发生 403 阻断的纯分片 m3u8 流，并无缝降级保底
 			switch (quality)
 			{
 				case "1080p":
-					sb.Append("-f \"bv*[height<=1080]+ba/b[height<=1080]/b\" ");
+					sb.Append("-f \"bv*[height<=1080][protocol^=http]+ba[protocol^=http]/bv*[height<=1080]+ba/b[height<=1080]/b\" ");
 					break;
 				case "720p":
-					sb.Append("-f \"bv*[height<=720]+ba/b[height<=720]/b\" ");
+					sb.Append("-f \"bv*[height<=720][protocol^=http]+ba[protocol^=http]/bv*[height<=720]+ba/b[height<=720]/b\" ");
 					break;
 				case "audio":
 					sb.Append("-x --audio-format mp3 ");
 					break;
 				default: // best
-					sb.Append("-f \"bv*+ba/b\" ");
+					sb.Append("-f \"bv*[protocol^=http]+ba[protocol^=http]/bv*+ba/b\" ");
 					break;
 			}
 
