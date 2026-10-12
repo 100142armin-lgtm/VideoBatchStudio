@@ -640,20 +640,20 @@ public sealed class DownloadEngine
 			// 自动挂载 node.js 运行时以应对复杂的 YouTube 签名加密挑战
 			sb.Append("--js-runtimes node ");
 
-			// 画质选择：优先选取直连 HTTP/HTTPS 流，完美避开 YouTube 易发生 403 阻断的纯分片 m3u8 流，并无缝降级保底
+			// 画质选择：优先选取包含完整原生原声（原音+人声伴奏混合音轨）的流，避免单独拉取了平台伴奏BGM音频；优先直连 HTTP/HTTPS 流避开 403 阻断
 			switch (quality)
 			{
 				case "1080p":
-					sb.Append("-f \"bv*[height<=1080][protocol^=http]+ba[protocol^=http]/bv*[height<=1080]+ba/b[height<=1080]/b\" ");
+					sb.Append("-f \"b[height<=1080][acodec!=none]/bv*[height<=1080][acodec!=none]/bv*[height<=1080][protocol^=http]+ba[protocol^=http]/bv*[height<=1080]+ba/b[height<=1080]/b\" ");
 					break;
 				case "720p":
-					sb.Append("-f \"bv*[height<=720][protocol^=http]+ba[protocol^=http]/bv*[height<=720]+ba/b[height<=720]/b\" ");
+					sb.Append("-f \"b[height<=720][acodec!=none]/bv*[height<=720][acodec!=none]/bv*[height<=720][protocol^=http]+ba[protocol^=http]/bv*[height<=720]+ba/b[height<=720]/b\" ");
 					break;
 				case "audio":
 					sb.Append("-x --audio-format mp3 ");
 					break;
 				default: // best
-					sb.Append("-f \"bv*[protocol^=http]+ba[protocol^=http]/bv*+ba/b\" ");
+					sb.Append("-f \"b[acodec!=none]/bv*[acodec!=none]/bv*[protocol^=http]+ba[protocol^=http]/bv*+ba/b\" ");
 					break;
 			}
 
