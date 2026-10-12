@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -167,7 +169,7 @@ public sealed class DownloadEngine
 	{
 		if (item == null || string.IsNullOrWhiteSpace(item.Url)) return false;
 
-		// 针对 Google Drive 特殊处理
+		// 针对 Google Drive 特殊处理：若 yt-dlp 就绪，优先查询真实标题与时长
 		if (item.Platform == "Google Drive")
 		{
 			var match = GoogleDriveIdRegex.Match(item.Url);
@@ -176,9 +178,13 @@ public sealed class DownloadEngine
 				string fileId = match.Groups[1].Value;
 				item.Title = $"Google_Drive_{fileId}";
 				item.DurationStr = "云端网盘";
-				item.Status = "已解析";
-				logCallback?.Invoke($"[解析] 识别 Google Drive 文件 ID: {fileId}");
-				return true;
+				item.Status = "已识别";
+				if (string.IsNullOrEmpty(ytDlpPath) || !File.Exists(ytDlpPath))
+				{
+					logCallback?.Invoke($"[解析] 识别 Google Drive 文件 ID: {fileId}");
+					return true;
+				}
+				// 若 yt-dlp 可用，继续向下执行获取网盘文件的真实完整文件名
 			}
 		}
 
@@ -277,17 +283,25 @@ public sealed class DownloadEngine
 		}
 		Directory.CreateDirectory(targetDir);
 
-		// 检查 Google Drive 直链下载
+		// 检查 Google Drive 优先使用专业提取引擎（包含大文件流媒体源），若未就绪则使用直链引擎
 		if (item.Platform == "Google Drive")
 		{
 			var match = GoogleDriveIdRegex.Match(item.Url);
 			if (match.Success)
 			{
 				string fileId = match.Groups[1].Value;
-				logCallback?.Invoke($"[Google Drive] 启动云端硬盘引擎下载: {fileId}");
-				bool gdriveOk = await DownloadGoogleDriveDirectAsync(item, fileId, targetDir, proxyUrl, logCallback, ct);
-				if (gdriveOk) return true;
-				logCallback?.Invoke($"[Google Drive] 直链尝试后回退至通用解析器...");
+				// 若 yt-dlp 可用，优先使用 yt-dlp 的原生 GoogleDrive 提取器，可完美下载原始完整高质量视频并自动命名
+				if (!string.IsNullOrEmpty(ytDlpPath) && File.Exists(ytDlpPath))
+				{
+					logCallback?.Invoke($"[Google Drive] 启用高保真云端提取引擎: {fileId}");
+					// 继续执行下面的 yt-dlp 处理流程
+				}
+				else
+				{
+					logCallback?.Invoke($"[Google Drive] 启动内置直连加速通道: {fileId}");
+					bool gdriveOk = await DownloadGoogleDriveDirectAsync(item, fileId, targetDir, proxyUrl, logCallback, ct);
+					if (gdriveOk) return true;
+				}
 			}
 		}
 
@@ -414,6 +428,28 @@ public sealed class DownloadEngine
 			{
 				item.SaveFilePath = detectedFilePath;
 			}
+			if (string.IsNullOrEmpty(item.SaveFilePath) || !File.Exists(item.SaveFilePath))
+			{
+				try
+				{
+					// 尝试按文件 ID 或最新生成时间定位落盘视频
+					var di = new DirectoryInfo(targetDir);
+					var files = di.GetFiles("*.*", SearchOption.TopDirectoryOnly)
+						.Where(f => f.Extension.Equals(".mp4", StringComparison.OrdinalIgnoreCase) ||
+						            f.Extension.Equals(".mkv", StringComparison.OrdinalIgnoreCase) ||
+						            f.Extension.Equals(".mov", StringComparison.OrdinalIgnoreCase) ||
+						            f.Extension.Equals(".webm", StringComparison.OrdinalIgnoreCase))
+						.OrderByDescending(f => f.LastWriteTime)
+						.ToList();
+
+					if (files.Count > 0)
+					{
+						item.SaveFilePath = files[0].FullName;
+						item.Title = Path.GetFileNameWithoutExtension(item.SaveFilePath);
+					}
+				}
+				catch { }
+			}
 			logCallback?.Invoke($"[下载完成] 成功保存: {item.SaveFilePath}");
 			return true;
 		}
@@ -438,7 +474,8 @@ public sealed class DownloadEngine
 	{
 		try
 		{
-			var handler = new HttpClientHandler();
+			var cookieJar = new CookieContainer();
+			var handler = new HttpClientHandler { CookieContainer = cookieJar };
 			if (!string.IsNullOrWhiteSpace(proxyUrl))
 			{
 				handler.Proxy = new WebProxy(proxyUrl);
@@ -450,7 +487,7 @@ public sealed class DownloadEngine
 				handler.Proxy = WebRequest.GetSystemWebProxy();
 			}
 
-			using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(30) };
+			using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(60) };
 			client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
 			string initUrl = $"https://drive.google.com/uc?export=download&id={fileId}";
@@ -458,27 +495,65 @@ public sealed class DownloadEngine
 
 			var response = await client.GetAsync(initUrl, HttpCompletionOption.ResponseHeadersRead, ct);
 
-			string downloadUrl = initUrl;
-			// 检查是否出现病毒扫描大文件确认页面
+			// 检查是否出现 HTML 页面（病毒扫描、大文件确认表单等）
 			if (response.Content.Headers.ContentType?.MediaType?.Contains("html") == true)
 			{
 				string html = await response.Content.ReadAsStringAsync();
-				var confirmMatch = Regex.Match(html, @"confirm=([0-9a-zA-Z_]+)");
-				if (confirmMatch.Success)
+
+				// 策略 A: 提取现代 Google Drive 下载表单 (action + hidden inputs)
+				var formMatch = Regex.Match(html, @"<form[^>]*action=""([^""]*)""");
+				string formAction = formMatch.Success ? formMatch.Groups[1].Value : "https://drive.usercontent.google.com/download";
+
+				var inputMatches = Regex.Matches(html, @"<input[^>]*name=""([^""]*)""[^>]*value=""([^""]*)""");
+				if (inputMatches.Count > 0)
 				{
-					string token = confirmMatch.Groups[1].Value;
-					downloadUrl = $"https://drive.google.com/uc?export=download&confirm={token}&id={fileId}";
-					logCallback?.Invoke($"[Google Drive] 检测到大文件确认令牌: {token}，正在建立直连通道...");
+					var queryParams = new List<string>();
+					foreach (Match inp in inputMatches)
+					{
+						string k = inp.Groups[1].Value;
+						string v = inp.Groups[2].Value;
+						queryParams.Add($"{Uri.EscapeDataString(k)}={Uri.EscapeDataString(v)}");
+					}
+					string downloadUrl = $"{formAction}?{string.Join("&", queryParams)}";
+					logCallback?.Invoke($"[Google Drive] 成功解析大文件直接下载流通道，正在拉取数据...");
 					response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+				}
+				else
+				{
+					var confirmMatch = Regex.Match(html, @"confirm=([0-9a-zA-Z_]+)");
+					if (confirmMatch.Success)
+					{
+						string token = confirmMatch.Groups[1].Value;
+						string downloadUrl = $"https://drive.google.com/uc?export=download&confirm={token}&id={fileId}";
+						logCallback?.Invoke($"[Google Drive] 检测到确认令牌: {token}，正在重定向下载...");
+						response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+					}
 				}
 			}
 
 			string fileName = $"GoogleDrive_{fileId}.mp4";
 			if (response.Content.Headers.ContentDisposition?.FileName != null)
 			{
-				fileName = response.Content.Headers.ContentDisposition.FileName.Trim('"', '\'');
+				string headerName = response.Content.Headers.ContentDisposition.FileName.Trim('"', '\'');
+				if (!string.IsNullOrWhiteSpace(headerName))
+				{
+					fileName = headerName;
+				}
 			}
 			fileName = SanitizeFileName(fileName);
+			if (!Path.HasExtension(fileName) || fileName.EndsWith("."))
+			{
+				fileName += ".mp4";
+			}
+			else if (!fileName.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) &&
+			         !fileName.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase) &&
+			         !fileName.EndsWith(".mov", StringComparison.OrdinalIgnoreCase) &&
+			         !fileName.EndsWith(".avi", StringComparison.OrdinalIgnoreCase) &&
+			         !fileName.EndsWith(".webm", StringComparison.OrdinalIgnoreCase))
+			{
+				fileName += ".mp4";
+			}
+
 			string targetFile = Path.Combine(outputDir, fileName);
 			item.SaveFilePath = targetFile;
 			item.Title = Path.GetFileNameWithoutExtension(targetFile);
