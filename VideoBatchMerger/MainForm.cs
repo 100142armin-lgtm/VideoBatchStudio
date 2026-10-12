@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.8.0";
+	public const string CurrentAppVersion = "8.8.1";
 
 	public const int WorkspaceMerge = 0;
 	public const int WorkspaceSplit = 1;
@@ -1035,13 +1035,9 @@ internal sealed class MainForm : Form
 		InitCutEditTracks();
 		Text = $"视频批处理工具 V{CurrentAppVersion}";
 		base.StartPosition = FormStartPosition.CenterScreen;
-		MinimumSize = new Size(1180, 1040);
+		MinimumSize = new Size(1000, 640);
 		Rectangle rectangle = ((Screen.PrimaryScreen == null) ? new Rectangle(0, 0, 1366, 768) : Screen.PrimaryScreen.WorkingArea);
-		base.Size = new Size(Math.Min(1680, Math.Max(MinimumSize.Width, rectangle.Width - 16)), Math.Min(1100, Math.Max(MinimumSize.Height, rectangle.Height - 12)));
-		if (rectangle.Width < 1660 || rectangle.Height < 1080)
-		{
-			base.WindowState = FormWindowState.Maximized;
-		}
+		base.Size = new Size(Math.Min(1680, Math.Max(MinimumSize.Width, rectangle.Width - 60)), Math.Min(980, Math.Max(MinimumSize.Height, rectangle.Height - 60)));
 		Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Regular, GraphicsUnit.Point);
 		BackColor = CanvasColor;
 		DoubleBuffered = true;
@@ -26838,5 +26834,63 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			}
 		}
 		return base.ProcessCmdKey(ref msg, keyData);
+	}
+
+	private const int WM_SIZING = 0x0214;
+	private const int WMSZ_LEFT = 1;
+	private const int WMSZ_RIGHT = 2;
+	private const int WMSZ_TOP = 3;
+	private const int WMSZ_TOPLEFT = 4;
+	private const int WMSZ_TOPRIGHT = 5;
+	private const int WMSZ_BOTTOM = 6;
+	private const int WMSZ_BOTTOMLEFT = 7;
+	private const int WMSZ_BOTTOMRIGHT = 8;
+
+	[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+	private struct RECT
+	{
+		public int Left;
+		public int Top;
+		public int Right;
+		public int Bottom;
+	}
+
+	protected override void WndProc(ref Message m)
+	{
+		if (m.Msg == WM_SIZING)
+		{
+			// 如果用户按住 Shift 键，则强制等比例对角线缩放
+			if ((Control.ModifierKeys & Keys.Shift) == Keys.Shift)
+			{
+				try
+				{
+					int edge = m.WParam.ToInt32();
+					if (edge >= WMSZ_TOPLEFT && edge <= WMSZ_BOTTOMRIGHT)
+					{
+						RECT rect = (RECT)System.Runtime.InteropServices.Marshal.PtrToStructure(m.LParam, typeof(RECT));
+						double targetRatio = (double)Width / Math.Max(1, Height);
+						int currentW = rect.Right - rect.Left;
+						int currentH = rect.Bottom - rect.Top;
+
+						// 依宽度推算高度
+						int newH = (int)Math.Round(currentW / targetRatio);
+						switch (edge)
+						{
+							case WMSZ_BOTTOMRIGHT:
+							case WMSZ_BOTTOMLEFT:
+								rect.Bottom = rect.Top + newH;
+								break;
+							case WMSZ_TOPLEFT:
+							case WMSZ_TOPRIGHT:
+								rect.Top = rect.Bottom - newH;
+								break;
+						}
+						System.Runtime.InteropServices.Marshal.StructureToPtr(rect, m.LParam, true);
+					}
+				}
+				catch { }
+			}
+		}
+		base.WndProc(ref m);
 	}
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -12,7 +13,7 @@ using System.Windows.Forms;
 namespace VideoBatchMerger.Downloader;
 
 /// <summary>
-/// 视频下载板块完整用户控件（支持 Facebook Reel、YouTube、Shorts、TikTok、Google Drive 双模直链加速等）
+/// 视频下载终端控制台（极客科技流风格，支持 Facebook Reel、YouTube、TikTok、Google Drive 双模直链等）
 /// </summary>
 internal sealed class DownloaderPanel : UserControl
 {
@@ -21,13 +22,28 @@ internal sealed class DownloaderPanel : UserControl
 	private CancellationTokenSource _cts;
 	private bool _isDownloading;
 
+	// 配色系统（深空科技矩阵暗夜主题）
+	private static readonly Color BgCanvas = Color.FromArgb(10, 15, 26);
+	private static readonly Color CardBg = Color.FromArgb(17, 26, 44);
+	private static readonly Color CardAltBg = Color.FromArgb(14, 21, 37);
+	private static readonly Color CardBorder = Color.FromArgb(32, 50, 82);
+	private static readonly Color InputBg = Color.FromArgb(9, 14, 24);
+	private static readonly Color TextPrimary = Color.FromArgb(241, 245, 249);
+	private static readonly Color TextMuted = Color.FromArgb(148, 163, 184);
+	private static readonly Color CyanNeon = Color.FromArgb(56, 189, 248);
+	private static readonly Color EmeraldNeon = Color.FromArgb(52, 211, 153);
+
 	// UI 控件
-	private Label _envStatusLabel;
+	private Label _envBadgeTitle;
+	private Label _envTagYtDlp;
+	private Label _envTagFFmpeg;
+	private Label _envTagFFprobe;
 	private Button _btnCheckEnv;
 	private Button _btnInstallYtDlp;
 
 	private TextBox _txtOutputDir;
 	private Button _btnBrowseDir;
+	private Button _btnOpenFolderQuick;
 	private ComboBox _cboQuality;
 	private ComboBox _cboThreads;
 	private ComboBox _cboProxy;
@@ -38,12 +54,12 @@ internal sealed class DownloaderPanel : UserControl
 	private CheckBox _chkPlaylistFolder;
 
 	private TextBox _txtUrls;
+	private Label _urlCountBadge;
 	private Button _btnReadClipboard;
 	private Button _btnClearUrls;
 	private Button _btnParsePreview;
 	private Button _btnStartDownload;
 	private Button _btnStopDownload;
-	private Button _btnOpenFolder;
 
 	private Button _btnSendAllToSplitScreen;
 	private Button _btnSendToCutEdit;
@@ -51,6 +67,7 @@ internal sealed class DownloaderPanel : UserControl
 
 	private ListView _listView;
 	private ProgressBar _progressBar;
+	private Label _progressTextLabel;
 	private RichTextBox _logBox;
 	private Label _statusLabel;
 	private System.Windows.Forms.Timer _refreshTimer;
@@ -66,45 +83,49 @@ internal sealed class DownloaderPanel : UserControl
 	{
 		SuspendLayout();
 		Dock = DockStyle.Fill;
-		BackColor = Color.FromArgb(12, 16, 24);
-		ForeColor = Color.FromArgb(226, 232, 240);
+		BackColor = BgCanvas;
+		ForeColor = TextPrimary;
 		Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
 
-		// 主容器（分层）
-		Panel rootPanel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(14) };
+		Panel rootPanel = new Panel
+		{
+			Dock = DockStyle.Fill,
+			Padding = new Padding(12),
+			BackColor = BgCanvas
+		};
 
-		// 1. 顶部环境检测条 (Top Environment Bar)
-		Panel envBar = CreateEnvironmentBar();
-		envBar.Dock = DockStyle.Top;
+		// 1. 顶部 Header 状态栏
+		Panel headerHud = CreateHeaderHud();
+		headerHud.Dock = DockStyle.Top;
 
-		// 2. 核心设置区 (Settings Panel)
+		// 2. 核心参数设置栏
 		Panel settingsBar = CreateSettingsBar();
 		settingsBar.Dock = DockStyle.Top;
 
-		// 3. 中间内容分栏 (SplitContainer: 左输入 420px 固定，右结果与日志自适应展开)
+		// 3. 中间内容分栏 (左输入 410px，右侧 Matrix 列表与终端 Console)
 		SplitContainer splitMain = new SplitContainer
 		{
 			Dock = DockStyle.Fill,
 			Orientation = Orientation.Vertical,
 			FixedPanel = FixedPanel.Panel1,
-			SplitterDistance = 420,
+			SplitterDistance = 410,
 			SplitterWidth = 8,
-			BackColor = Color.FromArgb(12, 16, 24)
+			BackColor = BgCanvas
 		};
 
 		Panel leftPanel = CreateLeftInputPanel();
 		leftPanel.Dock = DockStyle.Fill;
 		splitMain.Panel1.Controls.Add(leftPanel);
 
-		// 右侧上下分割 (上表格，下日志)
+		// 右侧上下分割 (上表格 60%，下日志 40%)
 		SplitContainer splitRight = new SplitContainer
 		{
 			Dock = DockStyle.Fill,
 			Orientation = Orientation.Horizontal,
-			FixedPanel = FixedPanel.Panel1,
-			SplitterDistance = 280,
+			FixedPanel = FixedPanel.None,
+			SplitterDistance = 330,
 			SplitterWidth = 8,
-			BackColor = Color.FromArgb(12, 16, 24)
+			BackColor = BgCanvas
 		};
 
 		Panel rightTopPanel = CreateRightTablePanel();
@@ -117,39 +138,65 @@ internal sealed class DownloaderPanel : UserControl
 
 		splitMain.Panel2.Controls.Add(splitRight);
 
-		splitMain.Resize += delegate
-		{
-			if (splitMain.Width > 700)
-			{
-				try { splitMain.SplitterDistance = 420; } catch { }
-			}
-		};
-
-		// 4. 底部状态栏
+		// 4. 底部微型状态栏
 		Panel bottomStatusBar = new Panel
 		{
 			Dock = DockStyle.Bottom,
-			Height = 28,
-			BackColor = Color.FromArgb(18, 24, 34),
-			Padding = new Padding(12, 4, 12, 4)
+			Height = 26,
+			BackColor = CardAltBg,
+			Padding = new Padding(12, 3, 12, 3)
 		};
+		bottomStatusBar.Paint += (s, e) =>
+		{
+			using var pen = new Pen(CardBorder);
+			e.Graphics.DrawLine(pen, 0, 0, bottomStatusBar.Width, 0);
+		};
+
 		_statusLabel = new Label
 		{
-			Text = "视频下载引擎已就绪（支持 Facebook Reel、YouTube、Shorts、TikTok、Google Drive 网盘等全平台）",
-			ForeColor = Color.FromArgb(148, 163, 184),
+			Text = "⚡ ULTRA STREAM ENGINE · 核心下载调度器已就绪",
+			ForeColor = TextMuted,
 			Dock = DockStyle.Fill,
-			TextAlign = ContentAlignment.MiddleLeft
+			TextAlign = ContentAlignment.MiddleLeft,
+			Font = new Font("Microsoft YaHei UI", 8.5f)
 		};
 		bottomStatusBar.Controls.Add(_statusLabel);
 
-		// 组装根容器
-		Panel centerWorkspace = new Panel { Dock = DockStyle.Fill };
+		// 组装主界面（先加Fill，再加Top）
+		Panel centerWorkspace = new Panel { Dock = DockStyle.Fill, BackColor = BgCanvas };
 		centerWorkspace.Controls.Add(splitMain);
 		centerWorkspace.Controls.Add(settingsBar);
-		centerWorkspace.Controls.Add(envBar);
+		centerWorkspace.Controls.Add(headerHud);
 
-		Controls.Add(centerWorkspace);
-		Controls.Add(bottomStatusBar);
+		rootPanel.Controls.Add(centerWorkspace);
+		rootPanel.Controls.Add(bottomStatusBar);
+		Controls.Add(rootPanel);
+
+		// 确保左侧面板保持 410px 宽度
+		splitMain.Panel1MinSize = 350;
+		centerWorkspace.Resize += delegate
+		{
+			if (splitMain.Width > 600)
+			{
+				try
+				{
+					splitMain.SplitterDistance = 410;
+				}
+				catch { }
+			}
+		};
+
+		splitRight.Resize += delegate
+		{
+			if (splitRight.Height > 300)
+			{
+				try
+				{
+					splitRight.SplitterDistance = Math.Max(200, (int)(splitRight.Height * 0.58));
+				}
+				catch { }
+			}
+		};
 
 		// UI 刷新定时器
 		_refreshTimer = new System.Windows.Forms.Timer { Interval = 250 };
@@ -159,148 +206,174 @@ internal sealed class DownloaderPanel : UserControl
 		ResumeLayout(false);
 	}
 
-	private Panel CreateEnvironmentBar()
+	/// <summary>
+	/// 顶部 HUD 环境与状态横幅
+	/// </summary>
+	private Panel CreateHeaderHud()
 	{
 		Panel p = new Panel
 		{
-			Height = 44,
-			BackColor = Color.FromArgb(18, 24, 34),
-			Padding = new Padding(12, 6, 12, 6),
-			Margin = new Padding(0, 0, 0, 8)
+			Height = 52,
+			BackColor = CardBg,
+			Margin = new Padding(0, 0, 0, 8),
+			Padding = new Padding(14, 8, 14, 8)
 		};
+		p.Paint += (s, e) => DrawTechBorder(e.Graphics, p.ClientRectangle, CardBorder, 6);
 
-		_envStatusLabel = new Label
+		Panel leftInfo = new Panel { Dock = DockStyle.Left, Width = 520, BackColor = Color.Transparent };
+
+		Label lblIcon = new Label
 		{
-			Text = "检测组件环境中...",
-			Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
-			ForeColor = Color.FromArgb(52, 211, 153),
+			Text = "⚡",
+			Font = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold),
+			ForeColor = CyanNeon,
+			Location = new Point(0, 6),
+			Size = new Size(24, 24),
+			TextAlign = ContentAlignment.MiddleCenter
+		};
+		leftInfo.Controls.Add(lblIcon);
+
+		_envBadgeTitle = new Label
+		{
+			Text = "ULTRA STREAM · 全网多平台极速提取终端",
+			Font = new Font("Microsoft YaHei UI", 10.5f, FontStyle.Bold),
+			ForeColor = TextPrimary,
+			Location = new Point(28, 4),
+			AutoSize = true
+		};
+		leftInfo.Controls.Add(_envBadgeTitle);
+
+		Label lblSub = new Label
+		{
+			Text = "FACEBOOK REEL · YOUTUBE 4K · TIKTOK · GOOGLE DRIVE 网盘双模直连",
+			Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+			ForeColor = CyanNeon,
+			Location = new Point(30, 26),
+			AutoSize = true
+		};
+		leftInfo.Controls.Add(lblSub);
+		p.Controls.Add(leftInfo);
+
+		FlowLayoutPanel flowPills = new FlowLayoutPanel
+		{
+			Dock = DockStyle.Right,
 			AutoSize = true,
-			Location = new Point(12, 12)
+			WrapContents = false,
+			FlowDirection = FlowDirection.LeftToRight,
+			Padding = new Padding(0, 4, 0, 0),
+			BackColor = Color.Transparent
 		};
-		p.Controls.Add(_envStatusLabel);
 
-		_btnInstallYtDlp = new Button
-		{
-			Text = "一键配置组件",
-			Size = new Size(110, 28),
-			Location = new Point(p.ClientSize.Width - 230, 8),
-			Anchor = AnchorStyles.Top | AnchorStyles.Right,
-			FlatStyle = FlatStyle.Flat,
-			BackColor = Color.FromArgb(37, 99, 235),
-			ForeColor = Color.White,
-			Cursor = Cursors.Hand
-		};
-		_btnInstallYtDlp.FlatAppearance.BorderSize = 0;
-		_btnInstallYtDlp.Click += async (s, e) => await InstallOrUpdateYtDlpAsync();
-		p.Controls.Add(_btnInstallYtDlp);
+		_envTagYtDlp = CreateTechPill("yt-dlp", "检测中", EmeraldNeon);
+		_envTagFFmpeg = CreateTechPill("FFmpeg", "检测中", EmeraldNeon);
+		_envTagFFprobe = CreateTechPill("FFprobe", "检测中", EmeraldNeon);
 
-		_btnCheckEnv = new Button
-		{
-			Text = "检测环境",
-			Size = new Size(84, 28),
-			Location = new Point(p.ClientSize.Width - 100, 8),
-			Anchor = AnchorStyles.Top | AnchorStyles.Right,
-			FlatStyle = FlatStyle.Flat,
-			BackColor = Color.FromArgb(37, 45, 60),
-			ForeColor = Color.FromArgb(226, 232, 240),
-			Cursor = Cursors.Hand
-		};
-		_btnCheckEnv.FlatAppearance.BorderSize = 0;
-		_btnCheckEnv.Click += (s, e) => RefreshEnvironmentStatus();
-		p.Controls.Add(_btnCheckEnv);
+		flowPills.Controls.Add(_envTagYtDlp);
+		flowPills.Controls.Add(_envTagFFmpeg);
+		flowPills.Controls.Add(_envTagFFprobe);
 
+		_btnInstallYtDlp = MakeTechButton("⚡ 一键配置组件", 112, 30, Color.FromArgb(37, 99, 235), async (s, e) => await InstallOrUpdateYtDlpAsync());
+		_btnInstallYtDlp.Margin = new Padding(8, 0, 4, 0);
+		flowPills.Controls.Add(_btnInstallYtDlp);
+
+		_btnCheckEnv = MakeTechButton("⟳ 刷新环境", 86, 30, Color.FromArgb(28, 42, 68), (s, e) => RefreshEnvironmentStatus());
+		_btnCheckEnv.Margin = new Padding(4, 0, 0, 0);
+		flowPills.Controls.Add(_btnCheckEnv);
+
+		p.Controls.Add(flowPills);
 		return p;
 	}
 
+	/// <summary>
+	/// 核心设置参数控制条
+	/// </summary>
 	private Panel CreateSettingsBar()
 	{
 		Panel p = new Panel
 		{
-			Height = 84,
-			BackColor = Color.FromArgb(20, 26, 38),
-			Padding = new Padding(12, 8, 12, 8),
-			Margin = new Padding(0, 6, 0, 8)
+			Height = 78,
+			BackColor = CardAltBg,
+			Margin = new Padding(0, 0, 0, 8),
+			Padding = new Padding(12, 8, 12, 8)
 		};
+		p.Paint += (s, e) => DrawTechBorder(e.Graphics, p.ClientRectangle, CardBorder, 6);
 
-		// 第一行：下载目录与画质
-		Label lblDir = new Label { Text = "下载目录:", AutoSize = true, Location = new Point(12, 12), ForeColor = Color.FromArgb(148, 163, 184) };
+		Label lblDir = new Label { Text = "保存目录:", AutoSize = true, Location = new Point(10, 13), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
 		p.Controls.Add(lblDir);
 
 		string defaultDownloadPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "视频批量下载");
 		_txtOutputDir = new TextBox
 		{
 			Text = defaultDownloadPath,
-			Location = new Point(80, 9),
-			Width = 380,
-			BackColor = Color.FromArgb(12, 16, 24),
-			ForeColor = Color.White,
-			BorderStyle = BorderStyle.FixedSingle
+			Location = new Point(80, 10),
+			Width = 320,
+			BackColor = InputBg,
+			ForeColor = TextPrimary,
+			BorderStyle = BorderStyle.FixedSingle,
+			Font = new Font("Segoe UI", 9f)
 		};
 		p.Controls.Add(_txtOutputDir);
 
-		_btnBrowseDir = new Button
-		{
-			Text = "选择",
-			Size = new Size(60, 24),
-			Location = new Point(466, 8),
-			FlatStyle = FlatStyle.Flat,
-			BackColor = Color.FromArgb(37, 45, 60),
-			ForeColor = Color.FromArgb(226, 232, 240),
-			Cursor = Cursors.Hand
-		};
-		_btnBrowseDir.FlatAppearance.BorderSize = 0;
-		_btnBrowseDir.Click += (s, e) =>
+		_btnBrowseDir = MakeTechButton("浏览...", 60, 26, Color.FromArgb(28, 42, 68), (s, e) =>
 		{
 			using var fbd = new FolderBrowserDialog { SelectedPath = _txtOutputDir.Text };
 			if (fbd.ShowDialog(this) == DialogResult.OK)
 			{
 				_txtOutputDir.Text = fbd.SelectedPath;
 			}
-		};
+		});
+		_btnBrowseDir.Location = new Point(408, 9);
 		p.Controls.Add(_btnBrowseDir);
 
-		Label lblQuality = new Label { Text = "画质:", AutoSize = true, Location = new Point(540, 12), ForeColor = Color.FromArgb(148, 163, 184) };
+		_btnOpenFolderQuick = MakeTechButton("打开目录", 72, 26, Color.FromArgb(28, 42, 68), (s, e) => OpenOutputDirectory());
+		_btnOpenFolderQuick.Location = new Point(474, 9);
+		p.Controls.Add(_btnOpenFolderQuick);
+
+		Label lblQuality = new Label { Text = "画质规格:", AutoSize = true, Location = new Point(560, 13), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
 		p.Controls.Add(lblQuality);
 
 		_cboQuality = new ComboBox
 		{
 			DropDownStyle = ComboBoxStyle.DropDownList,
-			Location = new Point(580, 9),
-			Width = 140,
-			BackColor = Color.FromArgb(12, 16, 24),
-			ForeColor = Color.White
+			Location = new Point(630, 10),
+			Width = 145,
+			BackColor = InputBg,
+			ForeColor = TextPrimary,
+			FlatStyle = FlatStyle.Flat
 		};
-		_cboQuality.Items.AddRange(new object[] { "最佳质量 (推荐)", "1080P 高清", "720P 标清", "仅提取音频 (MP3)" });
+		_cboQuality.Items.AddRange(new object[] { "最高画质 (4K/1080P)", "1080P 高清优先", "720P 极速标清", "仅提取音频 (MP3)" });
 		_cboQuality.SelectedIndex = 0;
 		p.Controls.Add(_cboQuality);
 
-		Label lblThreads = new Label { Text = "并发:", AutoSize = true, Location = new Point(735, 12), ForeColor = Color.FromArgb(148, 163, 184) };
+		Label lblThreads = new Label { Text = "并发线程:", AutoSize = true, Location = new Point(788, 13), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
 		p.Controls.Add(lblThreads);
 
 		_cboThreads = new ComboBox
 		{
 			DropDownStyle = ComboBoxStyle.DropDownList,
-			Location = new Point(775, 9),
-			Width = 90,
-			BackColor = Color.FromArgb(12, 16, 24),
-			ForeColor = Color.White
+			Location = new Point(858, 10),
+			Width = 84,
+			BackColor = InputBg,
+			ForeColor = TextPrimary,
+			FlatStyle = FlatStyle.Flat
 		};
 		_cboThreads.Items.AddRange(new object[] { "1 线程", "2 线程", "4 线程", "8 线程" });
-		_cboThreads.SelectedIndex = 2; // 4 线程
+		_cboThreads.SelectedIndex = 2;
 		p.Controls.Add(_cboThreads);
 
-		Label lblProxy = new Label { Text = "网络代理:", AutoSize = true, Location = new Point(880, 12), ForeColor = Color.FromArgb(148, 163, 184) };
+		Label lblProxy = new Label { Text = "网络代理:", AutoSize = true, Location = new Point(956, 13), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
 		p.Controls.Add(lblProxy);
 
 		_cboProxy = new ComboBox
 		{
 			DropDownStyle = ComboBoxStyle.DropDownList,
-			Location = new Point(945, 9),
-			Width = 150,
-			BackColor = Color.FromArgb(12, 16, 24),
-			ForeColor = Color.White
+			Location = new Point(1026, 10),
+			Width = 135,
+			BackColor = InputBg,
+			ForeColor = TextPrimary,
+			FlatStyle = FlatStyle.Flat
 		};
-		_cboProxy.Items.AddRange(new object[] { "系统代理 (推荐)", "直连 (无代理)", "自定义代理" });
+		_cboProxy.Items.AddRange(new object[] { "自动 (系统代理)", "直连 (无代理)", "自定义代理" });
 		_cboProxy.SelectedIndex = 0;
 		_cboProxy.SelectedIndexChanged += (s, e) =>
 		{
@@ -311,76 +384,79 @@ internal sealed class DownloaderPanel : UserControl
 		_txtCustomProxy = new TextBox
 		{
 			Text = "http://127.0.0.1:7890",
-			Location = new Point(1105, 9),
-			Width = 150,
-			BackColor = Color.FromArgb(12, 16, 24),
-			ForeColor = Color.White,
+			Location = new Point(1168, 10),
+			Width = 140,
+			BackColor = InputBg,
+			ForeColor = TextPrimary,
 			BorderStyle = BorderStyle.FixedSingle,
 			Visible = false
 		};
 		p.Controls.Add(_txtCustomProxy);
 
-		// 第二行：复选框
-		_chkResume = new CheckBox
-		{
-			Text = "断点续传",
-			Checked = true,
-			Location = new Point(80, 48),
-			AutoSize = true,
-			ForeColor = Color.FromArgb(203, 213, 225)
-		};
+		_chkResume = CreateCyberCheckBox("⚡ 断点续传加速", true, 80, 45);
 		p.Controls.Add(_chkResume);
 
-		_chkSkipExisting = new CheckBox
-		{
-			Text = "已完成则跳过",
-			Checked = true,
-			Location = new Point(180, 48),
-			AutoSize = true,
-			ForeColor = Color.FromArgb(203, 213, 225)
-		};
+		_chkSkipExisting = CreateCyberCheckBox("⏭ 已下载自动跳过", true, 215, 45);
 		p.Controls.Add(_chkSkipExisting);
 
-		_chkSubfolderByPlatform = new CheckBox
-		{
-			Text = "按平台分文件夹",
-			Checked = true,
-			Location = new Point(310, 48),
-			AutoSize = true,
-			ForeColor = Color.FromArgb(203, 213, 225)
-		};
+		_chkSubfolderByPlatform = CreateCyberCheckBox("📁 平台分类独立目录", true, 365, 45);
 		p.Controls.Add(_chkSubfolderByPlatform);
 
-		_chkPlaylistFolder = new CheckBox
-		{
-			Text = "播放列表分子文件夹",
-			Checked = true,
-			Location = new Point(450, 48),
-			AutoSize = true,
-			ForeColor = Color.FromArgb(203, 213, 225)
-		};
+		_chkPlaylistFolder = CreateCyberCheckBox("📑 剧集/合集分文件夹", true, 530, 45);
 		p.Controls.Add(_chkPlaylistFolder);
 
 		return p;
 	}
 
+	/// <summary>
+	/// 左侧输入与控制核心面板
+	/// </summary>
 	private Panel CreateLeftInputPanel()
 	{
 		Panel p = new Panel
 		{
-			BackColor = Color.FromArgb(18, 24, 34),
+			BackColor = CardBg,
 			Padding = new Padding(12)
 		};
+		p.Paint += (s, e) => DrawTechBorder(e.Graphics, p.ClientRectangle, CardBorder, 6);
+
+		Panel titleRow = new Panel { Dock = DockStyle.Top, Height = 48, BackColor = Color.Transparent };
 
 		Label lblTitle = new Label
 		{
-			Text = "视频 / 播放列表链接 (支持批量混排)",
+			Text = "📥 目标视频 / 播放列表链接",
 			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
-			ForeColor = Color.FromArgb(56, 189, 248),
-			Dock = DockStyle.Top,
-			Height = 26
+			ForeColor = CyanNeon,
+			Location = new Point(0, 0),
+			AutoSize = true
 		};
-		p.Controls.Add(lblTitle);
+		titleRow.Controls.Add(lblTitle);
+
+		_urlCountBadge = new Label
+		{
+			Text = "5 个示例链接",
+			Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+			ForeColor = EmeraldNeon,
+			BackColor = Color.FromArgb(20, 45, 40),
+			Padding = new Padding(6, 2, 6, 2),
+			Location = new Point(200, -2),
+			AutoSize = true
+		};
+		titleRow.Controls.Add(_urlCountBadge);
+
+		FlowLayoutPanel platformBadges = new FlowLayoutPanel
+		{
+			Location = new Point(0, 24),
+			Size = new Size(385, 22),
+			WrapContents = false,
+			BackColor = Color.Transparent
+		};
+		platformBadges.Controls.Add(CreateMiniPlatformTag("YouTube", Color.FromArgb(220, 38, 38)));
+		platformBadges.Controls.Add(CreateMiniPlatformTag("Facebook Reel", Color.FromArgb(37, 99, 235)));
+		platformBadges.Controls.Add(CreateMiniPlatformTag("TikTok", Color.FromArgb(219, 39, 119)));
+		platformBadges.Controls.Add(CreateMiniPlatformTag("Google Drive", Color.FromArgb(202, 138, 4)));
+		platformBadges.Controls.Add(CreateMiniPlatformTag("全网解析", Color.FromArgb(71, 85, 105)));
+		titleRow.Controls.Add(platformBadges);
 
 		_txtUrls = new TextBox
 		{
@@ -388,88 +464,108 @@ internal sealed class DownloaderPanel : UserControl
 			ScrollBars = ScrollBars.Both,
 			WordWrap = false,
 			Dock = DockStyle.Fill,
-			BackColor = Color.FromArgb(10, 14, 20),
+			BackColor = InputBg,
 			ForeColor = Color.FromArgb(226, 232, 240),
 			BorderStyle = BorderStyle.FixedSingle,
 			Font = new Font("Consolas", 9f)
 		};
 		_txtUrls.Text = "https://www.facebook.com/reel/1116404280831830\r\nhttps://www.youtube.com/watch?v=XqJMIE6_9gY\r\nhttps://www.youtube.com/shorts/bqLBK7GuPCk\r\nhttps://www.tiktok.com/@lucia.gove/video/7617254633341308178\r\nhttps://drive.google.com/file/d/1msP8BcsLRbFe5G8b67roWlkJTYN5fIoL/view";
+		_txtUrls.TextChanged += (s, e) =>
+		{
+			int count = GetUrlsFromInput().Length;
+			_urlCountBadge.Text = $"{count} 个待下载链接";
+			_urlCountBadge.ForeColor = count > 0 ? EmeraldNeon : TextMuted;
+		};
 
-		Panel urlContainer = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 6, 0, 8) };
+		Panel urlContainer = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 10), BackColor = Color.Transparent };
 		urlContainer.Controls.Add(_txtUrls);
 		p.Controls.Add(urlContainer);
 
-		// 下方按钮组容器 (FlowLayoutPanel)
 		Panel btnBottomArea = new Panel
 		{
 			Dock = DockStyle.Bottom,
-			Height = 140,
-			Padding = new Padding(0, 4, 0, 0)
+			Height = 146,
+			BackColor = Color.Transparent
 		};
 
-		// 行 1: 从剪贴板读取、清空、解析预览
-		_btnReadClipboard = MakeActionBtn("从剪贴板读取", 110, Color.FromArgb(37, 45, 60), (s, e) => ReadClipboardUrls());
-		_btnReadClipboard.Location = new Point(0, 6);
+		// 行 1: 辅助操作 (剪贴板、清空、元数据解析)
+		_btnReadClipboard = MakeTechButton("📋 粘贴剪贴板", 125, 30, Color.FromArgb(28, 42, 68), (s, e) => ReadClipboardUrls());
+		_btnReadClipboard.Location = new Point(0, 4);
 		btnBottomArea.Controls.Add(_btnReadClipboard);
 
-		_btnClearUrls = MakeActionBtn("清空链接", 80, Color.FromArgb(37, 45, 60), (s, e) => _txtUrls.Clear());
-		_btnClearUrls.Location = new Point(116, 6);
+		_btnClearUrls = MakeTechButton("🗑 清空", 70, 30, Color.FromArgb(28, 42, 68), (s, e) => _txtUrls.Clear());
+		_btnClearUrls.Location = new Point(132, 4);
 		btnBottomArea.Controls.Add(_btnClearUrls);
 
-		_btnParsePreview = MakeActionBtn("解析预览", 84, Color.FromArgb(37, 45, 60), async (s, e) => await ParseUrlsAsync());
-		_btnParsePreview.Location = new Point(202, 6);
+		_btnParsePreview = MakeTechButton("🔍 解析元数据", 110, 30, Color.FromArgb(28, 42, 68), async (s, e) => await ParseUrlsAsync());
+		_btnParsePreview.Location = new Point(208, 4);
 		btnBottomArea.Controls.Add(_btnParsePreview);
 
-		// 行 2: 开始下载、停止、打开文件夹
-		_btnStartDownload = MakeActionBtn("▶ 开始下载", 110, Color.FromArgb(37, 99, 235), async (s, e) => await StartDownloadAsync());
+		// 行 2: 核心下载引擎启动/停止
+		_btnStartDownload = MakeTechButton("▶ 启动批量极速下载", 205, 36, Color.FromArgb(37, 99, 235), async (s, e) => await StartDownloadAsync());
 		_btnStartDownload.Location = new Point(0, 44);
-		_btnStartDownload.Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
+		_btnStartDownload.Font = new Font("Microsoft YaHei UI", 10f, FontStyle.Bold);
 		btnBottomArea.Controls.Add(_btnStartDownload);
 
-		_btnStopDownload = MakeActionBtn("停止", 74, Color.FromArgb(220, 38, 38), (s, e) => StopDownload());
-		_btnStopDownload.Location = new Point(116, 44);
+		_btnStopDownload = MakeTechButton("⏹ 终止任务", 100, 36, Color.FromArgb(185, 28, 28), (s, e) => StopDownload());
+		_btnStopDownload.Location = new Point(213, 44);
 		btnBottomArea.Controls.Add(_btnStopDownload);
 
-		_btnOpenFolder = MakeActionBtn("打开文件夹", 90, Color.FromArgb(37, 45, 60), (s, e) => OpenOutputDirectory());
-		_btnOpenFolder.Location = new Point(196, 44);
-		btnBottomArea.Controls.Add(_btnOpenFolder);
-
-		// 行 3: 专属流转大按钮 (一键发送至 视频拼屏、发送至 视频剪辑)
-		_btnSendAllToSplitScreen = MakeActionBtn("▦ 一键发送至 视频拼屏", 175, Color.FromArgb(8, 145, 178), (s, e) => SendDownloadedToSplitScreen());
-		_btnSendAllToSplitScreen.Location = new Point(0, 88);
-		_btnSendAllToSplitScreen.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+		// 行 3: 独家一键流转工作流按钮组 (高科技发光配色)
+		_btnSendAllToSplitScreen = MakeTechButton("▦ 一键发送至 视频拼屏", 175, 36, Color.FromArgb(13, 148, 136), (s, e) => SendDownloadedToSplitScreen());
+		_btnSendAllToSplitScreen.Location = new Point(0, 92);
+		_btnSendAllToSplitScreen.Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Bold);
 		btnBottomArea.Controls.Add(_btnSendAllToSplitScreen);
 
-		_btnSendToCutEdit = MakeActionBtn("🎬 发送至剪辑", 96, Color.FromArgb(124, 58, 237), (s, e) => SendDownloadedToCutEditor());
-		_btnSendToCutEdit.Location = new Point(182, 88);
-		_btnSendToCutEdit.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+		_btnSendToCutEdit = MakeTechButton("🎬 发送至剪辑", 112, 36, Color.FromArgb(109, 40, 217), (s, e) => SendDownloadedToCutEditor());
+		_btnSendToCutEdit.Location = new Point(182, 92);
+		_btnSendToCutEdit.Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Bold);
 		btnBottomArea.Controls.Add(_btnSendToCutEdit);
 
-		_btnSendToMerge = MakeActionBtn("📦 送合并", 74, Color.FromArgb(37, 45, 60), (s, e) => SendDownloadedToMerge());
-		_btnSendToMerge.Location = new Point(284, 88);
+		_btnSendToMerge = MakeTechButton("📦 送合并", 86, 36, Color.FromArgb(28, 42, 68), (s, e) => SendDownloadedToMerge());
+		_btnSendToMerge.Location = new Point(300, 92);
 		btnBottomArea.Controls.Add(_btnSendToMerge);
 
+		p.Controls.Add(urlContainer);
 		p.Controls.Add(btnBottomArea);
+		p.Controls.Add(titleRow);
 		return p;
 	}
 
+	/// <summary>
+	/// 右上方任务矩阵列表区
+	/// </summary>
 	private Panel CreateRightTablePanel()
 	{
 		Panel p = new Panel
 		{
-			BackColor = Color.FromArgb(18, 24, 34),
+			BackColor = CardBg,
 			Padding = new Padding(12)
 		};
+		p.Paint += (s, e) => DrawTechBorder(e.Graphics, p.ClientRectangle, CardBorder, 6);
 
+		Panel headerRow = new Panel { Dock = DockStyle.Top, Height = 30, BackColor = Color.Transparent };
 		Label lblHeader = new Label
 		{
-			Text = "预览 / 进度 (可右键发送至【视频拼屏】或【视频剪辑】)",
+			Text = "📊 下载任务矩阵 (右键条目可直通【视频拼屏】/【剪辑工作台】)",
 			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
-			ForeColor = Color.FromArgb(56, 189, 248),
-			Dock = DockStyle.Top,
-			Height = 26
+			ForeColor = CyanNeon,
+			Dock = DockStyle.Left,
+			AutoSize = true
 		};
-		p.Controls.Add(lblHeader);
+		headerRow.Controls.Add(lblHeader);
+
+		_progressTextLabel = new Label
+		{
+			Text = "准备就绪",
+			Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+			ForeColor = TextMuted,
+			Dock = DockStyle.Right,
+			AutoSize = true,
+			TextAlign = ContentAlignment.MiddleRight
+		};
+		headerRow.Controls.Add(_progressTextLabel);
+		p.Controls.Add(headerRow);
 
 		_listView = new ListView
 		{
@@ -477,29 +573,29 @@ internal sealed class DownloaderPanel : UserControl
 			View = View.Details,
 			FullRowSelect = true,
 			GridLines = true,
-			BackColor = Color.FromArgb(10, 14, 20),
-			ForeColor = Color.FromArgb(226, 232, 240),
-			BorderStyle = BorderStyle.FixedSingle,
-			HeaderStyle = ColumnHeaderStyle.Nonclickable
+			BackColor = InputBg,
+			ForeColor = TextPrimary,
+			BorderStyle = BorderStyle.None,
+			HeaderStyle = ColumnHeaderStyle.Nonclickable,
+			Font = new Font("Microsoft YaHei UI", 9f)
 		};
 
 		_listView.Columns.Add("#", 38);
-		_listView.Columns.Add("平台", 86);
-		_listView.Columns.Add("来源", 78);
-		_listView.Columns.Add("标题", 260);
-		_listView.Columns.Add("时长/大小", 84);
-		_listView.Columns.Add("进度", 70);
-		_listView.Columns.Add("速度", 80);
-		_listView.Columns.Add("状态", 110);
+		_listView.Columns.Add("平台", 92);
+		_listView.Columns.Add("来源", 80);
+		_listView.Columns.Add("标题", 280);
+		_listView.Columns.Add("时长/大小", 95);
+		_listView.Columns.Add("进度", 75);
+		_listView.Columns.Add("速度", 85);
+		_listView.Columns.Add("状态", 115);
 
-		// 右键快捷菜单
 		_listView.ContextMenuStrip = CreateTableContextMenu();
 		p.Controls.Add(_listView);
 
 		_progressBar = new ProgressBar
 		{
 			Dock = DockStyle.Bottom,
-			Height = 8,
+			Height = 6,
 			Minimum = 0,
 			Maximum = 100,
 			Value = 0
@@ -509,10 +605,201 @@ internal sealed class DownloaderPanel : UserControl
 		return p;
 	}
 
+	/// <summary>
+	/// 右下方终端控制台
+	/// </summary>
+	private Panel CreateRightLogPanel()
+	{
+		Panel p = new Panel
+		{
+			BackColor = CardBg,
+			Padding = new Padding(12)
+		};
+		p.Paint += (s, e) => DrawTechBorder(e.Graphics, p.ClientRectangle, CardBorder, 6);
+
+		Panel titleRow = new Panel { Dock = DockStyle.Top, Height = 28, BackColor = Color.Transparent };
+		Label lblLog = new Label
+		{
+			Text = "💻 极速内核终端控制台 (Terminal Output)",
+			Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
+			ForeColor = TextMuted,
+			Dock = DockStyle.Left,
+			AutoSize = true
+		};
+		titleRow.Controls.Add(lblLog);
+
+		Button btnClearLog = MakeTechButton("清空终端", 72, 24, Color.FromArgb(28, 42, 68), (s, e) => _logBox.Clear());
+		btnClearLog.Dock = DockStyle.Right;
+		titleRow.Controls.Add(btnClearLog);
+		p.Controls.Add(titleRow);
+
+		_logBox = new RichTextBox
+		{
+			Dock = DockStyle.Fill,
+			BackColor = Color.FromArgb(6, 9, 16),
+			ForeColor = EmeraldNeon,
+			BorderStyle = BorderStyle.None,
+			Font = new Font("Consolas", 9f),
+			ReadOnly = true
+		};
+		p.Controls.Add(_logBox);
+
+		return p;
+	}
+
+	// ====================== 控件外观与样式辅助函数 ======================
+
+	private static void DrawTechBorder(Graphics g, Rectangle bounds, Color borderCol, int radius)
+	{
+		g.SmoothingMode = SmoothingMode.AntiAlias;
+		Rectangle r = new Rectangle(bounds.X, bounds.Y, bounds.Width - 1, bounds.Height - 1);
+		using var path = CreateRoundedPath(r, radius);
+		using var pen = new Pen(borderCol, 1f);
+		g.DrawPath(pen, path);
+	}
+
+	private static GraphicsPath CreateRoundedPath(Rectangle rect, int radius)
+	{
+		GraphicsPath path = new GraphicsPath();
+		if (rect.Width <= 0 || rect.Height <= 0) return path;
+		int d = radius * 2;
+		if (d > rect.Width) d = rect.Width;
+		if (d > rect.Height) d = rect.Height;
+		Rectangle arc = new Rectangle(rect.X, rect.Y, d, d);
+		path.AddArc(arc, 180, 90);
+		arc.X = rect.Right - d;
+		path.AddArc(arc, 270, 90);
+		arc.Y = rect.Bottom - d;
+		path.AddArc(arc, 0, 90);
+		arc.X = rect.Left;
+		path.AddArc(arc, 90, 90);
+		path.CloseFigure();
+		return path;
+	}
+
+	private Label CreateTechPill(string module, string status, Color dotColor)
+	{
+		Label lbl = new Label
+		{
+			Text = $"● {module}: {status}",
+			Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold),
+			ForeColor = dotColor,
+			BackColor = Color.FromArgb(20, 32, 54),
+			Padding = new Padding(6, 4, 6, 4),
+			Margin = new Padding(3, 0, 3, 0),
+			AutoSize = true
+		};
+		return lbl;
+	}
+
+	private Label CreateMiniPlatformTag(string name, Color bg)
+	{
+		Label lbl = new Label
+		{
+			Text = name,
+			Font = new Font("Microsoft YaHei UI", 7.5f, FontStyle.Bold),
+			ForeColor = Color.White,
+			BackColor = bg,
+			Padding = new Padding(4, 1, 4, 1),
+			Margin = new Padding(0, 0, 4, 0),
+			AutoSize = true
+		};
+		return lbl;
+	}
+
+	private CheckBox CreateCyberCheckBox(string text, bool check, int x, int y)
+	{
+		return new CheckBox
+		{
+			Text = text,
+			Checked = check,
+			Location = new Point(x, y),
+			AutoSize = true,
+			ForeColor = Color.FromArgb(203, 213, 225),
+			Font = new Font("Microsoft YaHei UI", 9f),
+			Cursor = Cursors.Hand
+		};
+	}
+
+	/// <summary>
+	/// 科技感玻璃质感自绘按钮
+	/// </summary>
+	private Button MakeTechButton(string text, int width, int height, Color baseColor, EventHandler onClick)
+	{
+		Button b = new Button
+		{
+			Text = text,
+			Size = new Size(width, height),
+			FlatStyle = FlatStyle.Flat,
+			BackColor = baseColor,
+			ForeColor = Color.White,
+			Cursor = Cursors.Hand,
+			Font = new Font("Microsoft YaHei UI", 9f)
+		};
+		b.FlatAppearance.BorderSize = 0;
+		b.Click += onClick;
+
+		bool isHover = false;
+		bool isPressed = false;
+
+		b.MouseEnter += (s, e) => { isHover = true; b.Invalidate(); };
+		b.MouseLeave += (s, e) => { isHover = false; isPressed = false; b.Invalidate(); };
+		b.MouseDown += (s, e) => { isPressed = true; b.Invalidate(); };
+		b.MouseUp += (s, e) => { isPressed = false; b.Invalidate(); };
+
+		b.Paint += (s, e) =>
+		{
+			Graphics g = e.Graphics;
+			g.SmoothingMode = SmoothingMode.AntiAlias;
+			Rectangle bounds = new Rectangle(0, 0, b.Width - 1, b.Height - 1);
+
+			Color topGrad, botGrad, borderColor;
+			if (isPressed)
+			{
+				topGrad = ControlPaint.Dark(baseColor, 0.2f);
+				botGrad = baseColor;
+				borderColor = CyanNeon;
+			}
+			else if (isHover)
+			{
+				topGrad = ControlPaint.Light(baseColor, 0.3f);
+				botGrad = baseColor;
+				borderColor = CyanNeon;
+			}
+			else
+			{
+				topGrad = ControlPaint.Light(baseColor, 0.15f);
+				botGrad = ControlPaint.Dark(baseColor, 0.1f);
+				borderColor = Color.FromArgb(baseColor.R / 2, baseColor.G / 2 + 30, baseColor.B / 2 + 50);
+			}
+
+			using var path = CreateRoundedPath(bounds, 5);
+			using (var lgb = new LinearGradientBrush(bounds, topGrad, botGrad, LinearGradientMode.Vertical))
+			{
+				g.FillPath(lgb, path);
+			}
+
+			using (var specPen = new Pen(Color.FromArgb(50, 255, 255, 255), 1f))
+			{
+				g.DrawLine(specPen, bounds.Left + 3, bounds.Top + 1, bounds.Right - 3, bounds.Top + 1);
+			}
+
+			using (var borderPen = new Pen(borderColor, 1f))
+			{
+				g.DrawPath(borderPen, path);
+			}
+
+			TextRenderer.DrawText(g, b.Text, b.Font, bounds, Color.White,
+				TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+		};
+
+		return b;
+	}
+
 	private ContextMenuStrip CreateTableContextMenu()
 	{
 		ContextMenuStrip cms = new ContextMenuStrip();
-		cms.BackColor = Color.FromArgb(20, 26, 38);
+		cms.BackColor = CardAltBg;
 		cms.ForeColor = Color.White;
 
 		var itemSplitScreen = new ToolStripMenuItem("▦ 发送此视频至【视频拼屏】");
@@ -532,71 +819,7 @@ internal sealed class DownloaderPanel : UserControl
 		return cms;
 	}
 
-	private Panel CreateRightLogPanel()
-	{
-		Panel p = new Panel
-		{
-			BackColor = Color.FromArgb(18, 24, 34),
-			Padding = new Padding(12)
-		};
-
-		Panel titleRow = new Panel { Dock = DockStyle.Top, Height = 26 };
-		Label lblLog = new Label
-		{
-			Text = "实时终端控制台日志",
-			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
-			ForeColor = Color.FromArgb(148, 163, 184),
-			Dock = DockStyle.Left,
-			AutoSize = true
-		};
-		titleRow.Controls.Add(lblLog);
-
-		Button btnClearLog = new Button
-		{
-			Text = "清空日志",
-			Size = new Size(68, 22),
-			Dock = DockStyle.Right,
-			FlatStyle = FlatStyle.Flat,
-			BackColor = Color.FromArgb(37, 45, 60),
-			ForeColor = Color.FromArgb(203, 213, 225),
-			Cursor = Cursors.Hand
-		};
-		btnClearLog.FlatAppearance.BorderSize = 0;
-		btnClearLog.Click += (s, e) => _logBox.Clear();
-		titleRow.Controls.Add(btnClearLog);
-		p.Controls.Add(titleRow);
-
-		_logBox = new RichTextBox
-		{
-			Dock = DockStyle.Fill,
-			BackColor = Color.FromArgb(8, 12, 18),
-			ForeColor = Color.FromArgb(52, 211, 153),
-			BorderStyle = BorderStyle.None,
-			Font = new Font("Consolas", 9f),
-			ReadOnly = true
-		};
-		p.Controls.Add(_logBox);
-
-		return p;
-	}
-
-	private Button MakeActionBtn(string text, int width, Color backColor, EventHandler onClick)
-	{
-		Button b = new Button
-		{
-			Text = text,
-			Size = new Size(width, 32),
-			FlatStyle = FlatStyle.Flat,
-			BackColor = backColor,
-			ForeColor = Color.White,
-			Cursor = Cursors.Hand
-		};
-		b.FlatAppearance.BorderSize = 0;
-		b.Click += onClick;
-		return b;
-	}
-
-	// ====================== 核心业务逻辑 ======================
+	// ====================== 核心下载调度与流转业务 ======================
 
 	public void RefreshEnvironmentStatus()
 	{
@@ -608,24 +831,24 @@ internal sealed class DownloaderPanel : UserControl
 		bool ffmpegOk = !string.IsNullOrEmpty(ffmpeg) && File.Exists(ffmpeg);
 		bool ffprobeOk = !string.IsNullOrEmpty(ffprobe) && File.Exists(ffprobe);
 
-		string text = "组件检测: ";
-		text += ytdlpOk ? "✓ yt-dlp " : "✗ yt-dlp(未配置) ";
-		text += ffmpegOk ? "✓ ffmpeg " : "✗ ffmpeg ";
-		text += ffprobeOk ? "✓ ffprobe" : "✗ ffprobe";
+		_envTagYtDlp.Text = ytdlpOk ? "● yt-dlp: 就绪" : "● yt-dlp: 未检测到";
+		_envTagYtDlp.ForeColor = ytdlpOk ? EmeraldNeon : Color.FromArgb(248, 113, 113);
+
+		_envTagFFmpeg.Text = ffmpegOk ? "● FFmpeg: 就绪" : "● FFmpeg: 缺失";
+		_envTagFFmpeg.ForeColor = ffmpegOk ? EmeraldNeon : Color.FromArgb(248, 113, 113);
+
+		_envTagFFprobe.Text = ffprobeOk ? "● FFprobe: 就绪" : "● FFprobe: 缺失";
+		_envTagFFprobe.ForeColor = ffprobeOk ? EmeraldNeon : Color.FromArgb(248, 113, 113);
 
 		if (ytdlpOk && ffmpegOk)
 		{
-			_envStatusLabel.Text = $"高清环境就绪 | {text}";
-			_envStatusLabel.ForeColor = Color.FromArgb(52, 211, 153);
-			_btnInstallYtDlp.Text = "组件已就绪";
-			_btnInstallYtDlp.BackColor = Color.FromArgb(37, 45, 60);
+			_envBadgeTitle.Text = "ULTRA STREAM · 全网多平台极速提取终端 [高清就绪]";
+			_btnInstallYtDlp.Text = "✓ 组件已完备";
 		}
 		else
 		{
-			_envStatusLabel.Text = $"环境未完备 | {text}";
-			_envStatusLabel.ForeColor = Color.FromArgb(248, 113, 113);
-			_btnInstallYtDlp.Text = "一键配置组件";
-			_btnInstallYtDlp.BackColor = Color.FromArgb(37, 99, 235);
+			_envBadgeTitle.Text = "ULTRA STREAM · 全网多平台极速提取终端 [环境待配置]";
+			_btnInstallYtDlp.Text = "⚡ 一键配置组件";
 		}
 	}
 
@@ -879,9 +1102,8 @@ internal sealed class DownloaderPanel : UserControl
 
 	private string GetEffectiveProxy()
 	{
-		if (_cboProxy.SelectedIndex == 1) return ""; // 直连
-		if (_cboProxy.SelectedIndex == 2) return _txtCustomProxy.Text.Trim(); // 自定义
-		// 系统代理
+		if (_cboProxy.SelectedIndex == 1) return "";
+		if (_cboProxy.SelectedIndex == 2) return _txtCustomProxy.Text.Trim();
 		try
 		{
 			var proxy = WebRequest.GetSystemWebProxy();
@@ -936,19 +1158,20 @@ internal sealed class DownloaderPanel : UserControl
 			lvi.SubItems[7].Text = item.Status;
 
 			if (item.Status == "成功" || item.Status.Contains("已完成"))
-				lvi.ForeColor = Color.FromArgb(52, 211, 153);
+				lvi.ForeColor = EmeraldNeon;
 			else if (item.Status.Contains("失败") || item.Status.Contains("异常"))
 				lvi.ForeColor = Color.FromArgb(248, 113, 113);
 			else if (item.Status.Contains("下载中"))
-				lvi.ForeColor = Color.FromArgb(56, 189, 248);
+				lvi.ForeColor = CyanNeon;
 			else
-				lvi.ForeColor = Color.FromArgb(226, 232, 240);
+				lvi.ForeColor = TextPrimary;
 		}
 
 		if (_items.Count > 0)
 		{
 			int avgPct = (int)_items.Average(it => it.ProgressPercent);
 			_progressBar.Value = Math.Max(0, Math.Min(100, avgPct));
+			_progressTextLabel.Text = $"总进度: {avgPct}% ({_items.Count(it => it.Status == "成功" || it.Status.Contains("已完成"))}/{_items.Count})";
 		}
 	}
 
@@ -969,9 +1192,6 @@ internal sealed class DownloaderPanel : UserControl
 
 	// ====================== 核心流转联动 (拼屏/剪辑/合并) ======================
 
-	/// <summary>
-	/// 一键将所有下载成功的视频推送到【视频拼屏】工作台并智能分配区域
-	/// </summary>
 	private void SendDownloadedToSplitScreen()
 	{
 		var downloadedFiles = _items
@@ -981,7 +1201,6 @@ internal sealed class DownloaderPanel : UserControl
 
 		if (downloadedFiles.Count == 0)
 		{
-			// 尝试从输出目录查找最新视频
 			string outDir = _txtOutputDir.Text.Trim();
 			if (Directory.Exists(outDir))
 			{
@@ -999,13 +1218,11 @@ internal sealed class DownloaderPanel : UserControl
 			return;
 		}
 
-		// 智能分配：每个区域填入 1 个视频（如果有 4 个视频，分别填入区域 1、2、3、4）
 		for (int i = 0; i < downloadedFiles.Count; i++)
 		{
 			_mainForm.AddSplitScreenVideoPaths(new string[] { downloadedFiles[i] }, i);
 		}
 
-		// 切换到【视频拼屏】Tab (Tab 索引 5)
 		_mainForm.SwitchToWorkspace(MainForm.WorkspaceSplitScreen);
 		MessageBox.Show(this, $"已将 {downloadedFiles.Count} 个下载视频成功分发至【视频拼屏】工作台并就绪排版！", "流转成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
 	}

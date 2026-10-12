@@ -551,7 +551,7 @@ public sealed class DownloadEngine
 
 		if (parseOnly)
 		{
-			sb.Append("--no-playlist --dump-single-json --print \"%(title)s|%(duration_string)s|%(filesize_approx_str)s\" ");
+			sb.Append("--no-playlist --encoding UTF-8 --dump-single-json --print \"%(title)s|%(duration_string)s|%(filesize_approx_str)s\" ");
 		}
 		else
 		{
