@@ -61,10 +61,6 @@ internal sealed class DownloaderPanel : UserControl
 	private Button _btnStartDownload;
 	private Button _btnStopDownload;
 
-	private Button _btnSendAllToSplitScreen;
-	private Button _btnSendToCutEdit;
-	private Button _btnSendToMerge;
-
 	private ListView _listView;
 	private ProgressBar _progressBar;
 	private Label _progressTextLabel;
@@ -527,7 +523,7 @@ internal sealed class DownloaderPanel : UserControl
 		Panel btnBottomArea = new Panel
 		{
 			Dock = DockStyle.Bottom,
-			Height = 146,
+			Height = 90,
 			BackColor = Color.Transparent
 		};
 
@@ -544,7 +540,7 @@ internal sealed class DownloaderPanel : UserControl
 		_btnParsePreview.Location = new Point(208, 4);
 		btnBottomArea.Controls.Add(_btnParsePreview);
 
-		// 行 2: 核心下载引擎启动/停止
+		// 行 2: 核心下载引擎启动/停止 (更清爽开阔)
 		_btnStartDownload = MakeTechButton("▶ 启动批量极速下载", 205, 36, Color.FromArgb(37, 99, 235), async (s, e) => await StartDownloadAsync());
 		_btnStartDownload.Location = new Point(0, 44);
 		_btnStartDownload.Font = new Font("Microsoft YaHei UI", 10f, FontStyle.Bold);
@@ -553,21 +549,6 @@ internal sealed class DownloaderPanel : UserControl
 		_btnStopDownload = MakeTechButton("⏹ 终止任务", 100, 36, Color.FromArgb(185, 28, 28), (s, e) => StopDownload());
 		_btnStopDownload.Location = new Point(213, 44);
 		btnBottomArea.Controls.Add(_btnStopDownload);
-
-		// 行 3: 独家一键流转工作流按钮组 (高科技发光配色)
-		_btnSendAllToSplitScreen = MakeTechButton("▦ 一键发送至 视频拼屏", 175, 36, Color.FromArgb(13, 148, 136), (s, e) => SendDownloadedToSplitScreen());
-		_btnSendAllToSplitScreen.Location = new Point(0, 92);
-		_btnSendAllToSplitScreen.Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Bold);
-		btnBottomArea.Controls.Add(_btnSendAllToSplitScreen);
-
-		_btnSendToCutEdit = MakeTechButton("🎬 发送至剪辑", 112, 36, Color.FromArgb(109, 40, 217), (s, e) => SendDownloadedToCutEditor());
-		_btnSendToCutEdit.Location = new Point(182, 92);
-		_btnSendToCutEdit.Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Bold);
-		btnBottomArea.Controls.Add(_btnSendToCutEdit);
-
-		_btnSendToMerge = MakeTechButton("📦 送合并", 86, 36, Color.FromArgb(28, 42, 68), (s, e) => SendDownloadedToMerge());
-		_btnSendToMerge.Location = new Point(300, 92);
-		btnBottomArea.Controls.Add(_btnSendToMerge);
 
 		p.Controls.Add(urlContainer);
 		p.Controls.Add(btnBottomArea);
@@ -1052,15 +1033,30 @@ internal sealed class DownloaderPanel : UserControl
 		if (_isDownloading) return;
 
 		string[] urls = GetUrlsFromInput();
-		if (urls.Length == 0 && _items.Count == 0)
+		if (urls.Length == 0)
 		{
 			MessageBox.Show(this, "请在左侧输入需要下载的视频链接！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			return;
 		}
 
-		if (_items.Count == 0 || urls.Length != _items.Count)
+		// 检查当前任务列表与左侧输入框中的链接是否完全一致，若有任何变动则立即以最新输入的链接为准重建任务队列并刷新视图
+		bool urlsChanged = (_items.Count != urls.Length);
+		if (!urlsChanged)
+		{
+			for (int i = 0; i < urls.Length; i++)
+			{
+				if (!string.Equals(_items[i].Url, urls[i], StringComparison.OrdinalIgnoreCase))
+				{
+					urlsChanged = true;
+					break;
+				}
+			}
+		}
+
+		if (urlsChanged)
 		{
 			_items.Clear();
+			_listView.Items.Clear();
 			for (int i = 0; i < urls.Length; i++)
 			{
 				var (platform, sourceType) = DownloadEngine.IdentifyPlatform(urls[i]);
@@ -1074,6 +1070,7 @@ internal sealed class DownloaderPanel : UserControl
 					Status = "准备中"
 				});
 			}
+			UpdateListViewRows();
 		}
 
 		string ytdlp = DownloadEngine.FindYtDlpPath();
@@ -1200,6 +1197,11 @@ internal sealed class DownloaderPanel : UserControl
 		{
 			BeginInvoke(new Action(UpdateListViewRows));
 			return;
+		}
+
+		while (_listView.Items.Count > _items.Count)
+		{
+			_listView.Items.RemoveAt(_listView.Items.Count - 1);
 		}
 
 		for (int i = 0; i < _items.Count; i++)
