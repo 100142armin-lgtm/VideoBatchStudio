@@ -298,14 +298,15 @@ internal sealed class DownloaderPanel : UserControl
 		};
 		p.Paint += (s, e) => DrawTechBorder(e.Graphics, p.ClientRectangle, CardBorder, 6);
 
-		Label lblDir = new Label { Text = "保存目录:", AutoSize = true, Location = new Point(10, 13), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
+		// 第一行：保存目录与常规操作
+		Label lblDir = new Label { Text = "保存目录:", AutoSize = true, Location = new Point(12, 13), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
 		p.Controls.Add(lblDir);
 
 		string defaultDownloadPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "视频批量下载");
 		_txtOutputDir = new TextBox
 		{
 			Text = defaultDownloadPath,
-			Location = new Point(80, 10),
+			Location = new Point(78, 10),
 			Width = 320,
 			BackColor = InputBg,
 			ForeColor = TextPrimary,
@@ -314,7 +315,7 @@ internal sealed class DownloaderPanel : UserControl
 		};
 		p.Controls.Add(_txtOutputDir);
 
-		_btnBrowseDir = MakeTechButton("浏览...", 60, 26, Color.FromArgb(28, 42, 68), (s, e) =>
+		_btnBrowseDir = MakeTechButton("浏览...", 58, 25, Color.FromArgb(28, 42, 68), (s, e) =>
 		{
 			using var fbd = new FolderBrowserDialog { SelectedPath = _txtOutputDir.Text };
 			if (fbd.ShowDialog(this) == DialogResult.OK)
@@ -322,88 +323,130 @@ internal sealed class DownloaderPanel : UserControl
 				_txtOutputDir.Text = fbd.SelectedPath;
 			}
 		});
-		_btnBrowseDir.Location = new Point(408, 9);
+		_btnBrowseDir.Location = new Point(404, 9);
 		p.Controls.Add(_btnBrowseDir);
 
-		_btnOpenFolderQuick = MakeTechButton("打开目录", 72, 26, Color.FromArgb(28, 42, 68), (s, e) => OpenOutputDirectory());
-		_btnOpenFolderQuick.Location = new Point(474, 9);
+		_btnOpenFolderQuick = MakeTechButton("打开目录", 72, 25, Color.FromArgb(28, 42, 68), (s, e) => OpenOutputDirectory());
+		_btnOpenFolderQuick.Location = new Point(468, 9);
 		p.Controls.Add(_btnOpenFolderQuick);
 
-		Label lblQuality = new Label { Text = "画质规格:", AutoSize = true, Location = new Point(560, 13), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
-		p.Controls.Add(lblQuality);
+		// 右侧流式对齐容器：画质规格、并发数、网络代理 (使用 FlowLayoutPanel 保证永远不拥挤重叠)
+		FlowLayoutPanel flowRightSettings = new FlowLayoutPanel
+		{
+			FlowDirection = FlowDirection.LeftToRight,
+			WrapContents = false,
+			AutoSize = true,
+			Location = new Point(552, 7),
+			Height = 32,
+			BackColor = Color.Transparent
+		};
+
+		Label lblQuality = new Label { Text = "画质规格:", AutoSize = true, Margin = new Padding(0, 5, 4, 0), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
+		flowRightSettings.Controls.Add(lblQuality);
 
 		_cboQuality = new ComboBox
 		{
 			DropDownStyle = ComboBoxStyle.DropDownList,
-			Location = new Point(630, 10),
 			Width = 145,
 			BackColor = InputBg,
 			ForeColor = TextPrimary,
-			FlatStyle = FlatStyle.Flat
+			FlatStyle = FlatStyle.Flat,
+			Margin = new Padding(0, 2, 12, 0)
 		};
 		_cboQuality.Items.AddRange(new object[] { "最高画质 (4K/1080P)", "1080P 高清优先", "720P 极速标清", "仅提取音频 (MP3)" });
 		_cboQuality.SelectedIndex = 0;
-		p.Controls.Add(_cboQuality);
+		flowRightSettings.Controls.Add(_cboQuality);
 
-		Label lblThreads = new Label { Text = "并发线程:", AutoSize = true, Location = new Point(788, 13), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
-		p.Controls.Add(lblThreads);
+		Label lblThreads = new Label { Text = "并发线程:", AutoSize = true, Margin = new Padding(0, 5, 4, 0), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
+		flowRightSettings.Controls.Add(lblThreads);
 
 		_cboThreads = new ComboBox
 		{
 			DropDownStyle = ComboBoxStyle.DropDownList,
-			Location = new Point(858, 10),
-			Width = 84,
+			Width = 80,
 			BackColor = InputBg,
 			ForeColor = TextPrimary,
-			FlatStyle = FlatStyle.Flat
+			FlatStyle = FlatStyle.Flat,
+			Margin = new Padding(0, 2, 12, 0)
 		};
 		_cboThreads.Items.AddRange(new object[] { "1 线程", "2 线程", "4 线程", "8 线程" });
 		_cboThreads.SelectedIndex = 2;
-		p.Controls.Add(_cboThreads);
+		flowRightSettings.Controls.Add(_cboThreads);
 
-		Label lblProxy = new Label { Text = "网络代理:", AutoSize = true, Location = new Point(956, 13), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
-		p.Controls.Add(lblProxy);
+		Label lblProxy = new Label { Text = "网络代理:", AutoSize = true, Margin = new Padding(0, 5, 4, 0), ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
+		flowRightSettings.Controls.Add(lblProxy);
 
 		_cboProxy = new ComboBox
 		{
 			DropDownStyle = ComboBoxStyle.DropDownList,
-			Location = new Point(1026, 10),
-			Width = 135,
+			Width = 115,
 			BackColor = InputBg,
 			ForeColor = TextPrimary,
-			FlatStyle = FlatStyle.Flat
+			FlatStyle = FlatStyle.Flat,
+			Margin = new Padding(0, 2, 4, 0)
 		};
 		_cboProxy.Items.AddRange(new object[] { "自动 (系统代理)", "直连 (无代理)", "自定义代理" });
 		_cboProxy.SelectedIndex = 0;
-		_cboProxy.SelectedIndexChanged += (s, e) =>
-		{
-			_txtCustomProxy.Visible = (_cboProxy.SelectedIndex == 2);
-		};
-		p.Controls.Add(_cboProxy);
+		flowRightSettings.Controls.Add(_cboProxy);
 
 		_txtCustomProxy = new TextBox
 		{
 			Text = "http://127.0.0.1:7890",
-			Location = new Point(1168, 10),
-			Width = 140,
+			Width = 135,
 			BackColor = InputBg,
 			ForeColor = TextPrimary,
 			BorderStyle = BorderStyle.FixedSingle,
-			Visible = false
+			Visible = false,
+			Margin = new Padding(0, 2, 0, 0)
 		};
-		p.Controls.Add(_txtCustomProxy);
+		_cboProxy.SelectedIndexChanged += (s, e) =>
+		{
+			_txtCustomProxy.Visible = (_cboProxy.SelectedIndex == 2);
+		};
+		flowRightSettings.Controls.Add(_txtCustomProxy);
 
-		_chkResume = CreateCyberCheckBox("⚡ 断点续传加速", true, 80, 45);
-		p.Controls.Add(_chkResume);
+		p.Controls.Add(flowRightSettings);
 
-		_chkSkipExisting = CreateCyberCheckBox("⏭ 已下载自动跳过", true, 215, 45);
-		p.Controls.Add(_chkSkipExisting);
+		// 自适应布局：当窗口宽度发生变化时，动态拉伸保存目录输入框
+		p.Resize += (s, e) =>
+		{
+			int availableForPath = flowRightSettings.Left - 165;
+			if (availableForPath > 180)
+			{
+				_txtOutputDir.Width = availableForPath;
+				_btnBrowseDir.Left = _txtOutputDir.Right + 6;
+				_btnOpenFolderQuick.Left = _btnBrowseDir.Right + 6;
+			}
+		};
 
-		_chkSubfolderByPlatform = CreateCyberCheckBox("📁 平台分类独立目录", true, 365, 45);
-		p.Controls.Add(_chkSubfolderByPlatform);
+		// 第二行：复选芯片（整齐间隔）
+		FlowLayoutPanel flowCheckboxes = new FlowLayoutPanel
+		{
+			FlowDirection = FlowDirection.LeftToRight,
+			WrapContents = false,
+			AutoSize = true,
+			Location = new Point(74, 45),
+			Height = 28,
+			BackColor = Color.Transparent
+		};
 
-		_chkPlaylistFolder = CreateCyberCheckBox("📑 剧集/合集分文件夹", true, 530, 45);
-		p.Controls.Add(_chkPlaylistFolder);
+		_chkResume = CreateCyberCheckBox("⚡ 断点续传加速", true, 0, 0);
+		_chkResume.Margin = new Padding(0, 0, 16, 0);
+		flowCheckboxes.Controls.Add(_chkResume);
+
+		_chkSkipExisting = CreateCyberCheckBox("⏭ 已下载自动跳过", true, 0, 0);
+		_chkSkipExisting.Margin = new Padding(0, 0, 16, 0);
+		flowCheckboxes.Controls.Add(_chkSkipExisting);
+
+		_chkSubfolderByPlatform = CreateCyberCheckBox("📁 平台分类独立目录", true, 0, 0);
+		_chkSubfolderByPlatform.Margin = new Padding(0, 0, 16, 0);
+		flowCheckboxes.Controls.Add(_chkSubfolderByPlatform);
+
+		_chkPlaylistFolder = CreateCyberCheckBox("📑 剧集/合集分文件夹", true, 0, 0);
+		_chkPlaylistFolder.Margin = new Padding(0, 0, 16, 0);
+		flowCheckboxes.Controls.Add(_chkPlaylistFolder);
+
+		p.Controls.Add(flowCheckboxes);
 
 		return p;
 	}
@@ -796,13 +839,61 @@ internal sealed class DownloaderPanel : UserControl
 		return b;
 	}
 
+	private sealed class CyberColorTable : ProfessionalColorTable
+	{
+		public override Color ToolStripDropDownBackground => Color.FromArgb(14, 21, 37); // #0e1525
+		public override Color ImageMarginGradientBegin => Color.FromArgb(14, 21, 37);
+		public override Color ImageMarginGradientMiddle => Color.FromArgb(14, 21, 37);
+		public override Color ImageMarginGradientEnd => Color.FromArgb(14, 21, 37);
+		public override Color MenuBorder => Color.FromArgb(32, 50, 82); // #203252
+		public override Color MenuItemBorder => Color.FromArgb(56, 189, 248); // #38bdf8 霓虹青高亮边框
+		public override Color MenuItemSelected => Color.FromArgb(30, 58, 95); // #1e3a5f 科技感选中背景
+		public override Color MenuItemSelectedGradientBegin => Color.FromArgb(30, 58, 95);
+		public override Color MenuItemSelectedGradientEnd => Color.FromArgb(30, 58, 95);
+		public override Color MenuStripGradientBegin => Color.FromArgb(14, 21, 37);
+		public override Color MenuStripGradientEnd => Color.FromArgb(14, 21, 37);
+		public override Color SeparatorDark => Color.FromArgb(32, 50, 82);
+		public override Color SeparatorLight => Color.FromArgb(15, 23, 42);
+	}
+
+	private sealed class CyberDarkMenuRenderer : ToolStripProfessionalRenderer
+	{
+		public CyberDarkMenuRenderer() : base(new CyberColorTable()) { }
+
+		protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+		{
+			// 确保无论普通还是鼠标悬停(Hover)状态，文字永远保持高对比度亮白或高亮青色，绝不被系统反色冲淡
+			if (e.Item.Selected)
+			{
+				e.TextColor = Color.FromArgb(241, 245, 249); // 高对比度极光亮白
+			}
+			else
+			{
+				e.TextColor = Color.FromArgb(226, 232, 240);
+			}
+			base.OnRenderItemText(e);
+		}
+
+		protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+		{
+			e.ArrowColor = e.Item.Selected ? Color.FromArgb(56, 189, 248) : Color.FromArgb(148, 163, 184);
+			base.OnRenderArrow(e);
+		}
+	}
+
 	private ContextMenuStrip CreateTableContextMenu()
 	{
 		ContextMenuStrip cms = new ContextMenuStrip();
-		cms.BackColor = CardAltBg;
-		cms.ForeColor = Color.White;
+		var renderer = new CyberDarkMenuRenderer();
+		cms.Renderer = renderer;
+		cms.BackColor = Color.FromArgb(14, 21, 37);
+		cms.ForeColor = Color.FromArgb(241, 245, 249);
+		cms.Font = new Font("Microsoft YaHei UI", 9f);
 
 		var itemSplitScreen = new ToolStripMenuItem("▦ 发送此视频至【视频拼屏】");
+		itemSplitScreen.DropDown.Renderer = renderer;
+		itemSplitScreen.DropDown.BackColor = Color.FromArgb(14, 21, 37);
+		itemSplitScreen.DropDown.ForeColor = Color.FromArgb(241, 245, 249);
 		itemSplitScreen.DropDownItems.Add("自动填充到当前选中区域", null, (s, e) => SendSelectedToSplitScreen(-1));
 		itemSplitScreen.DropDownItems.Add("指定分配至【区域 1】", null, (s, e) => SendSelectedToSplitScreen(0));
 		itemSplitScreen.DropDownItems.Add("指定分配至【区域 2】", null, (s, e) => SendSelectedToSplitScreen(1));
@@ -1054,21 +1145,6 @@ internal sealed class DownloaderPanel : UserControl
 		int successCount = _items.Count(i => i.Status == "成功" || i.Status.Contains("已完成"));
 		LogMessage($"[任务全部结束] 成功: {successCount} / 共: {_items.Count}");
 		_statusLabel.Text = $"视频下载任务结束：成功 {successCount} 个文件。可随时一键发送至【视频拼屏】或【视频剪辑】。";
-
-		if (successCount > 0)
-		{
-			var dlg = MessageBox.Show(
-				this,
-				$"下载完成！共成功下载 {successCount} 个视频。\n\n是否立即一键将下载的视频发送到【视频拼屏】工作台？",
-				"下载成功",
-				MessageBoxButtons.YesNo,
-				MessageBoxIcon.Question);
-
-			if (dlg == DialogResult.Yes)
-			{
-				SendDownloadedToSplitScreen();
-			}
-		}
 	}
 
 	private void StopDownload()
