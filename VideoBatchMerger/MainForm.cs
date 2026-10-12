@@ -40,7 +40,18 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.7.2";
+	public const string CurrentAppVersion = "8.8.0";
+
+	public const int WorkspaceMerge = 0;
+	public const int WorkspaceSplit = 1;
+	public const int WorkspaceWatermark = 2;
+	public const int WorkspaceImageVideo = 3;
+	public const int WorkspaceDownload = 4;
+	public const int WorkspaceSplitScreen = 5;
+	public const int WorkspaceCutEdit = 6;
+	public const int WorkspaceDeliver = 7;
+
+	private VideoBatchMerger.Downloader.DownloaderPanel _downloaderPanel;
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
@@ -873,6 +884,7 @@ internal sealed class MainForm : Form
 	private SplitScreenLayoutDefinition _activeSplitScreenLayout;
 
 	private int _splitScreenSelectedRegion;
+	internal int SplitScreenSelectedRegion => _splitScreenSelectedRegion;
 
 	private TabControl _splitScreenPresetTabs;
 
@@ -1116,9 +1128,10 @@ internal sealed class MainForm : Form
 		_tabs.TabPages.Add(BuildSplitTab());        // 1
 		_tabs.TabPages.Add(BuildWatermarkTab());    // 2
 		_tabs.TabPages.Add(BuildImageVideoTab());   // 3
-		_tabs.TabPages.Add(BuildSplitScreenTab());  // 4
-		_tabs.TabPages.Add(BuildCutEditTab());      // 5
-		_tabs.TabPages.Add(BuildDeliverTab());      // 6
+		_tabs.TabPages.Add(BuildDownloadTab());     // 4 (视频下载)
+		_tabs.TabPages.Add(BuildSplitScreenTab());  // 5
+		_tabs.TabPages.Add(BuildCutEditTab());      // 6
+		_tabs.TabPages.Add(BuildDeliverTab());      // 7
 		tableLayoutPanel.Controls.Add(_tabs, 0, 0);
 
 		_bottomNavBar = new Panel();
@@ -1181,10 +1194,10 @@ internal sealed class MainForm : Form
 		navCenter.Margin = new Padding(0);
 
 		_navButtons.Clear();
-		navCenter.Controls.Add(MakeNavButton("📦 批量合并", 0));
-		navCenter.Controls.Add(MakeNavButton("✂️ 视频拆分", 1));
-		navCenter.Controls.Add(MakeNavButton("💧 水印处理", 2));
-		navCenter.Controls.Add(MakeNavButton("🖼️ 图片成片", 3));
+		navCenter.Controls.Add(MakeNavButton("📦 批量合并", WorkspaceMerge));
+		navCenter.Controls.Add(MakeNavButton("✂️ 视频拆分", WorkspaceSplit));
+		navCenter.Controls.Add(MakeNavButton("💧 水印处理", WorkspaceWatermark));
+		navCenter.Controls.Add(MakeNavButton("🖼️ 图片成片", WorkspaceImageVideo));
 
 		Panel navDivider = new Panel();
 		navDivider.Width = 1;
@@ -1193,9 +1206,10 @@ internal sealed class MainForm : Form
 		navDivider.BackColor = BorderColor;
 		navCenter.Controls.Add(navDivider);
 
-		navCenter.Controls.Add(MakeNavButton("▦ 视频拼屏", 4));
-		navCenter.Controls.Add(MakeNavButton("🎬 视频剪辑", 5));
-		navCenter.Controls.Add(MakeNavButton("🚀 导出交付", 6));
+		navCenter.Controls.Add(MakeNavButton("📥 视频下载", WorkspaceDownload));
+		navCenter.Controls.Add(MakeNavButton("▦ 视频拼屏", WorkspaceSplitScreen));
+		navCenter.Controls.Add(MakeNavButton("🎬 视频剪辑", WorkspaceCutEdit));
+		navCenter.Controls.Add(MakeNavButton("🚀 导出交付", WorkspaceDeliver));
 		_bottomNavBar.Controls.Add(navCenter);
 
 		void CenterNavButtons()
@@ -1236,12 +1250,12 @@ internal sealed class MainForm : Form
 		return btn;
 	}
 
-	private void SwitchToWorkspace(int index)
+	internal void SwitchToWorkspace(int index)
 	{
 		if (_tabs == null || index < 0 || index >= _tabs.TabPages.Count) return;
 		_tabs.SelectedIndex = index;
 		UpdateNavButtonsActiveState();
-		if (index == 6)
+		if (index == WorkspaceDeliver)
 		{
 			UpdateDeliverSummary();
 			InitOrRefreshDeliverPreview();
@@ -2497,7 +2511,7 @@ internal sealed class MainForm : Form
 		goToDeliverBtn.Location = new Point(tabPage.ClientSize.Width - 282, 6);
 		goToDeliverBtn.Click += delegate
 		{
-			SwitchToWorkspace(6);
+			SwitchToWorkspace(WorkspaceDeliver);
 		};
 		topBar.Controls.Add(goToDeliverBtn);
 		topBar.Resize += delegate
@@ -4487,6 +4501,33 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		return tabPage;
 	}
 
+	private TabPage BuildDownloadTab()
+	{
+		TabPage tabPage = new TabPage("视频下载");
+		tabPage.BackColor = CanvasColor;
+		_downloaderPanel = new VideoBatchMerger.Downloader.DownloaderPanel(this);
+		tabPage.Controls.Add(_downloaderPanel);
+		return tabPage;
+	}
+
+	internal void AddVideosToMergeList(IEnumerable<string> paths)
+	{
+		if (paths == null) return;
+		bool anyAdded = false;
+		foreach (string p in paths)
+		{
+			if (File.Exists(p) && !_videos.Contains(p))
+			{
+				_videos.Add(p);
+				anyAdded = true;
+			}
+		}
+		if (anyAdded)
+		{
+			UpdateListView(null);
+		}
+	}
+
 	private TabPage BuildDeliverTab()
 	{
 		TabPage tabPage = new TabPage("导出交付");
@@ -5058,7 +5099,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			if (!string.IsNullOrEmpty(target) && File.Exists(target))
 			{
 				LoadVideoIntoCutEditor(target, clearExisting: true);
-				SwitchToWorkspace(5);
+				SwitchToWorkspace(WorkspaceCutEdit);
 			}
 		};
 		histBtnRow.Controls.Add(_deliverSendBackToCutButton);
@@ -10458,7 +10499,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	private void StartExportEditedVideo()
 	{
-		SwitchToWorkspace(6);
+		SwitchToWorkspace(WorkspaceDeliver);
 		StartDeliverExport();
 	}
 
@@ -10500,7 +10541,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		if (string.IsNullOrEmpty(_cutEditSourcePath) || !File.Exists(_cutEditSourcePath))
 		{
 			MessageBox.Show(this, "尚未载入视频素材，请先在【视频剪辑】工作台中载入并修剪视频！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-			SwitchToWorkspace(5);
+			SwitchToWorkspace(WorkspaceCutEdit);
 			return;
 		}
 
@@ -10969,7 +11010,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 	{
 		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
 		AddSplitScreenVideoPaths(new string[] { path }, _splitScreenSelectedRegion);
-		SwitchToWorkspace(4);
+		SwitchToWorkspace(WorkspaceSplitScreen);
 		MessageBox.Show(this, $"已将成片成功加载至【视频拼屏】工作台（区域 {_splitScreenSelectedRegion + 1}）！", "联动成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
 	}
 
@@ -10981,7 +11022,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			_videos.Add(path);
 			UpdateListView(null);
 		}
-		SwitchToWorkspace(0);
+		SwitchToWorkspace(WorkspaceMerge);
 		MessageBox.Show(this, "已将成片成功添加至【批量合并】素材库！", "联动成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
 	}
 
@@ -11006,7 +11047,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			return;
 		}
 		LoadVideoIntoCutEditor(target, clearExisting: true);
-		SwitchToWorkspace(5);
+		SwitchToWorkspace(WorkspaceCutEdit);
 	}
 
 	private void DeliverMediaElement_MediaOpened(object sender, System.Windows.RoutedEventArgs e)
@@ -11563,7 +11604,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			_splitScreenStatusLabel.Text = "✅ 拼屏画面合成完毕，已直接载入视频剪辑工作台！";
 			LoadVideoIntoCutEditor(tempComposite, clearExisting: true);
-			SwitchToWorkspace(5);
+			SwitchToWorkspace(WorkspaceCutEdit);
 		}
 		else
 		{
@@ -12887,7 +12928,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		};
 		_tabs.SelectedIndexChanged += delegate
 		{
-			if (_tabs.SelectedIndex != 5 && _cutEditIsPlaying && _cutEditMediaElement != null)
+			if (_tabs.SelectedIndex != WorkspaceCutEdit && _cutEditIsPlaying && _cutEditMediaElement != null)
 			{
 				try
 				{
@@ -12898,7 +12939,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				}
 				catch { }
 			}
-			if (_tabs.SelectedIndex != 6 && _deliverIsPlaying && _deliverMediaElement != null)
+			if (_tabs.SelectedIndex != WorkspaceDeliver && _deliverIsPlaying && _deliverMediaElement != null)
 			{
 				try
 				{
@@ -12909,7 +12950,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				}
 				catch { }
 			}
-			if (_tabs.SelectedIndex == 6)
+			if (_tabs.SelectedIndex == WorkspaceDeliver)
 			{
 				UpdateDeliverSummary();
 				InitOrRefreshDeliverPreview();
@@ -13837,7 +13878,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 	}
 
-	private void AddSplitScreenVideoPaths(IEnumerable<string> paths, int region)
+	internal void AddSplitScreenVideoPaths(IEnumerable<string> paths, int region)
 	{
 		if (_isRunning || region < 0 || region >= _splitScreenRegionVideos.Length)
 		{
@@ -17690,29 +17731,29 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 	{
 		if (!_isRunning && e.Data.GetData(DataFormats.FileDrop) is string[] paths)
 		{
-			if (sender == _splitScreenRegionList || sender == _splitScreenPreview || (_tabs != null && _tabs.SelectedIndex == 4))
+			if (sender == _splitScreenRegionList || sender == _splitScreenPreview || (_tabs != null && _tabs.SelectedIndex == WorkspaceSplitScreen))
 			{
 				AddSplitScreenVideoPaths(paths, _splitScreenSelectedRegion);
 			}
-			else if (sender == _cutEditMediaPoolList || sender == _cutEditPreviewBox || (_tabs != null && _tabs.SelectedIndex == 5))
+			else if (sender == _cutEditMediaPoolList || sender == _cutEditPreviewBox || (_tabs != null && _tabs.SelectedIndex == WorkspaceCutEdit))
 			{
 				AddCutEditMediaPoolPaths(paths);
 			}
-			else if (sender == _slideshowImageList || (_tabs != null && _tabs.SelectedIndex == 3))
+			else if (sender == _slideshowImageList || (_tabs != null && _tabs.SelectedIndex == WorkspaceImageVideo))
 			{
 				AddSlideshowImagePaths(paths);
 			}
-			else if (sender == _watermarkSourceImageList || (_tabs != null && _tabs.SelectedIndex == 2 && _watermarkSourceTabs != null && _watermarkSourceTabs.SelectedIndex == 1))
+			else if (sender == _watermarkSourceImageList || (_tabs != null && _tabs.SelectedIndex == WorkspaceWatermark && _watermarkSourceTabs != null && _watermarkSourceTabs.SelectedIndex == 1))
 			{
 				AddWatermarkSourceImagePaths(paths);
 			}
-			else if (sender == _watermarkVideoList || (_tabs != null && _tabs.SelectedIndex == 2))
+			else if (sender == _watermarkVideoList || (_tabs != null && _tabs.SelectedIndex == WorkspaceWatermark))
 			{
 				AddWatermarkVideoPaths(paths);
 			}
 			else
 			{
-				AddPaths(paths, sender == _splitVideoList || (_tabs != null && _tabs.SelectedIndex == 1));
+				AddPaths(paths, sender == _splitVideoList || (_tabs != null && _tabs.SelectedIndex == WorkspaceSplit));
 			}
 		}
 	}
@@ -26664,7 +26705,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
 	{
-		if (_tabs != null && _tabs.SelectedIndex == 5)
+		if (_tabs != null && _tabs.SelectedIndex == WorkspaceCutEdit)
 		{
 			if (keyData == (Keys.Control | Keys.S))
 			{
@@ -26779,7 +26820,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				return true;
 			}
 		}
-		if (_tabs != null && _tabs.SelectedIndex == 6)
+		if (_tabs != null && _tabs.SelectedIndex == WorkspaceDeliver)
 		{
 			if (keyData == (Keys.Control | Keys.P))
 			{

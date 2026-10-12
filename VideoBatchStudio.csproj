@@ -18,5 +18,6 @@
   <ItemGroup />
   <ItemGroup>
     <Reference Include="System.Core" />
+    <Reference Include="System.Net.Http" />
   </ItemGroup>
 </Project>

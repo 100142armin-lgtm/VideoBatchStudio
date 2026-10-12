@@ -1,10 +1,12 @@
 {
-  "version": "8.7.2",
-  "releaseDate": "2026-10-04",
-  "title": "VideoBatchStudio V8.7.2 剪辑工作台独立监视器双行全功能底栏重构与主辅预览黑屏全面根治",
+  "version": "8.8.0",
+  "releaseDate": "2026-10-12",
+  "title": "VideoBatchStudio V8.8.0 全新全网多平台视频下载板块与一键直通拼屏/剪辑生态闭环",
   "changelog": [
-    "【剪辑独立监视器控件绝对不遮挡布局 (Pop-out Studio Direct 2-Row Control Bar 🖥️)】彻底根除 WinForms TrackBar 默认高度抢占导致的控件层叠覆盖 bug，重构独立监视器底栏为严格独立双行布局（第一行高灵敏度时间线与精准时间码，第二行播放暂停、-5s/-1s/+1s/+5s 微调、全屏及字幕高度微调拉杆），所有按钮 100% 永久可见、交互灵敏",
-    "【主辅预览无缝双画同显与黑屏根治 (Cut Edit Seamless Playback & Dual Display 🎬)】深度优化剪辑播放引擎与 WPF MediaElement 宿主生命周期，彻底修复弹出独立监视器后主窗口黑屏或播放无反应的问题，优化寻道抖动阈值避免重复 seek 卡顿，提供如丝顺滑的专业剪辑预览体验",
+    "【全新重磅板块：全网视频批量下载 (Video Downloader 📥)】新增专业视频下载工作台，前置于【视频拼屏】板块，支持 Facebook Reel、YouTube 常规/Shorts、TikTok 无水印、Google Drive 网盘双模直链加速等全平台高清批量下载",
+    "【一键直通视频拼屏 (One-Click Stream to Split Screen ▦)】下载完成后支持一键将素材智能依次分配至拼屏【区域 1/2/3/4】，自动无缝跳转并就绪排版预览；支持列表右键单视频定向指派区域，彻底打通素材流转闭环",
+    "【一键直通多轨剪辑与合并 (One-Click Stream to Cut Edit & Merge 🎬)】支持一键将下载的单条或批量视频直接推入【视频剪辑】多轨时间线或【批量合并】素材库，省去手动拖拽繁琐流程",
+    "【高清环境自动检测与一键配置 (Auto Component Environment 🛠️)】深度集成 yt-dlp、ffmpeg、ffprobe 黄金组合探查与一键安装能力，支持断点续传、已存在跳过、按平台分目录分类、并发线程与系统/自定义网络代理配置",
     "【弹出监视器音画硬件加速无缝接管 (Pop-out Video Sync & Fullscreen 🚀)】弹出监视器无缝接管主播放器硬件加速渲染链路，支持双击/快捷键全屏大屏监看、毫秒级精准寻道与音画同步对齐",
     "【企业级安全全面加固 (Security Hardened 🛡️)】全方位修复 CLI 命令参数注入、危险文件后缀拦截、网络跳转 URL 协议白名单限制与 concat 换行注入漏洞，全面通过严苛安全审核，分发无忧",
     "【时间线长短调节拉杆 (Timeline Zoom Slider 🔍)】剪辑时间线新增横向时间长短调节拉杆，支持 20%~600% 连续平滑缩放，配备 ➖/➕ 微调步进按钮及【⛶ 适合窗口】快捷对齐，支持 Ctrl/Alt + 滚轮以鼠标为中心精准缩放",
