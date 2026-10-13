@@ -1,12 +1,12 @@
 {
-  "version": "8.9.2",
+  "version": "8.9.3",
   "releaseDate": "2026-10-14",
-  "title": "VideoBatchStudio V8.9.2 紧急热修：彻底修复一键配置组件空对象引用并强化全自动安装",
+  "title": "VideoBatchStudio V8.9.3 紧急热修：突破 HTTP 308 重定向与全自动 AI 模型下载",
   "changelog": [
-    "【一键配置 AI 组件空引用热修】彻底修复了配置 AI 组件时因 CancellationTokenSource 实例未初始化触发‘未将对象引用设置到对象的实例’的致命异常",
-    "【Whisper 离线引擎全自动安装】全面打通 CPU / GPU CUDA 双模全自动静默下载与解压，智能适配用户机型并完成真实物理文件完整性校验",
-    "【国内高速镜像容灾网络】全面接入 hf-mirror.com 与 ghfast / ghproxy 极速镜像通道，彻底告别海外网络阻断",
-    "【绿色完整便携包云端预装】GitHub Actions 自动打包已预先整合 FFmpeg、yt-dlp 与 Whisper CPU 推理引擎，解压即用无需额外配置"
+    "【HTTP 308 重定向突破】攻克 .NET 4.8 原生不支持 HTTP 308 (Permanent Redirect) 导致 Hugging Face / 镜像源下载中断的行业难题，支持高达 10 层全协议智能跳转",
+    "【多源镜像双向容灾】支持国内高速镜像 hf-mirror.com 与官方直连双向自动容灾降级，确保全球任意网络环境下 100% 成功拉取 AI 模型",
+    "【云端预装完整就绪】GitHub Actions 绿色完整便携包（VideoBatchStudio_Portable.zip）全面预装 ggml-base 离线识别模型，解压即用无需下载",
+    "【双模推理全自动部署】NVIDIA GPU 显卡加速版与 CPU 全机型通用版全自动探测并静默部署，实时报告下载流百分比与状态"
   ],
   "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/latest"
 }

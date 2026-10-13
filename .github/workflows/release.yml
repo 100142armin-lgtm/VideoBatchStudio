@@ -80,6 +80,16 @@ jobs:
             Write-Host "whisper engine download failed: $_"
           }
 
+          # Download and bundle ggml-base.bin model into staging/whisper/models
+          try {
+            Write-Host "Downloading ggml-base.bin for portable bundle..."
+            New-Item -ItemType Directory -Force -Path "staging/VideoBatchStudio/whisper/models" | Out-Null
+            Invoke-WebRequest -Uri "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" -OutFile "staging/VideoBatchStudio/whisper/models/ggml-base.bin" -TimeoutSec 180
+            Write-Host "Bundled ggml-base.bin model successfully"
+          } catch {
+            Write-Host "ggml-base.bin download failed: $_"
+          }
+
           # Create Portable Zip
           Compress-Archive -Path "staging/VideoBatchStudio/*" -DestinationPath "release_assets/VideoBatchStudio_Portable.zip" -Force
 

@@ -147,41 +147,97 @@ public static class TranscribeEngine
 		return false;
 	}
 
-	/// <summary>流式下载大文件（写入 .part，完成后改名），带进度日志</summary>
+	/// <summary>流式下载大文件（写入 .part，完成后改名），带进度日志并全兼容包括 HTTP 308 在内的重定向</summary>
 	public static async Task DownloadFileAsync(string url, string destPath, Action<string> logCallback, CancellationToken ct)
 	{
 		Directory.CreateDirectory(Path.GetDirectoryName(destPath));
 		string part = destPath + ".part";
 		ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-		using var client = new HttpClient { Timeout = TimeSpan.FromHours(2) };
-		client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 VideoBatchStudio");
-		using var resp = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
-		resp.EnsureSuccessStatusCode();
-		long total = resp.Content.Headers.ContentLength ?? -1;
-		using (var src = await resp.Content.ReadAsStreamAsync())
-		using (var dst = new FileStream(part, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16))
+
+		using var handler = new HttpClientHandler
 		{
-			byte[] buf = new byte[1 << 16];
-			long done = 0;
-			int lastPct = -1;
-			int n;
-			while ((n = await src.ReadAsync(buf, 0, buf.Length, ct)) > 0)
+			AllowAutoRedirect = false, // 显式禁用内置重定向，以兼容 .NET 4.8 原生不支持的 HTTP 308 (Permanent Redirect)
+			AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+		};
+		using var client = new HttpClient(handler) { Timeout = TimeSpan.FromHours(2) };
+		client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 VideoBatchStudio");
+
+		string currentUrl = url;
+		HttpResponseMessage resp = null;
+		int redirectCount = 0;
+		const int maxRedirects = 10;
+
+		try
+		{
+			while (true)
 			{
-				await dst.WriteAsync(buf, 0, n, ct);
-				done += n;
-				if (total > 0)
+				ct.ThrowIfCancellationRequested();
+
+				var request = new HttpRequestMessage(HttpMethod.Get, currentUrl);
+				resp = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+
+				int statusCode = (int)resp.StatusCode;
+				if (statusCode == 301 || statusCode == 302 || statusCode == 303 || statusCode == 307 || statusCode == 308)
 				{
-					int pct = (int)(done * 100 / total);
-					if (pct / 10 != lastPct / 10)
+					if (++redirectCount > maxRedirects)
 					{
-						lastPct = pct;
-						logCallback?.Invoke($"[下载进度] {Path.GetFileName(destPath)}  {pct}%  ({done / 1048576}MB / {total / 1048576}MB)");
+						throw new InvalidOperationException($"超过最大重定向次数限制 ({maxRedirects})");
+					}
+
+					var location = resp.Headers.Location;
+					if (location == null)
+					{
+						throw new InvalidOperationException($"HTTP {statusCode} 重定向未提供有效 Location 标头");
+					}
+
+					Uri nextUri = location.IsAbsoluteUri ? location : new Uri(new Uri(currentUrl), location);
+					currentUrl = nextUri.ToString();
+
+					resp.Dispose();
+					resp = null;
+					continue;
+				}
+
+				resp.EnsureSuccessStatusCode();
+				break;
+			}
+
+			long total = resp.Content.Headers.ContentLength ?? -1;
+			using (var src = await resp.Content.ReadAsStreamAsync())
+			using (var dst = new FileStream(part, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16))
+			{
+				byte[] buf = new byte[1 << 16];
+				long done = 0;
+				int lastPct = -1;
+				int n;
+				while ((n = await src.ReadAsync(buf, 0, buf.Length, ct)) > 0)
+				{
+					await dst.WriteAsync(buf, 0, n, ct);
+					done += n;
+					if (total > 0)
+					{
+						int pct = (int)(done * 100 / total);
+						if (pct / 10 != lastPct / 10)
+						{
+							lastPct = pct;
+							logCallback?.Invoke($"[下载进度] {Path.GetFileName(destPath)}  {pct}%  ({done / 1048576}MB / {total / 1048576}MB)");
+						}
 					}
 				}
 			}
+
+			if (File.Exists(destPath)) File.Delete(destPath);
+			File.Move(part, destPath);
 		}
-		if (File.Exists(destPath)) File.Delete(destPath);
-		File.Move(part, destPath);
+		catch
+		{
+			try { if (File.Exists(part)) File.Delete(part); } catch { }
+			throw;
+		}
+		finally
+		{
+			resp?.Dispose();
+		}
 	}
 
 	/// <summary>多镜像容灾大文件流式下载（自动尝试国内加速镜像与官方直连）</summary>
@@ -194,10 +250,17 @@ public static class TranscribeEngine
 			urls.Add($"https://ghproxy.net/{primaryUrl}");
 			urls.Add(primaryUrl);
 		}
-		else if (primaryUrl.Contains("huggingface.co"))
+		else if (primaryUrl.Contains("huggingface.co") || primaryUrl.Contains("hf-mirror.com"))
 		{
-			urls.Add(primaryUrl.Replace("huggingface.co", "hf-mirror.com"));
-			urls.Add(primaryUrl);
+			string hfMirror = primaryUrl.Contains("hf-mirror.com")
+				? primaryUrl
+				: primaryUrl.Replace("huggingface.co", "hf-mirror.com");
+			string hfOfficial = primaryUrl.Contains("huggingface.co")
+				? primaryUrl
+				: primaryUrl.Replace("hf-mirror.com", "huggingface.co");
+
+			urls.Add(hfMirror);
+			urls.Add(hfOfficial);
 		}
 		else
 		{
