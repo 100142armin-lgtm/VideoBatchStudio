@@ -862,6 +862,7 @@ internal sealed class TranscribePanel : UserControl
 	{
 		_btnInstallModel.Enabled = false;
 		_btnInstallModel.Text = "⏳ 正在配置 AI 组件...";
+		using var installCts = new CancellationTokenSource();
 		try
 		{
 			LogMessage("========================================");
@@ -876,13 +877,13 @@ internal sealed class TranscribePanel : UserControl
 				if (hasNvidia)
 				{
 					LogMessage("[引擎配置] 检测到系统配备 NVIDIA 独立显卡，正在优先拉取 GPU CUDA 硬件加速内核...");
-					engineInstalled = await TranscribeEngine.InstallCudaBuildAsync(LogMessage, _cts.Token);
+					engineInstalled = await TranscribeEngine.InstallCudaBuildAsync(LogMessage, installCts.Token);
 				}
 
 				if (!engineInstalled)
 				{
 					LogMessage("[引擎配置] 正在拉取通用 CPU 版 Whisper 离线推理引擎 (全机型免显卡兼容)...");
-					engineInstalled = await TranscribeEngine.InstallCpuBuildAsync(LogMessage, _cts.Token);
+					engineInstalled = await TranscribeEngine.InstallCpuBuildAsync(LogMessage, installCts.Token);
 				}
 
 				if (!engineInstalled)
@@ -902,7 +903,7 @@ internal sealed class TranscribePanel : UserControl
 			if (string.IsNullOrEmpty(baseModel) && string.IsNullOrEmpty(smallModel))
 			{
 				LogMessage("[模型配置] 正在从高速镜像拉取 ggml-base.bin 多语种基础模型 (约 141MB，英/葡/西全语种)...");
-				bool modelOk = await TranscribeEngine.DownloadModelAsync("base", LogMessage, _cts.Token);
+				bool modelOk = await TranscribeEngine.DownloadModelAsync("base", LogMessage, installCts.Token);
 				if (!modelOk)
 				{
 					throw new Exception("AI 语音转录模型下载失败，请检查网络连接后重试。");
@@ -1036,6 +1037,7 @@ internal sealed class TranscribePanel : UserControl
 	private async Task StartTranscribeProcessAsync()
 	{
 		if (_isProcessing) return;
+		_cts = new CancellationTokenSource();
 
 		string whisperCli = TranscribeEngine.FindWhisperCliPath();
 		if (string.IsNullOrEmpty(whisperCli) || !File.Exists(whisperCli))

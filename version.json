@@ -1,12 +1,12 @@
 {
-  "version": "8.9.1",
+  "version": "8.9.2",
   "releaseDate": "2026-10-14",
-  "title": "VideoBatchStudio V8.9.1 紧急加固：一键自动安装 Whisper 离线推理引擎与国内极速镜像源",
+  "title": "VideoBatchStudio V8.9.2 紧急热修：彻底修复一键配置组件空对象引用并强化全自动安装",
   "changelog": [
-    "【一键配置 AI 组件彻底修复】修复了仅下载模型而未下载 whisper-cli 引擎内核导致的‘配置完成但无法使用’缺陷，全面接入 CPU/GPU 双模全自动安装与验证机制",
-    "【国内高速镜像源容灾网络】为 GitHub Releases 与 HuggingFace 模型全面配置国内高速镜像（hf-mirror / ghfast / ghproxy）双向容灾，免除网络超时与下载失败",
-    "【绿色完整便携包云端预装】GitHub Actions 自动打包构建已预先整合 FFmpeg、yt-dlp 与 Whisper CPU 推理引擎，解压即用无需额外配置",
-    "【智能引导与缺失提示】转录与下载启动前精准检查所有缺失的底层二进制依赖，提供一键引导安装与明确使用建议"
+    "【一键配置 AI 组件空引用热修】彻底修复了配置 AI 组件时因 CancellationTokenSource 实例未初始化触发‘未将对象引用设置到对象的实例’的致命异常",
+    "【Whisper 离线引擎全自动安装】全面打通 CPU / GPU CUDA 双模全自动静默下载与解压，智能适配用户机型并完成真实物理文件完整性校验",
+    "【国内高速镜像容灾网络】全面接入 hf-mirror.com 与 ghfast / ghproxy 极速镜像通道，彻底告别海外网络阻断",
+    "【绿色完整便携包云端预装】GitHub Actions 自动打包已预先整合 FFmpeg、yt-dlp 与 Whisper CPU 推理引擎，解压即用无需额外配置"
   ],
   "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/latest"
 }
