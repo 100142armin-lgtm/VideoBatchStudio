@@ -20,3 +20,6 @@ release_assets/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Third-party offline binary runtime & models
+whisper/

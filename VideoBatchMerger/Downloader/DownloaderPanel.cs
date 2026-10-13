@@ -195,8 +195,14 @@ internal sealed class DownloaderPanel : UserControl
 		};
 
 		// UI 刷新定时器
-		_refreshTimer = new System.Windows.Forms.Timer { Interval = 250 };
-		_refreshTimer.Tick += (s, e) => UpdateListViewRows();
+		_refreshTimer = new System.Windows.Forms.Timer { Interval = 350 };
+		_refreshTimer.Tick += (s, e) =>
+		{
+			if (_isDownloading)
+			{
+				UpdateListViewRows();
+			}
+		};
 		_refreshTimer.Start();
 
 		ResumeLayout(false);
@@ -603,6 +609,7 @@ internal sealed class DownloaderPanel : UserControl
 			HeaderStyle = ColumnHeaderStyle.Nonclickable,
 			Font = new Font("Microsoft YaHei UI", 9f)
 		};
+		SetDoubleBuffered(_listView);
 
 		_listView.Columns.Add("#", 38);
 		_listView.Columns.Add("平台", 92);
@@ -1208,7 +1215,7 @@ internal sealed class DownloaderPanel : UserControl
 		for (int i = 0; i < _items.Count; i++)
 		{
 			var item = _items[i];
-			ListViewItem lvi = null;
+			ListViewItem lvi;
 			if (i < _listView.Items.Count)
 			{
 				lvi = _listView.Items[i];
@@ -1227,31 +1234,62 @@ internal sealed class DownloaderPanel : UserControl
 			}
 
 			lvi.Tag = item;
-			lvi.SubItems[0].Text = item.Index.ToString();
-			lvi.SubItems[1].Text = item.Platform;
-			lvi.SubItems[2].Text = item.SourceType;
-			lvi.SubItems[3].Text = item.Title;
-			lvi.SubItems[4].Text = string.IsNullOrEmpty(item.FileSizeStr) ? item.DurationStr : $"{item.DurationStr} / {item.FileSizeStr}";
-			lvi.SubItems[5].Text = $"{item.ProgressPercent}%";
-			lvi.SubItems[6].Text = item.SpeedStr;
-			lvi.SubItems[7].Text = item.Status;
+			SetSubItemText(lvi, 0, item.Index.ToString());
+			SetSubItemText(lvi, 1, item.Platform);
+			SetSubItemText(lvi, 2, item.SourceType);
+			SetSubItemText(lvi, 3, item.Title);
+			string durOrSize = string.IsNullOrEmpty(item.FileSizeStr) ? item.DurationStr : $"{item.DurationStr} / {item.FileSizeStr}";
+			SetSubItemText(lvi, 4, durOrSize);
+			SetSubItemText(lvi, 5, $"{item.ProgressPercent}%");
+			SetSubItemText(lvi, 6, item.SpeedStr);
+			SetSubItemText(lvi, 7, item.Status);
 
+			Color targetColor = TextPrimary;
 			if (item.Status == "成功" || item.Status.Contains("已完成"))
-				lvi.ForeColor = EmeraldNeon;
+				targetColor = EmeraldNeon;
 			else if (item.Status.Contains("失败") || item.Status.Contains("异常"))
-				lvi.ForeColor = Color.FromArgb(248, 113, 113);
+				targetColor = Color.FromArgb(248, 113, 113);
 			else if (item.Status.Contains("下载中"))
-				lvi.ForeColor = CyanNeon;
-			else
-				lvi.ForeColor = TextPrimary;
+				targetColor = CyanNeon;
+
+			if (lvi.ForeColor != targetColor) lvi.ForeColor = targetColor;
 		}
 
 		if (_items.Count > 0)
 		{
 			int avgPct = (int)_items.Average(it => it.ProgressPercent);
-			_progressBar.Value = Math.Max(0, Math.Min(100, avgPct));
-			_progressTextLabel.Text = $"总进度: {avgPct}% ({_items.Count(it => it.Status == "成功" || it.Status.Contains("已完成"))}/{_items.Count})";
+			int clamped = Math.Max(0, Math.Min(100, avgPct));
+			if (_progressBar.Value != clamped) _progressBar.Value = clamped;
+			string progText = $"总进度: {avgPct}% ({_items.Count(it => it.Status == "成功" || it.Status.Contains("已完成"))}/{_items.Count})";
+			if (_progressTextLabel.Text != progText) _progressTextLabel.Text = progText;
 		}
+	}
+
+	private static void SetSubItemText(ListViewItem item, int subIndex, string text)
+	{
+		if (item == null || subIndex < 0) return;
+		while (item.SubItems.Count <= subIndex)
+		{
+			item.SubItems.Add(string.Empty);
+		}
+		if (item.SubItems[subIndex].Text != text)
+		{
+			item.SubItems[subIndex].Text = text;
+		}
+	}
+
+	public static void SetDoubleBuffered(Control control)
+	{
+		if (control == null) return;
+		try
+		{
+			typeof(Control).InvokeMember("DoubleBuffered",
+				System.Reflection.BindingFlags.SetProperty |
+				System.Reflection.BindingFlags.Instance |
+				System.Reflection.BindingFlags.NonPublic,
+				null, control, new object[] { true });
+		}
+		catch { }
 	}
 
 	private void LogMessage(string msg)

@@ -55,7 +55,7 @@ internal sealed class MainForm : Form
 	private VideoBatchMerger.Downloader.DownloaderPanel _downloaderPanel;
 	private VideoBatchMerger.Transcriber.TranscribePanel _transcribePanel;
 	private Button _checkUpdateButton;
-	private Button _themeToggleButton;
+	private Button _themeToggleButton = null;
 	private readonly List<Button> _navButtons = new List<Button>();
 	private readonly Dictionary<Button, int> _navButtonTabs = new Dictionary<Button, int>();
 	private Panel _cutEditVideoHostPanel;
@@ -761,7 +761,7 @@ internal sealed class MainForm : Form
 
 	private OutputFrameControls _watermarkOutputFrameControls;
 
-	private Button _globalResetButton;
+	private Button _globalResetButton = null;
 
 	private BgmControls _mergeBgm;
 
@@ -1147,15 +1147,16 @@ internal sealed class MainForm : Form
 
 		FlowLayoutPanel navRight = new FlowLayoutPanel();
 		navRight.Dock = DockStyle.Right;
-		navRight.AutoSize = true;
-		navRight.FlowDirection = FlowDirection.LeftToRight;
+		navRight.AutoSize = false;
 		navRight.WrapContents = false;
-		navRight.Padding = new Padding(0, 7, 16, 7);
+		navRight.FlowDirection = FlowDirection.LeftToRight;
+		navRight.Padding = new Padding(0, 11, 14, 11);
 		navRight.Margin = new Padding(0);
 
-		_checkUpdateButton = MakeButton("🔔 检查更新", 108);
-		_checkUpdateButton.Height = 36;
-		_checkUpdateButton.Margin = new Padding(0, 0, 8, 0);
+		_checkUpdateButton = MakeButton("🔔 检查更新", 80);
+		_checkUpdateButton.Height = 28;
+		_checkUpdateButton.Font = new Font(Font.FontFamily, 8.25f);
+		_checkUpdateButton.Margin = new Padding(0);
 		_checkUpdateButton.Click += delegate
 		{
 			UpdateChecker.CheckForUpdatesAsync(this, CurrentAppVersion, isManual: true);
@@ -1163,27 +1164,7 @@ internal sealed class MainForm : Form
 		ToolTip updateTip = new ToolTip();
 		updateTip.SetToolTip(_checkUpdateButton, "检查最新版本与团队功能更新");
 		navRight.Controls.Add(_checkUpdateButton);
-
-		_themeToggleButton = MakeButton(_isDarkMode ? "🌙 暗黑模式" : "☀️ 日间模式", 112);
-		_themeToggleButton.Tag = "accent";
-		_themeToggleButton.Height = 36;
-		_themeToggleButton.Margin = new Padding(0, 0, 8, 0);
-		_themeToggleButton.Click += delegate
-		{
-			_isDarkMode = !_isDarkMode;
-			UpdateThemeToggleButton();
-			ApplyThemeToWholeApp();
-			SaveUserSettings();
-		};
-		ToolTip headerTip = new ToolTip();
-		headerTip.SetToolTip(_themeToggleButton, "切换白天 / 暗黑界面模式（当前模式会自动保存）");
-		navRight.Controls.Add(_themeToggleButton);
-
-		_globalResetButton = MakeButton("重置全部设置", 116);
-		_globalResetButton.Tag = "danger";
-		_globalResetButton.Height = 36;
-		_globalResetButton.Margin = new Padding(0);
-		navRight.Controls.Add(_globalResetButton);
+		navRight.Width = navRight.PreferredSize.Width;
 		_bottomNavBar.Controls.Add(navRight);
 
 		FlowLayoutPanel navCenter = new FlowLayoutPanel();
@@ -1203,7 +1184,7 @@ internal sealed class MainForm : Form
 		Panel navDivider = new Panel();
 		navDivider.Width = 1;
 		navDivider.Height = 24;
-		navDivider.Margin = new Padding(8, 6, 8, 6);
+		navDivider.Margin = new Padding(6, 4, 6, 4);
 		navDivider.BackColor = BorderColor;
 		navCenter.Controls.Add(navDivider);
 
@@ -1218,8 +1199,14 @@ internal sealed class MainForm : Form
 		{
 			if (_bottomNavBar.ClientSize.Width > 0 && navCenter.PreferredSize.Width > 0)
 			{
-				int x = (_bottomNavBar.ClientSize.Width - navCenter.PreferredSize.Width) / 2;
-				navCenter.Location = new Point(Math.Max(10, x), 0);
+				navRight.Width = navRight.PreferredSize.Width;
+				int rightWidth = navRight.Width;
+				int centerWidth = navCenter.PreferredSize.Width;
+				int idealX = (_bottomNavBar.ClientSize.Width - centerWidth) / 2;
+				int maxX = _bottomNavBar.ClientSize.Width - rightWidth - centerWidth - 8;
+				int finalX = Math.Max(6, Math.Min(idealX, maxX));
+				navCenter.Location = new Point(finalX, Math.Max(0, (_bottomNavBar.ClientSize.Height - navCenter.PreferredSize.Height) / 2));
+				navRight.BringToFront();
 			}
 		}
 
@@ -1240,9 +1227,10 @@ internal sealed class MainForm : Form
 
 	private Button MakeNavButton(string text, int tabIndex)
 	{
-		Button btn = MakeButton(text, 116);
-		btn.Height = 36;
-		btn.Margin = new Padding(0, 0, 6, 0);
+		Button btn = MakeButton(text, 96);
+		btn.Height = 33;
+		btn.Font = new Font(Font.FontFamily, 8.75f);
+		btn.Margin = new Padding(0, 0, 5, 0);
 		btn.Tag = (tabIndex == (_tabs?.SelectedIndex ?? 0)) ? "nav-active" : "nav";
 		btn.Click += delegate
 		{
@@ -17556,10 +17544,13 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			CancelMerge();
 		};
-		_globalResetButton.Click += delegate
+		if (_globalResetButton != null)
 		{
-			ResetAllSettings();
-		};
+			_globalResetButton.Click += delegate
+			{
+				ResetAllSettings();
+			};
+		}
 		_imageAddButton.Click += delegate
 		{
 			AddSlideshowImagesFromDialog();
@@ -17783,6 +17774,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			else if (sender == _watermarkVideoList || (_tabs != null && _tabs.SelectedIndex == WorkspaceWatermark))
 			{
 				AddWatermarkVideoPaths(paths);
+			}
+			else if (_tabs != null && _tabs.SelectedIndex == WorkspaceTranscribe)
+			{
+				_transcribePanel?.AddFiles(paths);
 			}
 			else
 			{
@@ -25407,7 +25402,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		try
 		{
 			Dictionary<string, string> values = ReadSettingsFile(userSettingsPath);
-			_isDarkMode = GetBoolSetting(values, "ui.dark_mode", fallback: true);
+			_isDarkMode = true;
 			int num = GetIntSetting(values, "ui.tab", 0);
 			if (GetIntSetting(values, "format.version", 1) < 2 && num >= 3)
 			{
@@ -26175,7 +26170,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_watermarkSourceImageRemoveButton.Enabled = !running;
 		_watermarkSourceImageClearButton.Enabled = !running;
 		_watermarkResetButton.Enabled = !running;
-		_globalResetButton.Enabled = !running;
+		if (_globalResetButton != null) _globalResetButton.Enabled = !running;
 		_watermarkOutputFolder.Enabled = !running;
 		SetOutputFrameControlsEnabled(_watermarkOutputFrameControls, !running && _watermarkSourceTabs.SelectedIndex == 0);
 		_watermarkOutputBrowseButton.Enabled = !running;

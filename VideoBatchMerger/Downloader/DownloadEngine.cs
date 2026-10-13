@@ -670,10 +670,16 @@ public sealed class DownloadEngine
 
 		if (!string.IsNullOrWhiteSpace(proxyUrl))
 		{
-			sb.Append($"--proxy \"{proxyUrl}\" ");
+			string safeProxy = proxyUrl.Replace("\"", "").Replace("\r", "").Replace("\n", "").Trim();
+			if (!string.IsNullOrWhiteSpace(safeProxy))
+			{
+				sb.Append($"--proxy \"{safeProxy}\" ");
+			}
 		}
 
-		sb.Append($"\"{url}\"");
+		// 安全防御：清洗 URL 中的双引号与换行符，并使用 -- 终止选项解析，彻底杜绝 CLI 参数注入
+		string cleanUrl = (url ?? string.Empty).Replace("\"", "").Replace("\r", "").Replace("\n", "").Trim();
+		sb.Append($"-- \"{cleanUrl}\"");
 		return sb.ToString();
 	}
 
@@ -686,8 +692,9 @@ public sealed class DownloadEngine
 
 	private static string SanitizeFolderName(string name)
 	{
-		string invalidChars = Regex.Escape(new string(Path.GetInvalidPathChars()));
-		string sanitized = Regex.Replace(name, "[" + invalidChars + "]", "_");
+		if (string.IsNullOrWhiteSpace(name)) return "Videos";
+		string invalidChars = Regex.Escape(new string(Path.GetInvalidFileNameChars()));
+		string sanitized = Regex.Replace(name, "[" + invalidChars + "]", "_").Trim('.', ' ');
 		return string.IsNullOrWhiteSpace(sanitized) ? "Videos" : sanitized;
 	}
 }

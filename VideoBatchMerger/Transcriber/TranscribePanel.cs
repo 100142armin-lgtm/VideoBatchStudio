@@ -39,11 +39,17 @@ internal sealed class TranscribePanel : UserControl
 	private Button _btnInstallModel;
 	private Button _btnRefreshEnv;
 
-	// 左侧面板控件
-	private TabControl _tabInputMode;
+	// 左侧面板：分段胶囊按钮与双面板
+	private Button _btnModeLocal;
+	private Button _btnModeOnline;
+	private Panel _panelLocalMode;
+	private Panel _panelOnlineMode;
+	private int _currentInputMode = 0; // 0: 本地媒体, 1: 在线链接
 	private ListBox _lstLocalFiles;
 	private TextBox _txtOnlineUrls;
 	private Label _urlCountBadge;
+
+	// 参数设置
 	private ComboBox _cboModel;
 	private ComboBox _cboSourceLang;
 	private ComboBox _cboTargetLang;
@@ -75,8 +81,10 @@ internal sealed class TranscribePanel : UserControl
 		BackColor = BgCanvas;
 		ForeColor = TextPrimary;
 		Font = new Font("Microsoft YaHei UI", 9f);
+		AllowDrop = true;
 
 		Panel rootPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12), BackColor = BgCanvas };
+		AttachDragDrop(rootPanel);
 
 		// 1. 顶部 Header HUD 状态栏
 		Panel headerHud = CreateHeaderHud();
@@ -103,6 +111,7 @@ internal sealed class TranscribePanel : UserControl
 		splitMain.Panel2.BackColor = BgCanvas;
 		splitMain.Panel1.Padding = new Padding(0, 0, 4, 0);
 		splitMain.Panel2.Padding = new Padding(4, 0, 0, 0);
+		AttachDragDrop(splitMain);
 
 		// 左侧配置与输入面板
 		Panel leftPanel = CreateLeftInputPanel();
@@ -146,9 +155,17 @@ internal sealed class TranscribePanel : UserControl
 			}
 		};
 
-		_uiTimer = new System.Windows.Forms.Timer { Interval = 300 };
-		_uiTimer.Tick += (s, e) => UpdateTaskListView();
+		_uiTimer = new System.Windows.Forms.Timer { Interval = 350 };
+		_uiTimer.Tick += (s, e) =>
+		{
+			if (_isProcessing)
+			{
+				UpdateTaskListView();
+			}
+		};
 		_uiTimer.Start();
+
+		AttachDragDropRecursively(this);
 
 		ResumeLayout(false);
 	}
@@ -157,41 +174,31 @@ internal sealed class TranscribePanel : UserControl
 	{
 		Panel p = new Panel
 		{
-			Height = 52,
+			Height = 56,
 			BackColor = CardBg,
 			Margin = new Padding(0, 0, 0, 8),
 			Padding = new Padding(14, 8, 14, 8)
 		};
 		p.Paint += (s, e) => DrawTechBorder(e.Graphics, p.ClientRectangle, CardBorder, 6);
 
-		Panel leftInfo = new Panel { Dock = DockStyle.Left, Width = 560, BackColor = Color.Transparent };
-		Label lblIcon = new Label
-		{
-			Text = "🎙️",
-			Font = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold),
-			ForeColor = CyanNeon,
-			Location = new Point(0, 6),
-			Size = new Size(24, 24),
-			TextAlign = ContentAlignment.MiddleCenter
-		};
-		leftInfo.Controls.Add(lblIcon);
+		Panel leftInfo = new Panel { Dock = DockStyle.Left, Width = 600, BackColor = Color.Transparent };
 
 		_envBadgeTitle = new Label
 		{
-			Text = "AI TRANSCRIBE · 全地化本地音视频双语字幕提取终端",
-			Font = new Font("Microsoft YaHei UI", 10.5f, FontStyle.Bold),
+			Text = "⚡ AI 智能字幕工作台",
+			Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold),
 			ForeColor = TextPrimary,
-			Location = new Point(28, 4),
+			Location = new Point(2, 4),
 			AutoSize = true
 		};
 		leftInfo.Controls.Add(_envBadgeTitle);
 
 		Label lblSub = new Label
 		{
-			Text = "WHISPER.CPP 离线神经网络 · 英语 / 葡萄牙语 / 西班牙语 → 简体中文高精神经翻译",
-			Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+			Text = "Whisper 本地离线神经网络 · 英语 / 葡语 / 西语等多语种高精转录 · 简体中文实时双语对照",
+			Font = new Font("Microsoft YaHei UI", 8.25f),
 			ForeColor = CyanNeon,
-			Location = new Point(30, 26),
+			Location = new Point(4, 30),
 			AutoSize = true
 		};
 		leftInfo.Controls.Add(lblSub);
@@ -236,60 +243,51 @@ internal sealed class TranscribePanel : UserControl
 			Padding = new Padding(12)
 		};
 		p.Paint += (s, e) => DrawTechBorder(e.Graphics, p.ClientRectangle, CardBorder, 6);
+		AttachDragDrop(p);
 
-		Panel titleRow = new Panel { Dock = DockStyle.Top, Height = 32, BackColor = Color.Transparent };
-		Label lblTitle = new Label
-		{
-			Text = "📥 音视频来源 (支持批量本地媒体 / 在线视频链接)",
-			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
-			ForeColor = CyanNeon,
-			Dock = DockStyle.Left,
-			AutoSize = true
-		};
-		titleRow.Controls.Add(lblTitle);
+		// 1. 顶部模式切换分段胶囊栏与计数药丸
+		Panel switchBar = new Panel { Dock = DockStyle.Top, Height = 38, BackColor = Color.Transparent };
+
+		_btnModeLocal = MakeSegmentButton("📁 本地媒体文件 (支持拖入)", (s, e) => SwitchInputMode(0));
+		_btnModeLocal.Location = new Point(0, 2);
+		_btnModeLocal.Width = 175;
+		_btnModeLocal.Tag = "active";
+		switchBar.Controls.Add(_btnModeLocal);
+
+		_btnModeOnline = MakeSegmentButton("🌐 在线视频链接 (自动解析)", (s, e) => SwitchInputMode(1));
+		_btnModeOnline.Location = new Point(182, 2);
+		_btnModeOnline.Width = 175;
+		_btnModeOnline.Tag = "normal";
+		switchBar.Controls.Add(_btnModeOnline);
 
 		_urlCountBadge = new Label
 		{
-			Text = "0 个任务待处理",
-			Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+			Text = "0 个任务",
+			Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
 			ForeColor = TextMuted,
 			BackColor = Color.FromArgb(20, 32, 54),
-			Padding = new Padding(6, 2, 6, 2),
+			Padding = new Padding(6, 4, 6, 4),
 			Dock = DockStyle.Right,
-			AutoSize = true
+			AutoSize = true,
+			TextAlign = ContentAlignment.MiddleRight
 		};
-		titleRow.Controls.Add(_urlCountBadge);
-		p.Controls.Add(titleRow);
+		switchBar.Controls.Add(_urlCountBadge);
+		p.Controls.Add(switchBar);
 
-		_tabInputMode = new TabControl
-		{
-			Dock = DockStyle.Fill,
-			Font = new Font("Microsoft YaHei UI", 9f)
-		};
+		// 2. 模式内容容器 (中间充填)
+		Panel inputContentPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Padding = new Padding(0, 6, 0, 6) };
 
-		// Tab 1: 本地文件批量
-		TabPage tabLocal = new TabPage("📁 批量本地音视频");
-		tabLocal.BackColor = CardAltBg;
-		Panel localContainer = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6) };
+		// --- 模式 A: 本地文件容器 ---
+		_panelLocalMode = new Panel { Dock = DockStyle.Fill, BackColor = CardAltBg, Padding = new Padding(8) };
+		AttachDragDrop(_panelLocalMode);
 
-		_lstLocalFiles = new ListBox
-		{
-			Dock = DockStyle.Fill,
-			BackColor = InputBg,
-			ForeColor = TextPrimary,
-			BorderStyle = BorderStyle.FixedSingle,
-			SelectionMode = SelectionMode.MultiExtended,
-			Font = new Font("Consolas", 9f)
-		};
-		localContainer.Controls.Add(_lstLocalFiles);
-
-		Panel localToolBar = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = Color.Transparent };
-		Button btnAddFiles = MakeTechButton("＋ 添加文件…", 100, 28, Color.FromArgb(28, 42, 68), (s, e) => AddLocalMediaFiles());
-		btnAddFiles.Location = new Point(0, 4);
+		Panel localToolBar = new Panel { Dock = DockStyle.Top, Height = 34, BackColor = Color.Transparent };
+		Button btnAddFiles = MakeTechButton("＋ 添加文件…", 95, 28, Color.FromArgb(28, 42, 68), (s, e) => AddLocalMediaFiles());
+		btnAddFiles.Location = new Point(0, 2);
 		localToolBar.Controls.Add(btnAddFiles);
 
-		Button btnAddFolder = MakeTechButton("📂 添加文件夹…", 110, 28, Color.FromArgb(28, 42, 68), (s, e) => AddLocalMediaFolder());
-		btnAddFolder.Location = new Point(106, 4);
+		Button btnAddFolder = MakeTechButton("📂 添加文件夹…", 105, 28, Color.FromArgb(28, 42, 68), (s, e) => AddLocalMediaFolder());
+		btnAddFolder.Location = new Point(102, 2);
 		localToolBar.Controls.Add(btnAddFolder);
 
 		Button btnClearFiles = MakeTechButton("🗑 清空列表", 85, 28, Color.FromArgb(28, 42, 68), (s, e) =>
@@ -297,17 +295,63 @@ internal sealed class TranscribePanel : UserControl
 			_lstLocalFiles.Items.Clear();
 			UpdateInputCount();
 		});
-		btnClearFiles.Location = new Point(222, 4);
+		btnClearFiles.Location = new Point(214, 2);
 		localToolBar.Controls.Add(btnClearFiles);
+		_panelLocalMode.Controls.Add(localToolBar);
 
-		localContainer.Controls.Add(localToolBar);
-		tabLocal.Controls.Add(localContainer);
-		_tabInputMode.TabPages.Add(tabLocal);
+		Label lblDropHint = new Label
+		{
+			Text = "[拖拽提示] 支持鼠标直接拖拽音视频文件或文件夹至此区域 (或 Ctrl+V 粘贴)",
+			ForeColor = CyanNeon,
+			Dock = DockStyle.Top,
+			Height = 24,
+			Font = new Font("Microsoft YaHei UI", 8.25f),
+			TextAlign = ContentAlignment.MiddleLeft
+		};
+		_panelLocalMode.Controls.Add(lblDropHint);
 
-		// Tab 2: 在线链接解析
-		TabPage tabOnline = new TabPage("🌐 在线视频链接 (YouTube/TikTok/FB)");
-		tabOnline.BackColor = CardAltBg;
-		Panel onlineContainer = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6) };
+		_lstLocalFiles = new ListBox
+		{
+			Dock = DockStyle.Fill,
+			BackColor = InputBg,
+			ForeColor = TextPrimary,
+			BorderStyle = BorderStyle.None,
+			SelectionMode = SelectionMode.MultiExtended,
+			Font = new Font("Consolas", 9f)
+		};
+		AttachDragDrop(_lstLocalFiles);
+		_panelLocalMode.Controls.Add(_lstLocalFiles);
+		_panelLocalMode.Controls.Add(lblDropHint);
+		_panelLocalMode.Controls.Add(localToolBar);
+		localToolBar.SendToBack();
+		lblDropHint.SendToBack();
+
+		// --- 模式 B: 在线链接容器 ---
+		_panelOnlineMode = new Panel { Dock = DockStyle.Fill, BackColor = CardAltBg, Padding = new Padding(8), Visible = false };
+		AttachDragDrop(_panelOnlineMode);
+
+		Panel onlineToolBar = new Panel { Dock = DockStyle.Top, Height = 34, BackColor = Color.Transparent };
+		Button btnPasteUrls = MakeTechButton("📋 快捷粘贴剪贴板链接", 155, 28, Color.FromArgb(28, 42, 68), (s, e) => PasteUrlsFromClipboard());
+		btnPasteUrls.Location = new Point(0, 2);
+		onlineToolBar.Controls.Add(btnPasteUrls);
+
+		Button btnClearUrls = MakeTechButton("🗑 清空链接", 85, 28, Color.FromArgb(28, 42, 68), (s, e) =>
+		{
+			_txtOnlineUrls.Clear();
+			UpdateInputCount();
+		});
+		btnClearUrls.Location = new Point(162, 2);
+		onlineToolBar.Controls.Add(btnClearUrls);
+
+		Label lblOnlineHint = new Label
+		{
+			Text = "[链接列表] 每行输入一个视频链接 (支持 YouTube / TikTok / Facebook / IG 等):",
+			ForeColor = EmeraldNeon,
+			Dock = DockStyle.Top,
+			Height = 24,
+			Font = new Font("Microsoft YaHei UI", 8.25f),
+			TextAlign = ContentAlignment.MiddleLeft
+		};
 
 		_txtOnlineUrls = new TextBox
 		{
@@ -317,41 +361,26 @@ internal sealed class TranscribePanel : UserControl
 			Dock = DockStyle.Fill,
 			BackColor = InputBg,
 			ForeColor = Color.FromArgb(226, 232, 240),
-			BorderStyle = BorderStyle.FixedSingle,
+			BorderStyle = BorderStyle.None,
 			Font = new Font("Consolas", 9f)
 		};
 		_txtOnlineUrls.Text = "https://www.youtube.com/shorts/bqLBK7GuPCk\r\nhttps://www.tiktok.com/@lucia.gove/video/7617254633341308178";
 		_txtOnlineUrls.TextChanged += (s, e) => UpdateInputCount();
-		onlineContainer.Controls.Add(_txtOnlineUrls);
+		AttachDragDrop(_txtOnlineUrls);
 
-		Panel onlineToolBar = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = Color.Transparent };
-		Button btnPasteUrls = MakeTechButton("📋 粘贴剪贴板", 100, 28, Color.FromArgb(28, 42, 68), (s, e) =>
-		{
-			if (Clipboard.ContainsText())
-			{
-				string t = Clipboard.GetText();
-				if (!string.IsNullOrWhiteSpace(t))
-				{
-					if (string.IsNullOrWhiteSpace(_txtOnlineUrls.Text)) _txtOnlineUrls.Text = t.Trim();
-					else _txtOnlineUrls.AppendText("\r\n" + t.Trim());
-				}
-			}
-		});
-		btnPasteUrls.Location = new Point(0, 4);
-		onlineToolBar.Controls.Add(btnPasteUrls);
+		_panelOnlineMode.Controls.Add(_txtOnlineUrls);
+		_panelOnlineMode.Controls.Add(lblOnlineHint);
+		_panelOnlineMode.Controls.Add(onlineToolBar);
+		onlineToolBar.SendToBack();
+		lblOnlineHint.SendToBack();
 
-		Button btnClearUrls = MakeTechButton("🗑 清空", 70, 28, Color.FromArgb(28, 42, 68), (s, e) => _txtOnlineUrls.Clear());
-		btnClearUrls.Location = new Point(106, 4);
-		onlineToolBar.Controls.Add(btnClearUrls);
+		inputContentPanel.Controls.Add(_panelOnlineMode);
+		inputContentPanel.Controls.Add(_panelLocalMode);
+		p.Controls.Add(inputContentPanel);
+		p.Controls.Add(switchBar);
+		switchBar.SendToBack();
 
-		onlineContainer.Controls.Add(onlineToolBar);
-		tabOnline.Controls.Add(onlineContainer);
-		_tabInputMode.TabPages.Add(tabOnline);
-
-		_tabInputMode.SelectedIndexChanged += (s, e) => UpdateInputCount();
-		p.Controls.Add(_tabInputMode);
-
-		// 底部 AI 参数设置卡片与启动按钮组
+		// 3. 底部 AI 参数设置卡片与启动按钮组
 		Panel paramPanel = new Panel { Dock = DockStyle.Bottom, Height = 220, BackColor = Color.Transparent };
 
 		// 第一行参数：转录模型选择与源语言
@@ -367,7 +396,7 @@ internal sealed class TranscribePanel : UserControl
 			ForeColor = TextPrimary,
 			FlatStyle = FlatStyle.Flat
 		};
-		_cboModel.Items.AddRange(new object[] { "小巧极速 (Base 141MB)", "标准推荐 (Small 465MB)", "高精影院 (Medium 1.4GB)" });
+		_cboModel.Items.AddRange(new object[] { "极速模式 (Base 148MB)", "标准推荐 (Small 488MB)", "高精影院 (Turbo 574MB)" });
 		_cboModel.SelectedIndex = 1;
 		paramPanel.Controls.Add(_cboModel);
 
@@ -378,12 +407,12 @@ internal sealed class TranscribePanel : UserControl
 		{
 			DropDownStyle = ComboBoxStyle.DropDownList,
 			Location = new Point(300, 7),
-			Width = 110,
+			Width = 140,
 			BackColor = InputBg,
 			ForeColor = TextPrimary,
 			FlatStyle = FlatStyle.Flat
 		};
-		_cboSourceLang.Items.AddRange(new object[] { "自动识别", "英语 (English)", "葡萄牙语 (pt)", "西班牙语 (es)", "中文普通话" });
+		_cboSourceLang.Items.AddRange(new object[] { "自动识别 (推荐)", "英语 (English)", "葡萄牙语 (Português)", "西班牙语 (Español)", "中文普通话 (Chinese)", "法语 (Français)", "德语 (Deutsch)", "俄语 (Русский)", "日语 (Japanese)" });
 		_cboSourceLang.SelectedIndex = 0;
 		paramPanel.Controls.Add(_cboSourceLang);
 
@@ -400,7 +429,7 @@ internal sealed class TranscribePanel : UserControl
 			ForeColor = TextPrimary,
 			FlatStyle = FlatStyle.Flat
 		};
-		_cboTargetLang.Items.AddRange(new object[] { "🇨🇳 简体中文 (译为中文)", "🇺🇸 英语 (译为英文)", "不翻译 (仅输出原文)" });
+		_cboTargetLang.Items.AddRange(new object[] { "[中] 简体中文 (译为中文)", "[英] 英语 (译为英文)", "不翻译 (仅输出原文)" });
 		_cboTargetLang.SelectedIndex = 0;
 		paramPanel.Controls.Add(_cboTargetLang);
 
@@ -411,7 +440,7 @@ internal sealed class TranscribePanel : UserControl
 		{
 			DropDownStyle = ComboBoxStyle.DropDownList,
 			Location = new Point(300, 43),
-			Width = 110,
+			Width = 140,
 			BackColor = InputBg,
 			ForeColor = TextPrimary,
 			FlatStyle = FlatStyle.Flat
@@ -432,7 +461,7 @@ internal sealed class TranscribePanel : UserControl
 		paramPanel.Controls.Add(_btnStopTranscribe);
 
 		// 日志输出框
-		Panel logPanel = new Panel { Location = new Point(4, 130), Size = new Size(410, 85), BackColor = Color.Transparent };
+		Panel logPanel = new Panel { Location = new Point(4, 130), Size = new Size(440, 85), BackColor = Color.Transparent };
 		_logBox = new RichTextBox
 		{
 			Dock = DockStyle.Fill,
@@ -468,24 +497,24 @@ internal sealed class TranscribePanel : UserControl
 		Panel rightHeader = new Panel { Dock = DockStyle.Top, Height = 44, BackColor = Color.Transparent };
 		Panel topToolBar = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = Color.Transparent };
 
-		Button btnCopyOriginal = MakeTechButton("📋 复制原文", 95, 30, Color.FromArgb(28, 42, 68), (s, e) => CopyOriginalText());
-		btnCopyOriginal.Location = new Point(0, 2);
+		Button btnCopyOriginal = MakeTechButton("复制原文", 86, 28, Color.FromArgb(28, 42, 68), (s, e) => CopyOriginalText());
+		btnCopyOriginal.Location = new Point(0, 3);
 		topToolBar.Controls.Add(btnCopyOriginal);
 
-		Button btnCopyBilingual = MakeTechButton("📑 复制双语对照", 115, 30, Color.FromArgb(28, 42, 68), (s, e) => CopyBilingualText());
-		btnCopyBilingual.Location = new Point(102, 2);
-		topToolBar.Controls.Add(btnCopyBilingual);
-
-		Button btnCopyChinese = MakeTechButton("🀄 复制纯中文", 105, 30, Color.FromArgb(28, 42, 68), (s, e) => CopyChineseText());
-		btnCopyChinese.Location = new Point(224, 2);
+		Button btnCopyChinese = MakeTechButton("复制纯中文", 96, 28, Color.FromArgb(28, 42, 68), (s, e) => CopyChineseText());
+		btnCopyChinese.Location = new Point(92, 3);
 		topToolBar.Controls.Add(btnCopyChinese);
 
-		Button btnExportSrt = MakeTechButton("💾 导出 SRT 字幕", 115, 30, Color.FromArgb(13, 148, 136), (s, e) => ExportSrtFile());
-		btnExportSrt.Location = new Point(336, 2);
+		Button btnCopyBilingual = MakeTechButton("复制双语对照", 108, 28, Color.FromArgb(28, 42, 68), (s, e) => CopyBilingualText());
+		btnCopyBilingual.Location = new Point(194, 3);
+		topToolBar.Controls.Add(btnCopyBilingual);
+
+		Button btnExportSrt = MakeTechButton("导出 SRT 字幕", 106, 28, Color.FromArgb(13, 148, 136), (s, e) => ExportSrtFile());
+		btnExportSrt.Location = new Point(308, 3);
 		topToolBar.Controls.Add(btnExportSrt);
 
-		Button btnExportTxt = MakeTechButton("📄 导出 TXT 文本", 115, 30, Color.FromArgb(28, 42, 68), (s, e) => ExportTxtFile());
-		btnExportTxt.Location = new Point(458, 2);
+		Button btnExportTxt = MakeTechButton("导出 TXT 文本", 106, 28, Color.FromArgb(28, 42, 68), (s, e) => ExportTxtFile());
+		btnExportTxt.Location = new Point(420, 3);
 		topToolBar.Controls.Add(btnExportTxt);
 
 		_progressTextLabel = new Label
@@ -543,12 +572,13 @@ internal sealed class TranscribePanel : UserControl
 			HeaderStyle = ColumnHeaderStyle.Nonclickable,
 			Font = new Font("Microsoft YaHei UI", 9f)
 		};
+		SetDoubleBuffered(_listViewTasks);
 		_listViewTasks.Columns.Add("#", 38);
 		_listViewTasks.Columns.Add("媒体名称", 240);
 		_listViewTasks.Columns.Add("语种", 80);
 		_listViewTasks.Columns.Add("句数", 65);
 		_listViewTasks.Columns.Add("进度", 75);
-		_listViewTasks.Columns.Add("状态", 120);
+		_listViewTasks.Columns.Add("状态", 140);
 
 		_listViewTasks.SelectedIndexChanged += (s, e) => DisplaySelectedTaskSubtitles();
 		splitRightContent.Panel1.Controls.Add(_listViewTasks);
@@ -566,7 +596,7 @@ internal sealed class TranscribePanel : UserControl
 
 		// 识别原文轨
 		Panel pnlOrig = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6) };
-		Label lblOrig = new Label { Text = "● 原始语音识别结果 (包含精细时间戳)", ForeColor = CyanNeon, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold), Dock = DockStyle.Top, Height = 22 };
+		Label lblOrig = new Label { Text = "● 原始外文语音识别结果 (纯文本 · 按视频归类)", ForeColor = CyanNeon, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold), Dock = DockStyle.Top, Height = 22 };
 		pnlOrig.Controls.Add(lblOrig);
 
 		_rtbOriginal = new RichTextBox
@@ -576,6 +606,7 @@ internal sealed class TranscribePanel : UserControl
 			ForeColor = Color.FromArgb(226, 232, 240),
 			BorderStyle = BorderStyle.None,
 			Font = new Font("Consolas", 9.5f),
+			ScrollBars = RichTextBoxScrollBars.Vertical,
 			ReadOnly = false
 		};
 		pnlOrig.Controls.Add(_rtbOriginal);
@@ -583,7 +614,7 @@ internal sealed class TranscribePanel : UserControl
 
 		// 中文译文轨
 		Panel pnlTrans = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6) };
-		Label lblTrans = new Label { Text = "● 简体中文对照翻译 (时间戳同步对齐)", ForeColor = EmeraldNeon, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold), Dock = DockStyle.Top, Height = 22 };
+		Label lblTrans = new Label { Text = "● 简体中文对照翻译 (纯文本 · 按视频归类)", ForeColor = EmeraldNeon, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold), Dock = DockStyle.Top, Height = 22 };
 		pnlTrans.Controls.Add(lblTrans);
 
 		_rtbTranslated = new RichTextBox
@@ -593,6 +624,7 @@ internal sealed class TranscribePanel : UserControl
 			ForeColor = EmeraldNeon,
 			BorderStyle = BorderStyle.None,
 			Font = new Font("Microsoft YaHei UI", 9.5f),
+			ScrollBars = RichTextBoxScrollBars.Vertical,
 			ReadOnly = false
 		};
 		pnlTrans.Controls.Add(_rtbTranslated);
@@ -606,40 +638,231 @@ internal sealed class TranscribePanel : UserControl
 		return p;
 	}
 
+	private void SwitchInputMode(int modeIndex)
+	{
+		_currentInputMode = modeIndex;
+		_panelLocalMode.Visible = (modeIndex == 0);
+		_panelOnlineMode.Visible = (modeIndex == 1);
+		_btnModeLocal.Tag = (modeIndex == 0) ? "active" : "normal";
+		_btnModeOnline.Tag = (modeIndex == 1) ? "active" : "normal";
+		_btnModeLocal.Invalidate();
+		_btnModeOnline.Invalidate();
+		UpdateInputCount();
+	}
+
+	private Button MakeSegmentButton(string text, EventHandler onClick)
+	{
+		Button b = new Button
+		{
+			Text = text,
+			Height = 32,
+			FlatStyle = FlatStyle.Flat,
+			ForeColor = TextPrimary,
+			Cursor = Cursors.Hand,
+			Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
+			Margin = new Padding(0)
+		};
+		b.FlatAppearance.BorderSize = 0;
+		b.Click += onClick;
+		b.Paint += (s, e) =>
+		{
+			Graphics g = e.Graphics;
+			g.SmoothingMode = SmoothingMode.AntiAlias;
+			Rectangle bounds = new Rectangle(0, 0, b.Width - 1, b.Height - 1);
+			bool isActive = (b.Tag as string) == "active";
+			Color bg = isActive ? Color.FromArgb(20, 36, 64) : Color.FromArgb(14, 21, 37);
+			Color border = isActive ? CyanNeon : Color.FromArgb(30, 48, 80);
+			Color fore = isActive ? CyanNeon : TextMuted;
+
+			using var path = CreateRoundedPath(bounds, 4);
+			using var brush = new SolidBrush(bg);
+			g.FillPath(brush, path);
+			using var pen = new Pen(border, isActive ? 1.5f : 1f);
+			g.DrawPath(pen, path);
+
+			TextRenderer.DrawText(g, b.Text, b.Font, bounds, fore,
+				TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+		};
+		return b;
+	}
+
+	private void AttachDragDropRecursively(Control root)
+	{
+		if (root == null) return;
+		root.AllowDrop = true;
+		root.DragEnter -= OnFileDragEnter;
+		root.DragEnter += OnFileDragEnter;
+		root.DragDrop -= OnFileDragDrop;
+		root.DragDrop += OnFileDragDrop;
+		foreach (Control child in root.Controls)
+		{
+			AttachDragDropRecursively(child);
+		}
+	}
+
+	private void AttachDragDrop(Control c)
+	{
+		AttachDragDropRecursively(c);
+	}
+
+	private void OnFileDragEnter(object sender, DragEventArgs e)
+	{
+		if (e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.Text))
+		{
+			e.Effect = DragDropEffects.Copy;
+		}
+	}
+
+	private void OnFileDragDrop(object sender, DragEventArgs e)
+	{
+		if (e.Data.GetDataPresent(DataFormats.FileDrop))
+		{
+			string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
+			if (files != null && files.Length > 0)
+			{
+				SwitchInputMode(0);
+				AddFiles(files);
+			}
+		}
+		else if (e.Data.GetDataPresent(DataFormats.Text))
+		{
+			string text = (string)e.Data.GetData(DataFormats.Text);
+			if (!string.IsNullOrWhiteSpace(text))
+			{
+				if (text.Contains("http://") || text.Contains("https://"))
+				{
+					SwitchInputMode(1);
+					PasteUrlsFromText(text);
+				}
+			}
+		}
+	}
+
+	protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+	{
+		if (keyData == (Keys.Control | Keys.V))
+		{
+			if (Clipboard.ContainsText())
+			{
+				string text = Clipboard.GetText();
+				if (!string.IsNullOrWhiteSpace(text) && (text.Contains("http://") || text.Contains("https://")))
+				{
+					SwitchInputMode(1);
+					PasteUrlsFromText(text);
+					return true;
+				}
+			}
+			else if (Clipboard.ContainsFileDropList())
+			{
+				var files = Clipboard.GetFileDropList().Cast<string>();
+				SwitchInputMode(0);
+				AddFiles(files);
+				return true;
+			}
+		}
+		return base.ProcessCmdKey(ref msg, keyData);
+	}
+
+	private void PasteUrlsFromClipboard()
+	{
+		if (Clipboard.ContainsText())
+		{
+			PasteUrlsFromText(Clipboard.GetText());
+		}
+		else
+		{
+			MessageBox.Show(this, "剪贴板中未检测到文本内容！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+		}
+	}
+
+	private void PasteUrlsFromText(string text)
+	{
+		if (string.IsNullOrWhiteSpace(text)) return;
+		var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+			.Select(l => l.Trim())
+			.Where(l => l.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || l.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+			.ToList();
+
+		if (lines.Count == 0)
+		{
+			// 如果没有直接以 http 开头，尝试提取其中的 URL
+			var matches = System.Text.RegularExpressions.Regex.Matches(text, @"https?://[^\s""'<>]+");
+			foreach (System.Text.RegularExpressions.Match m in matches)
+			{
+				lines.Add(m.Value.Trim());
+			}
+		}
+
+		if (lines.Count > 0)
+		{
+			var current = _txtOnlineUrls.Lines.ToList();
+			int added = 0;
+			foreach (var u in lines)
+			{
+				if (!current.Contains(u))
+				{
+					current.Add(u);
+					added++;
+				}
+			}
+			_txtOnlineUrls.Lines = current.ToArray();
+			UpdateInputCount();
+			LogMessage($"[链接粘贴] 成功添加 {added} 个在线视频链接。");
+		}
+		else
+		{
+			MessageBox.Show(this, "未能从剪贴板提取到有效的网页视频链接 (如 YouTube, TikTok, Facebook Reel 等)！", "未检测到链接", MessageBoxButtons.OK, MessageBoxIcon.Information);
+		}
+	}
+
 	// ====================== 业务逻辑实现 ======================
 
 	public void RefreshEnvironmentStatus()
 	{
 		string whisper = TranscribeEngine.FindWhisperCliPath();
 		bool whisperOk = !string.IsNullOrEmpty(whisper) && File.Exists(whisper);
+		bool isCuda = TranscribeEngine.IsCudaBuild(whisper);
+		bool gpuHardware = TranscribeEngine.IsCudaAvailable();
 
 		string baseModel = TranscribeEngine.FindModelPath("base");
 		string smallModel = TranscribeEngine.FindModelPath("small");
 		bool modelOk = !string.IsNullOrEmpty(baseModel) || !string.IsNullOrEmpty(smallModel);
 
-		bool cudaOk = TranscribeEngine.IsCudaAvailable();
-
-		_envTagWhisper.Text = whisperOk ? "● Whisper 内核: 就绪" : "● Whisper 内核: 缺失";
-		_envTagWhisper.ForeColor = whisperOk ? EmeraldNeon : Color.FromArgb(248, 113, 113);
+		_envTagWhisper.Text = whisperOk
+			? (isCuda ? "● Whisper 内核: GPU加速版" : "● Whisper 内核: CPU版")
+			: "● Whisper: 未找到";
+		_envTagWhisper.ForeColor = whisperOk ? EmeraldNeon : AmberNeon;
 
 		_envTagModel.Text = modelOk ? "● AI 模型: 已就绪" : "● AI 模型: 缺失";
-		_envTagModel.ForeColor = modelOk ? EmeraldNeon : Color.FromArgb(248, 113, 113);
+		_envTagModel.ForeColor = modelOk ? EmeraldNeon : AmberNeon;
 
-		_envTagCuda.Text = cudaOk ? "● CUDA 硬件加速: 就绪" : "● 运算架构: CPU 多核";
-		_envTagCuda.ForeColor = cudaOk ? CyanNeon : AmberNeon;
+		_envTagCuda.Text = isCuda
+			? "● NVIDIA GPU 硬件加速: 生效中"
+			: (gpuHardware ? "● 检测到NVIDIA显卡 (未配置CUDA内核)" : "● CPU 模式: 运行中");
+		_envTagCuda.ForeColor = isCuda ? CyanNeon : (gpuHardware ? AmberNeon : TextMuted);
 
-		if (whisperOk && modelOk)
+		if (whisperOk && modelOk && isCuda)
+		{
+			_btnInstallModel.Text = "✓ GPU组件与模型已就绪";
+			_btnInstallModel.BackColor = Color.FromArgb(28, 42, 68);
+		}
+		else if (whisperOk && modelOk)
 		{
 			_btnInstallModel.Text = "✓ 模型已就绪";
-			_btnInstallModel.BackColor = Color.FromArgb(20, 45, 40);
+			_btnInstallModel.BackColor = Color.FromArgb(28, 42, 68);
+		}
+		else
+		{
+			_btnInstallModel.Text = "⚡ 一键配置 AI 组件";
+			_btnInstallModel.BackColor = Color.FromArgb(37, 99, 235);
 		}
 	}
 
 	private async Task AutoInstallAiComponentsAsync()
 	{
 		LogMessage("[组件配置] 正在自动检测并配置 Whisper 离线推理组件...");
-		string toolsDir = @"D:\工具\视频拼接\VideoBatchStudio";
-		string whisperDir = Path.Combine(toolsDir, "whisper");
+
+		string whisperDir = TranscribeEngine.GetWhisperInstallDir();
 		Directory.CreateDirectory(whisperDir);
 		string modelsDir = Path.Combine(whisperDir, "models");
 		Directory.CreateDirectory(modelsDir);
@@ -647,7 +870,7 @@ internal sealed class TranscribePanel : UserControl
 		string smallModel = Path.Combine(modelsDir, "ggml-small.bin");
 		if (!File.Exists(smallModel))
 		{
-			LogMessage("[模型下载] 正在从高速镜像拉取 ggml-small.bin 多语种模型 (约 466MB)...");
+			LogMessage("[模型下载] 正在从高速镜像拉取 ggml-small.bin 标准推荐模型 (约 465MB)...");
 			await Task.Run(() =>
 			{
 				try
@@ -674,21 +897,44 @@ internal sealed class TranscribePanel : UserControl
 	public void AddFiles(IEnumerable<string> files)
 	{
 		if (files == null) return;
-		_tabInputMode.SelectedIndex = 0;
+		SwitchInputMode(0);
+		string[] exts = { ".mp4", ".mov", ".mkv", ".mp3", ".wav", ".m4a", ".webm", ".avi", ".flv", ".wmv", ".aac", ".ogg" };
+		int added = 0;
+
 		foreach (var f in files)
 		{
-			if (!string.IsNullOrWhiteSpace(f) && !_lstLocalFiles.Items.Contains(f))
+			if (string.IsNullOrWhiteSpace(f)) continue;
+			if (Directory.Exists(f))
 			{
-				_lstLocalFiles.Items.Add(f);
+				var subFiles = Directory.GetFiles(f, "*.*", SearchOption.AllDirectories)
+					.Where(sf => exts.Contains(Path.GetExtension(sf).ToLowerInvariant()));
+				foreach (var sf in subFiles)
+				{
+					if (!_lstLocalFiles.Items.Contains(sf))
+					{
+						_lstLocalFiles.Items.Add(sf);
+						added++;
+					}
+				}
+			}
+			else if (File.Exists(f))
+			{
+				string ext = Path.GetExtension(f).ToLowerInvariant();
+				if (exts.Contains(ext) && !_lstLocalFiles.Items.Contains(f))
+				{
+					_lstLocalFiles.Items.Add(f);
+					added++;
+				}
 			}
 		}
 		UpdateInputCount();
+		if (added > 0) LogMessage($"[导入文件] 成功添加 {added} 个媒体文件。");
 	}
 
 	public void AddOnlineUrls(IEnumerable<string> urls)
 	{
 		if (urls == null) return;
-		_tabInputMode.SelectedIndex = 1;
+		SwitchInputMode(1);
 		var current = _txtOnlineUrls.Lines.ToList();
 		foreach (var u in urls)
 		{
@@ -706,52 +952,32 @@ internal sealed class TranscribePanel : UserControl
 		using var ofd = new OpenFileDialog
 		{
 			Title = "选择音视频文件（支持多选）",
-			Filter = "媒体文件 (*.mp4;*.mov;*.mkv;*.mp3;*.wav;*.m4a;*.webm;*.flv)|*.mp4;*.mov;*.mkv;*.mp3;*.wav;*.m4a;*.webm;*.flv|所有文件 (*.*)|*.*",
+			Filter = "媒体文件 (*.mp4;*.mov;*.mkv;*.mp3;*.wav;*.m4a;*.webm;*.flv;*.avi)|*.mp4;*.mov;*.mkv;*.mp3;*.wav;*.m4a;*.webm;*.flv;*.avi|所有文件 (*.*)|*.*",
 			Multiselect = true
 		};
 
 		if (ofd.ShowDialog(this) == DialogResult.OK)
 		{
-			foreach (var file in ofd.FileNames)
-			{
-				if (!_lstLocalFiles.Items.Contains(file))
-				{
-					_lstLocalFiles.Items.Add(file);
-				}
-			}
-			UpdateInputCount();
+			AddFiles(ofd.FileNames);
 		}
 	}
 
 	private void AddLocalMediaFolder()
 	{
-		using var fbd = new FolderBrowserDialog { Description = "选择包含媒体文件的文件夹" };
+		using var fbd = new FolderBrowserDialog { Description = "选择包含音视频媒体文件的文件夹" };
 		if (fbd.ShowDialog(this) == DialogResult.OK)
 		{
-			string[] exts = { ".mp4", ".mov", ".mkv", ".mp3", ".wav", ".m4a", ".webm" };
-			var files = Directory.GetFiles(fbd.SelectedPath, "*.*", SearchOption.AllDirectories)
-				.Where(f => exts.Contains(Path.GetExtension(f).ToLowerInvariant()))
-				.ToArray();
-
-			foreach (var file in files)
-			{
-				if (!_lstLocalFiles.Items.Contains(file))
-				{
-					_lstLocalFiles.Items.Add(file);
-				}
-			}
-			UpdateInputCount();
-			LogMessage($"[导入文件夹] 成功扫描并添加了 {files.Length} 个媒体文件。");
+			AddFiles(new[] { fbd.SelectedPath });
 		}
 	}
 
 	private void UpdateInputCount()
 	{
-		int count = (_tabInputMode.SelectedIndex == 0)
+		int count = (_currentInputMode == 0)
 			? _lstLocalFiles.Items.Count
 			: _txtOnlineUrls.Lines.Count(l => !string.IsNullOrWhiteSpace(l) && (l.StartsWith("http://") || l.StartsWith("https://")));
 
-		_urlCountBadge.Text = $"{count} 个任务待处理";
+		_urlCountBadge.Text = $"{count} 个任务";
 		_urlCountBadge.ForeColor = count > 0 ? EmeraldNeon : TextMuted;
 	}
 
@@ -770,13 +996,31 @@ internal sealed class TranscribePanel : UserControl
 		{
 			0 => "base",
 			1 => "small",
-			_ => "medium"
+			_ => "large-v3-turbo-q5_0"
 		};
 		string modelPath = TranscribeEngine.FindModelPath(modelChoice);
 		if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
 		{
-			modelPath = TranscribeEngine.FindModelPath("small");
-			if (string.IsNullOrEmpty(modelPath)) modelPath = TranscribeEngine.FindModelPath("base");
+			if (_cboModel.SelectedIndex == 2)
+			{
+				string turboDest = Path.Combine(TranscribeEngine.GetWhisperInstallDir(), "models", "ggml-large-v3-turbo-q5_0.bin");
+				LogMessage("[模型下载] 正在自动拉取 ggml-large-v3-turbo-q5_0.bin 旗舰显卡模型 (574MB)...");
+				try
+				{
+					await TranscribeEngine.DownloadFileAsync("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin", turboDest, LogMessage, _cts.Token);
+					modelPath = turboDest;
+				}
+				catch (Exception ex)
+				{
+					LogMessage($"[下载中断] 旗舰模型下载中断，自动切换使用 Small 模型: {ex.Message}");
+					modelPath = TranscribeEngine.FindModelPath("small");
+				}
+			}
+			else
+			{
+				modelPath = TranscribeEngine.FindModelPath("small");
+				if (string.IsNullOrEmpty(modelPath)) modelPath = TranscribeEngine.FindModelPath("base");
+			}
 		}
 
 		if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
@@ -788,7 +1032,7 @@ internal sealed class TranscribePanel : UserControl
 		_items.Clear();
 		_listViewTasks.Items.Clear();
 
-		if (_tabInputMode.SelectedIndex == 0)
+		if (_currentInputMode == 0)
 		{
 			for (int i = 0; i < _lstLocalFiles.Items.Count; i++)
 			{
@@ -818,7 +1062,7 @@ internal sealed class TranscribePanel : UserControl
 				_items.Add(new TranscribeItem
 				{
 					Index = i + 1,
-					SourceName = $"[{platform}] 待下载直转",
+					SourceName = $"[{platform}] 在线音轨提取",
 					SourcePathOrUrl = urls[i],
 					IsOnlineUrl = true,
 					Status = "等待下载"
@@ -847,6 +1091,10 @@ internal sealed class TranscribePanel : UserControl
 			2 => "pt",
 			3 => "es",
 			4 => "zh",
+			5 => "fr",
+			6 => "de",
+			7 => "ru",
+			8 => "ja",
 			_ => "auto"
 		};
 
@@ -862,88 +1110,145 @@ internal sealed class TranscribePanel : UserControl
 				item.Status = "处理中";
 				UpdateTaskListView();
 
-				// 1. 若为在线链接，先调动内核下载原视频
-				if (item.IsOnlineUrl)
+				string tempAudioDir = null;
+				string wavPath = string.Empty;
+
+				try
 				{
-					item.Status = "视频提取中...";
-					UpdateTaskListView();
-					string outDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "视频批量下载");
-					Directory.CreateDirectory(outDir);
-
-					var dlItem = new Downloader.DownloadItem { Index = 1, Url = item.SourcePathOrUrl };
-					bool dlSuccess = await Downloader.DownloadEngine.DownloadAsync(
-						dlItem, ytdlp, ffmpeg, outDir, "best", true, true, false, "", LogMessage, _cts.Token);
-
-					if (dlSuccess && File.Exists(dlItem.SaveFilePath))
+					// 1. 若为在线链接，仅拉取纯音频流到独立临时目录（不保存视频，不占磁盘空间）
+					if (item.IsOnlineUrl)
 					{
-						item.LocalMediaFilePath = dlItem.SaveFilePath;
-						item.SourceName = Path.GetFileName(dlItem.SaveFilePath);
+						item.Status = "音轨拉取中...";
+						UpdateTaskListView();
+						try
+						{
+							var audioRes = await TranscribeEngine.FetchOnlineAudioAsync(item.SourcePathOrUrl, ytdlp, ffmpeg, LogMessage, _cts.Token);
+							tempAudioDir = audioRes.TempDir;
+							item.LocalMediaFilePath = audioRes.MediaPath;
+							item.SourceName = SanitizeTitle(audioRes.Title);
+						}
+						catch (Exception ex)
+						{
+							item.Status = "在线提取失败";
+							item.ErrorMessage = ex.Message;
+							UpdateTaskListView();
+							continue;
+						}
 					}
-					else
+
+					// 2. 提取 16kHz WAV 音轨
+					item.Status = "音频提取中...";
+					item.ProgressPercent = 5;
+					UpdateTaskListView();
+					try
 					{
-						item.Status = "下载失败";
-						item.ErrorMessage = "在线视频拉取失败";
+						wavPath = await TranscribeEngine.Extract16kWavAsync(item.LocalMediaFilePath, ffmpeg, LogMessage, _cts.Token);
+						item.ProgressPercent = 15;
+						UpdateTaskListView();
+					}
+					catch (Exception ex)
+					{
+						item.Status = "音频提取失败";
+						item.ErrorMessage = ex.Message;
 						UpdateTaskListView();
 						continue;
 					}
-				}
 
-				// 2. 提取 16kHz WAV 音轨
-				item.Status = "音频提取中...";
-				UpdateTaskListView();
-				string wavPath = string.Empty;
-				try
-				{
-					wavPath = await TranscribeEngine.Extract16kWavAsync(item.LocalMediaFilePath, ffmpeg, LogMessage, _cts.Token);
-				}
-				catch (Exception ex)
-				{
-					item.Status = "音频提取失败";
-					item.ErrorMessage = ex.Message;
-					UpdateTaskListView();
-					continue;
-				}
+					// 自动智能语种推断：若用户选择“自动识别”，但文件名带有明显语种标识（如 -PT 为葡萄牙语，-ES 为西班牙语，-EN 为英语）
+					string effectiveLang = language;
+					if (string.Equals(language, "auto", StringComparison.OrdinalIgnoreCase))
+					{
+						string nameUpper = (item.SourceName ?? string.Empty).ToUpperInvariant();
+						if (nameUpper.Contains("-PT") || nameUpper.Contains("_PT") || nameUpper.EndsWith("PT")) effectiveLang = "pt";
+						else if (nameUpper.Contains("-ES") || nameUpper.Contains("_ES") || nameUpper.EndsWith("ES")) effectiveLang = "es";
+						else if (nameUpper.Contains("-EN") || nameUpper.Contains("_EN") || nameUpper.EndsWith("EN")) effectiveLang = "en";
+						else if (nameUpper.Contains("-FR") || nameUpper.Contains("_FR") || nameUpper.EndsWith("FR")) effectiveLang = "fr";
+					}
+					item.DetectedLanguage = effectiveLang.ToUpperInvariant();
 
-				// 3. 执行 Whisper 本地神经网络语音识别
-				item.Status = "AI 转录中...";
-				UpdateTaskListView();
-				try
-				{
-					item.Segments = await TranscribeEngine.TranscribeAsync(wavPath, whisperCli, modelPath, language, LogMessage, _cts.Token);
-				}
-				catch (Exception ex)
-				{
-					item.Status = "转录异常";
-					item.ErrorMessage = ex.Message;
+					// 3. 执行 Whisper 本地神经网络语音识别
+					item.Status = "AI 转录中...";
 					UpdateTaskListView();
-					continue;
+					try
+					{
+						item.Segments = await TranscribeEngine.TranscribeAsync(
+							wavPath, whisperCli, modelPath, effectiveLang, LogMessage, _cts.Token,
+							pct =>
+							{
+								item.ProgressPercent = Math.Min(80, 15 + (int)(pct * 0.65));
+								item.Status = $"AI 转录中 ({pct}%)";
+								if (IsHandleCreated)
+								{
+									try { BeginInvoke(new Action(UpdateTaskListView)); } catch { }
+								}
+							});
+					}
+					catch (Exception ex)
+					{
+						item.Status = "转录异常";
+						item.ErrorMessage = ex.Message;
+						UpdateTaskListView();
+						continue;
+					}
+
+					// 4. 判断是否有人声字幕
+					if (item.Segments == null || item.Segments.Count == 0)
+					{
+						item.Status = "未检测到人声对白";
+						item.ErrorMessage = "音轨未检测到清晰人声，已识别为纯背景音、环境声或静音素材";
+						LogMessage($"[转录检测] 该视频未提取到人声字幕 (识别为纯背景音/无对白/静音素材)。");
+						UpdateTaskListView();
+						continue;
+					}
+
+					item.ProgressPercent = 80;
+					UpdateTaskListView();
+
+					// 5. 自动翻译为简体中文
+					if (_cboTargetLang.SelectedIndex == 0)
+					{
+						item.Status = "AI智能翻译中...";
+						item.ProgressPercent = 85;
+						UpdateTaskListView();
+						try
+						{
+							await TranscribeEngine.TranslateSegmentsAsync(item.Segments, effectiveLang, LogMessage, _cts.Token);
+						}
+						catch (Exception ex)
+						{
+							LogMessage($"[翻译提示] 在线翻译暂不可用，已保留原文: {ex.Message}");
+						}
+					}
+
+					item.Status = "已完成";
+					item.ProgressPercent = 100;
+					UpdateTaskListView();
+
+					// 刷新字幕视窗
+					DisplaySelectedTaskSubtitles();
+				}
+				catch (Exception itemEx)
+				{
+					item.Status = "处理异常";
+					item.ErrorMessage = itemEx.Message;
+					LogMessage($"[任务异常] {item.SourceName}: {itemEx.Message}");
+					UpdateTaskListView();
 				}
 				finally
 				{
-					if (File.Exists(wavPath))
+					// 清理临时文件，确保不占用磁盘空间
+					try
 					{
-						try { File.Delete(wavPath); } catch { }
+						if (!string.IsNullOrEmpty(wavPath) && File.Exists(wavPath)) File.Delete(wavPath);
+						if (!string.IsNullOrEmpty(tempAudioDir)) TranscribeEngine.TryDeleteDir(tempAudioDir);
 					}
-				}
-
-				// 4. 执行神经翻译转为简体中文
-				if (_cboTargetLang.SelectedIndex == 0 && item.Segments.Count > 0)
-				{
-					item.Status = "翻译为中文...";
-					UpdateTaskListView();
-					await TranscribeEngine.TranslateSegmentsAsync(item.Segments, language, LogMessage, _cts.Token);
-				}
-
-				item.ProgressPercent = 100;
-				item.Status = "已完成";
-				UpdateTaskListView();
-
-				// 若当前只有一项或用户正在查看该项，立即渲染文本
-				if (_listViewTasks.SelectedIndices.Count == 0 && i == 0)
-				{
-					_listViewTasks.Items[0].Selected = true;
+					catch { }
 				}
 			}
+		}
+		catch (OperationCanceledException)
+		{
+			LogMessage("[操作已取消] 用户中止了转录进程。");
 		}
 		catch (Exception ex)
 		{
@@ -956,6 +1261,13 @@ internal sealed class TranscribePanel : UserControl
 			_btnStopTranscribe.Enabled = false;
 			_statusLabel.Text = $"全部任务转录与翻译流程已结束，共 {_items.Count(it => it.Status == "已完成")} 个文件成功！";
 			LogMessage("[流程结束] 全部音视频转录与中文翻译任务已完成。");
+
+			// 自动选中第 1 个任务并展示双轨字幕，保证文本框不为空白
+			if (_listViewTasks.Items.Count > 0 && _listViewTasks.SelectedItems.Count == 0)
+			{
+				_listViewTasks.Items[0].Selected = true;
+			}
+			DisplaySelectedTaskSubtitles();
 		}
 	}
 
@@ -985,7 +1297,7 @@ internal sealed class TranscribePanel : UserControl
 		for (int i = 0; i < _items.Count; i++)
 		{
 			var item = _items[i];
-			ListViewItem lvi = null;
+			ListViewItem lvi;
 			if (i < _listViewTasks.Items.Count)
 			{
 				lvi = _listViewTasks.Items[i];
@@ -1002,103 +1314,293 @@ internal sealed class TranscribePanel : UserControl
 			}
 
 			lvi.Tag = item;
-			lvi.SubItems[0].Text = item.Index.ToString();
-			lvi.SubItems[1].Text = item.SourceName;
-			lvi.SubItems[2].Text = item.DetectedLanguage;
-			lvi.SubItems[3].Text = item.Segments.Count.ToString();
-			lvi.SubItems[4].Text = $"{item.ProgressPercent}%";
-			lvi.SubItems[5].Text = item.Status;
+			SetSubItemText(lvi, 0, item.Index.ToString());
+			SetSubItemText(lvi, 1, item.SourceName);
+			SetSubItemText(lvi, 2, item.DetectedLanguage);
+			SetSubItemText(lvi, 3, item.Segments.Count.ToString());
+			SetSubItemText(lvi, 4, $"{item.ProgressPercent}%");
+			SetSubItemText(lvi, 5, item.Status);
 
-			if (item.Status == "已完成") lvi.ForeColor = EmeraldNeon;
-			else if (item.Status.Contains("失败") || item.Status.Contains("异常")) lvi.ForeColor = Color.FromArgb(248, 113, 113);
-			else if (item.Status.Contains("中")) lvi.ForeColor = CyanNeon;
-			else lvi.ForeColor = TextPrimary;
+			Color targetColor = TextPrimary;
+			if (item.Status == "已完成") targetColor = EmeraldNeon;
+			else if (item.Status == "未检测到人声对白") targetColor = AmberNeon;
+			else if (item.Status.Contains("失败") || item.Status.Contains("异常")) targetColor = Color.FromArgb(248, 113, 113);
+			else if (item.Status.Contains("中")) targetColor = CyanNeon;
+
+			if (lvi.ForeColor != targetColor) lvi.ForeColor = targetColor;
 		}
 
 		if (_items.Count > 0)
 		{
 			int avg = (int)_items.Average(it => it.ProgressPercent);
-			_progressBar.Value = Math.Max(0, Math.Min(100, avg));
-			_progressTextLabel.Text = $"进度: {avg}% ({_items.Count(it => it.Status == "已完成")}/{_items.Count})";
+			int clamped = Math.Max(0, Math.Min(100, avg));
+			if (_progressBar.Value != clamped) _progressBar.Value = clamped;
+			string progText = $"进度: {avg}% ({_items.Count(it => it.Status == "已完成")}/{_items.Count})";
+			if (_progressTextLabel.Text != progText) _progressTextLabel.Text = progText;
 		}
+	}
+
+	private static void SetSubItemText(ListViewItem item, int subIndex, string text)
+	{
+		if (item == null || subIndex < 0) return;
+		while (item.SubItems.Count <= subIndex)
+		{
+			item.SubItems.Add(string.Empty);
+		}
+		if (item.SubItems[subIndex].Text != text)
+		{
+			item.SubItems[subIndex].Text = text;
+		}
+	}
+
+	public static void SetDoubleBuffered(Control control)
+	{
+		if (control == null) return;
+		try
+		{
+			typeof(Control).InvokeMember("DoubleBuffered",
+				System.Reflection.BindingFlags.SetProperty |
+				System.Reflection.BindingFlags.Instance |
+				System.Reflection.BindingFlags.NonPublic,
+				null, control, new object[] { true });
+		}
+		catch { }
 	}
 
 	private void DisplaySelectedTaskSubtitles()
 	{
-		if (_listViewTasks.SelectedItems.Count == 0) return;
-		var item = _listViewTasks.SelectedItems[0].Tag as TranscribeItem;
-		if (item == null || item.Segments == null) return;
+		var completedItems = _items.Where(it => it.Segments != null && it.Segments.Count > 0).ToList();
+		if (completedItems.Count == 0)
+		{
+			var any = _items.FirstOrDefault();
+			if (any != null && !string.IsNullOrEmpty(any.ErrorMessage))
+			{
+				_rtbOriginal.Text = $"[{any.ErrorMessage}]";
+				_rtbTranslated.Text = "[无需翻译]";
+			}
+			else
+			{
+				_rtbOriginal.Clear();
+				_rtbTranslated.Clear();
+			}
+			return;
+		}
 
 		var sbOrig = new StringBuilder();
 		var sbTrans = new StringBuilder();
 
-		foreach (var seg in item.Segments)
+		for (int i = 0; i < completedItems.Count; i++)
 		{
-			sbOrig.AppendLine($"[{seg.TimeRangeStr}]");
-			sbOrig.AppendLine(seg.OriginalText);
-			sbOrig.AppendLine();
+			var item = completedItems[i];
+			if (i > 0)
+			{
+				sbOrig.AppendLine();
+				sbOrig.AppendLine();
+				sbTrans.AppendLine();
+				sbTrans.AppendLine();
+			}
 
-			sbTrans.AppendLine($"[{seg.TimeRangeStr}]");
-			sbTrans.AppendLine(string.IsNullOrEmpty(seg.TranslatedText) ? "(等待翻译...)" : seg.TranslatedText);
-			sbTrans.AppendLine();
+			// 按照视频的名称 显示每个视频转录的文字 文本格式显示即可，不要时间戳
+			sbOrig.AppendLine($"【{item.SourceName}】");
+			sbTrans.AppendLine($"【{item.SourceName}】");
+
+			foreach (var seg in item.Segments)
+			{
+				if (!string.IsNullOrWhiteSpace(seg.OriginalText))
+				{
+					sbOrig.AppendLine(seg.OriginalText.Trim());
+				}
+				string trans = !string.IsNullOrWhiteSpace(seg.TranslatedText) ? seg.TranslatedText.Trim() : seg.OriginalText.Trim();
+				if (!string.IsNullOrWhiteSpace(trans))
+				{
+					sbTrans.AppendLine(trans);
+				}
+			}
 		}
 
-		_rtbOriginal.Text = sbOrig.ToString();
-		_rtbTranslated.Text = sbTrans.ToString();
+		_rtbOriginal.Text = sbOrig.ToString().TrimEnd();
+		_rtbTranslated.Text = sbTrans.ToString().TrimEnd();
+
+		// 如果列表中有选中的任务且不是第一项，滚动至该视频名称；若为第1项或无选中，平稳停留在顶部
+		if (_listViewTasks.SelectedItems.Count > 0 && _listViewTasks.SelectedIndices[0] > 0)
+		{
+			var selItem = _listViewTasks.SelectedItems[0].Tag as TranscribeItem;
+			if (selItem != null)
+			{
+				ScrollToTaskHeader(selItem.SourceName);
+			}
+		}
+		else
+		{
+			_rtbOriginal.SelectionStart = 0;
+			_rtbOriginal.SelectionLength = 0;
+			_rtbOriginal.ScrollToCaret();
+			_rtbTranslated.SelectionStart = 0;
+			_rtbTranslated.SelectionLength = 0;
+			_rtbTranslated.ScrollToCaret();
+		}
 	}
 
-	private TranscribeItem GetActiveItem()
+	private void ScrollToTaskHeader(string sourceName)
 	{
-		if (_listViewTasks.SelectedItems.Count > 0)
+		if (string.IsNullOrEmpty(sourceName)) return;
+		string header = $"【{sourceName}】";
+		ScrollBoxToText(_rtbOriginal, header);
+		ScrollBoxToText(_rtbTranslated, header);
+	}
+
+	private void ScrollBoxToText(RichTextBox box, string text)
+	{
+		if (box == null || string.IsNullOrEmpty(text)) return;
+		int idx = box.Text.IndexOf(text, StringComparison.OrdinalIgnoreCase);
+		if (idx >= 0)
 		{
-			return _listViewTasks.SelectedItems[0].Tag as TranscribeItem;
+			box.SelectionStart = idx;
+			box.SelectionLength = 0;
+			box.ScrollToCaret();
 		}
-		return _items.FirstOrDefault(it => it.Segments.Count > 0);
+	}
+
+	private List<TranscribeItem> GetTargetItems()
+	{
+		var completed = _items.Where(it => it.Segments != null && it.Segments.Count > 0).ToList();
+		if (completed.Count == 0) return new List<TranscribeItem>();
+
+		// 只有当用户显式按住 Ctrl/Shift 多选了部分任务时（选中数 > 1 且 < 总完成数），才只针对选中的项；
+		// 只要用户单选了某一行或没选，默认全量汇聚复制全部已完成的视频，确保一个视频都不会漏掉！
+		if (_listViewTasks.SelectedItems.Count > 1 && _listViewTasks.SelectedItems.Count < completed.Count)
+		{
+			var selected = _listViewTasks.SelectedItems.Cast<ListViewItem>()
+				.Select(lvi => lvi.Tag as TranscribeItem)
+				.Where(it => it != null && it.Segments != null && it.Segments.Count > 0)
+				.ToList();
+			if (selected.Count > 0) return selected;
+		}
+
+		return completed;
+	}
+
+	private static string FormatSpreadsheetCell(string text)
+	{
+		if (string.IsNullOrEmpty(text)) return "\"\"";
+		string normalized = text.Replace("\r\n", "\n").Replace("\r", "\n");
+		string escaped = normalized.Replace("\"", "\"\"");
+		return $"\"{escaped}\"";
 	}
 
 	private void CopyOriginalText()
 	{
-		var item = GetActiveItem();
-		if (item == null || item.Segments.Count == 0)
+		var targets = GetTargetItems();
+		if (targets.Count == 0)
 		{
 			MessageBox.Show(this, "当前没有识别出的原文内容可复制！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			return;
 		}
-		string text = TranscribeEngine.ExportToTxt(item.Segments, includeOriginal: true, includeTranslated: false);
-		Clipboard.SetText(text);
-		MessageBox.Show(this, "成功复制全部语音识别原文至剪贴板！", "已复制", MessageBoxButtons.OK, MessageBoxIcon.Information);
-	}
 
-	private void CopyBilingualText()
-	{
-		var item = GetActiveItem();
-		if (item == null || item.Segments.Count == 0)
+		var sb = new StringBuilder();
+		for (int i = 0; i < targets.Count; i++)
 		{
-			MessageBox.Show(this, "当前没有字幕内容可复制！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-			return;
+			var item = targets[i];
+			var lines = new List<string>();
+			lines.Add($"【{item.SourceName}】");
+			foreach (var seg in item.Segments)
+			{
+				if (!string.IsNullOrWhiteSpace(seg.OriginalText))
+				{
+					lines.Add(seg.OriginalText.Trim());
+				}
+			}
+			string videoCellText = string.Join("\n", lines);
+			if (i > 0) sb.Append("\r\n");
+			sb.Append(FormatSpreadsheetCell(videoCellText));
 		}
-		string text = TranscribeEngine.ExportToTxt(item.Segments, includeOriginal: true, includeTranslated: true);
-		Clipboard.SetText(text);
-		MessageBox.Show(this, "成功复制双语对照字幕内容至剪贴板！", "已复制", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+		Clipboard.SetText(sb.ToString().Trim());
+		int totalLines = targets.Sum(t => t.Segments.Count);
+		MessageBox.Show(this, $"成功复制全部 {targets.Count} 个视频共 {totalLines} 句识别原文！\n已采用表格单单元格格式打包，直接粘贴到谷歌表格/Excel 中即可实现【每个视频的文字完整放在一个单元格】。", "已复制原文", MessageBoxButtons.OK, MessageBoxIcon.Information);
 	}
 
 	private void CopyChineseText()
 	{
-		var item = GetActiveItem();
-		if (item == null || item.Segments.Count == 0)
+		var targets = GetTargetItems();
+		if (targets.Count == 0)
 		{
 			MessageBox.Show(this, "当前没有中文翻译内容可复制！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			return;
 		}
-		string text = TranscribeEngine.ExportToTxt(item.Segments, includeOriginal: false, includeTranslated: true);
-		Clipboard.SetText(text);
-		MessageBox.Show(this, "成功复制纯中文译文内容至剪贴板！", "已复制", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+		var sb = new StringBuilder();
+		for (int i = 0; i < targets.Count; i++)
+		{
+			var item = targets[i];
+			var lines = new List<string>();
+			lines.Add($"【{item.SourceName}】");
+			foreach (var seg in item.Segments)
+			{
+				string trans = !string.IsNullOrWhiteSpace(seg.TranslatedText) ? seg.TranslatedText.Trim() : seg.OriginalText.Trim();
+				if (!string.IsNullOrWhiteSpace(trans))
+				{
+					lines.Add(trans);
+				}
+			}
+			string videoCellText = string.Join("\n", lines);
+			if (i > 0) sb.Append("\r\n");
+			sb.Append(FormatSpreadsheetCell(videoCellText));
+		}
+
+		Clipboard.SetText(sb.ToString().Trim());
+		int totalLines = targets.Sum(t => t.Segments.Count);
+		MessageBox.Show(this, $"成功复制全部 {targets.Count} 个视频共 {totalLines} 句纯中文译文！\n已采用表格单单元格格式打包，直接粘贴到谷歌表格/Excel 中即可实现【每个视频的文字完整放在一个单元格】。", "已复制中文", MessageBoxButtons.OK, MessageBoxIcon.Information);
+	}
+
+	private void CopyBilingualText()
+	{
+		var targets = GetTargetItems();
+		if (targets.Count == 0)
+		{
+			MessageBox.Show(this, "当前没有双语字幕内容可复制！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			return;
+		}
+
+		var sb = new StringBuilder();
+		for (int i = 0; i < targets.Count; i++)
+		{
+			var item = targets[i];
+			var origLines = new List<string>();
+			origLines.Add($"【{item.SourceName}】");
+			var transLines = new List<string>();
+			transLines.Add($"【{item.SourceName}】");
+
+			foreach (var seg in item.Segments)
+			{
+				if (!string.IsNullOrWhiteSpace(seg.OriginalText))
+				{
+					origLines.Add(seg.OriginalText.Trim());
+				}
+				string trans = !string.IsNullOrWhiteSpace(seg.TranslatedText) ? seg.TranslatedText.Trim() : seg.OriginalText.Trim();
+				if (!string.IsNullOrWhiteSpace(trans))
+				{
+					transLines.Add(trans);
+				}
+			}
+
+			string origCell = FormatSpreadsheetCell(string.Join("\n", origLines));
+			string transCell = FormatSpreadsheetCell(string.Join("\n", transLines));
+
+			if (i > 0) sb.Append("\r\n");
+			// TSV 制表符 \t 分隔左列(外文)与右列(中文)，实现 A1 外文、B1 中文并排对照
+			sb.Append(origCell).Append("\t").Append(transCell);
+		}
+
+		Clipboard.SetText(sb.ToString().Trim());
+		int totalLines = targets.Sum(t => t.Segments.Count);
+		MessageBox.Show(this, $"成功复制全部 {targets.Count} 个视频共 {totalLines} 句双语对照！\n已采用双列对照格式打包，直接粘贴到谷歌表格/Excel 中即可实现【A列外文，B列对应中文，每视频一行一格】。", "已复制双语", MessageBoxButtons.OK, MessageBoxIcon.Information);
 	}
 
 	private void ExportSrtFile()
 	{
-		var item = GetActiveItem();
-		if (item == null || item.Segments.Count == 0)
+		var targets = GetTargetItems();
+		if (targets.Count == 0)
 		{
 			MessageBox.Show(this, "当前没有字幕可导出！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			return;
@@ -1108,23 +1610,29 @@ internal sealed class TranscribePanel : UserControl
 		{
 			Title = "导出为标准 SRT 字幕文件",
 			Filter = "SRT 字幕文件 (*.srt)|*.srt|所有文件 (*.*)|*.*",
-			FileName = $"{Path.GetFileNameWithoutExtension(item.SourceName)}_双语字幕.srt"
+			FileName = targets.Count == 1
+				? $"{SanitizeFileName(targets[0].SourceName)}_字幕.srt"
+				: $"批量视频字幕_{DateTime.Now:yyyyMMdd_HHmm}.srt"
 		};
 
 		if (sfd.ShowDialog(this) == DialogResult.OK)
 		{
 			bool includeOrig = (_cboSubMode.SelectedIndex == 0 || _cboSubMode.SelectedIndex == 2);
 			bool includeTrans = (_cboSubMode.SelectedIndex == 0 || _cboSubMode.SelectedIndex == 1);
-			string srt = TranscribeEngine.ExportToSrt(item.Segments, includeOrig, includeTrans);
-			File.WriteAllText(sfd.FileName, srt, Encoding.UTF8);
+			var sb = new StringBuilder();
+			foreach (var item in targets)
+			{
+				sb.Append(TranscribeEngine.ExportToSrt(item.Segments, includeOrig, includeTrans));
+			}
+			File.WriteAllText(sfd.FileName, sb.ToString(), Encoding.UTF8);
 			MessageBox.Show(this, $"字幕文件已成功保存至:\n{sfd.FileName}", "导出成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
 		}
 	}
 
 	private void ExportTxtFile()
 	{
-		var item = GetActiveItem();
-		if (item == null || item.Segments.Count == 0)
+		var targets = GetTargetItems();
+		if (targets.Count == 0)
 		{
 			MessageBox.Show(this, "当前没有文本可导出！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			return;
@@ -1132,19 +1640,50 @@ internal sealed class TranscribePanel : UserControl
 
 		using var sfd = new SaveFileDialog
 		{
-			Title = "导出为纯文本文件",
+			Title = "导出为带时间戳的双语字幕 TXT 文本",
 			Filter = "文本文件 (*.txt)|*.txt|所有文件 (*.*)|*.*",
-			FileName = $"{Path.GetFileNameWithoutExtension(item.SourceName)}_文本.txt"
+			FileName = targets.Count == 1
+				? $"{SanitizeFileName(targets[0].SourceName)}_字幕对照.txt"
+				: $"批量视频字幕对照_{DateTime.Now:yyyyMMdd_HHmm}.txt"
 		};
 
 		if (sfd.ShowDialog(this) == DialogResult.OK)
 		{
-			bool includeOrig = (_cboSubMode.SelectedIndex == 0 || _cboSubMode.SelectedIndex == 2);
-			bool includeTrans = (_cboSubMode.SelectedIndex == 0 || _cboSubMode.SelectedIndex == 1);
-			string txt = TranscribeEngine.ExportToTxt(item.Segments, includeOrig, includeTrans);
-			File.WriteAllText(sfd.FileName, txt, Encoding.UTF8);
-			MessageBox.Show(this, $"文本文件已成功保存至:\n{sfd.FileName}", "导出成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			var sb = new StringBuilder();
+			for (int i = 0; i < targets.Count; i++)
+			{
+				var item = targets[i];
+				if (i > 0) sb.AppendLine().AppendLine();
+				sb.AppendLine($"========================================");
+				sb.AppendLine($"媒体文件: {item.SourceName}");
+				sb.AppendLine($"========================================");
+				string txt = TranscribeEngine.ExportToTxt(item.Segments, includeOriginal: true, includeTranslated: true);
+				sb.AppendLine(txt);
+			}
+			File.WriteAllText(sfd.FileName, sb.ToString(), Encoding.UTF8);
+			MessageBox.Show(this, $"TXT 对照字幕文件已成功保存至:\n{sfd.FileName}", "导出成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
 		}
+	}
+
+	private static string SanitizeTitle(string title)
+	{
+		if (string.IsNullOrWhiteSpace(title)) return "在线音轨";
+		string clean = title.Replace("\r", " ").Replace("\n", " ").Trim();
+		return string.IsNullOrEmpty(clean) ? "在线音轨" : clean;
+	}
+
+	private static string SanitizeFileName(string name)
+	{
+		if (string.IsNullOrWhiteSpace(name)) return "批量视频";
+		char[] invalid = Path.GetInvalidFileNameChars();
+		var sb = new StringBuilder();
+		foreach (char c in name)
+		{
+			sb.Append(invalid.Contains(c) ? '_' : c);
+		}
+		string res = sb.ToString().Trim();
+		if (res.Length > 60) res = res.Substring(0, 60);
+		return string.IsNullOrEmpty(res) ? "批量视频" : res;
 	}
 
 	private void LogMessage(string msg)
