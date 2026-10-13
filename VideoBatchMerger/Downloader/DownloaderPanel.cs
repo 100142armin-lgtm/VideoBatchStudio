@@ -884,6 +884,7 @@ internal sealed class DownloaderPanel : UserControl
 
 		cms.Items.Add("🎬 发送此视频至【视频剪辑】工作台", null, (s, e) => SendSelectedToCutEdit());
 		cms.Items.Add("📦 发送此视频至【批量合并】素材库", null, (s, e) => SendSelectedToMerge());
+		cms.Items.Add("🎙️ 发送此视频至【智能字幕】转录", null, (s, e) => SendSelectedToTranscribe());
 		cms.Items.Add(new ToolStripSeparator());
 		cms.Items.Add("📂 在文件资源管理器中定位", null, (s, e) => LocateSelectedFile());
 		cms.Items.Add("▶ 打开播放此视频", null, (s, e) => PlaySelectedFile());
@@ -1374,6 +1375,23 @@ internal sealed class DownloaderPanel : UserControl
 		{
 			_mainForm.AddVideosToMergeList(new[] { item.SaveFilePath });
 			_mainForm.SwitchToWorkspace(MainForm.WorkspaceMerge);
+		}
+	}
+
+	private void SendSelectedToTranscribe()
+	{
+		if (_listView.SelectedItems.Count == 0) return;
+		var item = _listView.SelectedItems[0].Tag as DownloadItem;
+		if (item != null)
+		{
+			if (File.Exists(item.SaveFilePath))
+			{
+				_mainForm.AddVideosToTranscribeList(new[] { item.SaveFilePath });
+			}
+			else if (!string.IsNullOrWhiteSpace(item.Url))
+			{
+				_mainForm.AddUrlsToTranscribeList(new[] { item.Url });
+			}
 		}
 	}
 

@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.8.2";
+	public const string CurrentAppVersion = "8.9.0";
 
 	public const int WorkspaceMerge = 0;
 	public const int WorkspaceSplit = 1;
@@ -50,11 +50,14 @@ internal sealed class MainForm : Form
 	public const int WorkspaceSplitScreen = 5;
 	public const int WorkspaceCutEdit = 6;
 	public const int WorkspaceDeliver = 7;
+	public const int WorkspaceTranscribe = 8;
 
 	private VideoBatchMerger.Downloader.DownloaderPanel _downloaderPanel;
+	private VideoBatchMerger.Transcriber.TranscribePanel _transcribePanel;
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton;
 	private readonly List<Button> _navButtons = new List<Button>();
+	private readonly Dictionary<Button, int> _navButtonTabs = new Dictionary<Button, int>();
 	private Panel _cutEditVideoHostPanel;
 	private double _cutEditPlaybackStartPos = 0.0;
 
@@ -1128,6 +1131,7 @@ internal sealed class MainForm : Form
 		_tabs.TabPages.Add(BuildSplitScreenTab());  // 5
 		_tabs.TabPages.Add(BuildCutEditTab());      // 6
 		_tabs.TabPages.Add(BuildDeliverTab());      // 7
+		_tabs.TabPages.Add(BuildTranscribeTab());   // 8 (智能字幕)
 		tableLayoutPanel.Controls.Add(_tabs, 0, 0);
 
 		_bottomNavBar = new Panel();
@@ -1190,6 +1194,7 @@ internal sealed class MainForm : Form
 		navCenter.Margin = new Padding(0);
 
 		_navButtons.Clear();
+		_navButtonTabs.Clear();
 		navCenter.Controls.Add(MakeNavButton("📦 批量合并", WorkspaceMerge));
 		navCenter.Controls.Add(MakeNavButton("✂️ 视频拆分", WorkspaceSplit));
 		navCenter.Controls.Add(MakeNavButton("💧 水印处理", WorkspaceWatermark));
@@ -1203,6 +1208,7 @@ internal sealed class MainForm : Form
 		navCenter.Controls.Add(navDivider);
 
 		navCenter.Controls.Add(MakeNavButton("📥 视频下载", WorkspaceDownload));
+		navCenter.Controls.Add(MakeNavButton("🎙️ 智能字幕", WorkspaceTranscribe));
 		navCenter.Controls.Add(MakeNavButton("▦ 视频拼屏", WorkspaceSplitScreen));
 		navCenter.Controls.Add(MakeNavButton("🎬 视频剪辑", WorkspaceCutEdit));
 		navCenter.Controls.Add(MakeNavButton("🚀 导出交付", WorkspaceDeliver));
@@ -1243,10 +1249,11 @@ internal sealed class MainForm : Form
 			SwitchToWorkspace(tabIndex);
 		};
 		_navButtons.Add(btn);
+		_navButtonTabs[btn] = tabIndex;
 		return btn;
 	}
 
-	internal void SwitchToWorkspace(int index)
+	public void SwitchToWorkspace(int index)
 	{
 		if (_tabs == null || index < 0 || index >= _tabs.TabPages.Count) return;
 		_tabs.SelectedIndex = index;
@@ -1256,17 +1263,24 @@ internal sealed class MainForm : Form
 			UpdateDeliverSummary();
 			InitOrRefreshDeliverPreview();
 		}
+		else if (index == WorkspaceTranscribe)
+		{
+			_transcribePanel?.OnActivated();
+		}
 		SaveUserSettings();
 	}
 
 	private void UpdateNavButtonsActiveState()
 	{
 		if (_tabs == null) return;
-		for (int i = 0; i < _navButtons.Count; i++)
+		foreach (Button btn in _navButtons)
 		{
-			bool isActive = (i == _tabs.SelectedIndex);
-			_navButtons[i].Tag = isActive ? "nav-active" : "nav";
-			_navButtons[i].Invalidate();
+			if (_navButtonTabs.TryGetValue(btn, out int tabIdx))
+			{
+				bool isActive = (tabIdx == _tabs.SelectedIndex);
+				btn.Tag = isActive ? "nav-active" : "nav";
+				btn.Invalidate();
+			}
 		}
 	}
 
@@ -4504,6 +4518,29 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_downloaderPanel = new VideoBatchMerger.Downloader.DownloaderPanel(this);
 		tabPage.Controls.Add(_downloaderPanel);
 		return tabPage;
+	}
+
+	private TabPage BuildTranscribeTab()
+	{
+		TabPage tabPage = new TabPage("智能字幕");
+		tabPage.BackColor = CanvasColor;
+		_transcribePanel = new VideoBatchMerger.Transcriber.TranscribePanel(this);
+		tabPage.Controls.Add(_transcribePanel);
+		return tabPage;
+	}
+
+	internal void AddVideosToTranscribeList(IEnumerable<string> paths)
+	{
+		if (paths == null) return;
+		_transcribePanel?.AddFiles(paths);
+		SwitchToWorkspace(WorkspaceTranscribe);
+	}
+
+	internal void AddUrlsToTranscribeList(IEnumerable<string> urls)
+	{
+		if (urls == null) return;
+		_transcribePanel?.AddOnlineUrls(urls);
+		SwitchToWorkspace(WorkspaceTranscribe);
 	}
 
 	internal void AddVideosToMergeList(IEnumerable<string> paths)
