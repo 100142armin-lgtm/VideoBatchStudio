@@ -59,6 +59,27 @@ jobs:
             }
           }
 
+          # Download and bundle yt-dlp.exe
+          try {
+            Write-Host "Downloading yt-dlp.exe for portable bundle..."
+            Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "staging/VideoBatchStudio/yt-dlp.exe" -TimeoutSec 60
+            Write-Host "Bundled yt-dlp.exe successfully"
+          } catch {
+            Write-Host "yt-dlp download failed: $_"
+          }
+
+          # Download and bundle whisper CPU engine into staging/whisper
+          try {
+            Write-Host "Downloading whisper-bin-x64.zip for portable bundle..."
+            New-Item -ItemType Directory -Force -Path "staging/VideoBatchStudio/whisper" | Out-Null
+            Invoke-WebRequest -Uri "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.0/whisper-bin-x64.zip" -OutFile "whisper_temp.zip" -TimeoutSec 90
+            Expand-Archive -Path "whisper_temp.zip" -DestinationPath "staging/VideoBatchStudio/whisper" -Force
+            Remove-Item "whisper_temp.zip" -Force -ErrorAction SilentlyContinue
+            Write-Host "Bundled whisper CPU engine successfully"
+          } catch {
+            Write-Host "whisper engine download failed: $_"
+          }
+
           # Create Portable Zip
           Compress-Archive -Path "staging/VideoBatchStudio/*" -DestinationPath "release_assets/VideoBatchStudio_Portable.zip" -Force
 

@@ -860,33 +860,85 @@ internal sealed class TranscribePanel : UserControl
 
 	private async Task AutoInstallAiComponentsAsync()
 	{
-		LogMessage("[组件配置] 正在自动检测并配置 Whisper 离线推理组件...");
-
-		string whisperDir = TranscribeEngine.GetWhisperInstallDir();
-		Directory.CreateDirectory(whisperDir);
-		string modelsDir = Path.Combine(whisperDir, "models");
-		Directory.CreateDirectory(modelsDir);
-
-		string smallModel = Path.Combine(modelsDir, "ggml-small.bin");
-		if (!File.Exists(smallModel))
+		_btnInstallModel.Enabled = false;
+		_btnInstallModel.Text = "⏳ 正在配置 AI 组件...";
+		try
 		{
-			LogMessage("[模型下载] 正在从高速镜像拉取 ggml-small.bin 标准推荐模型 (约 465MB)...");
-			await Task.Run(() =>
-			{
-				try
-				{
-					using var client = new System.Net.WebClient();
-					client.DownloadFile("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin", smallModel);
-				}
-				catch (Exception ex)
-				{
-					LogMessage($"[模型下载异常] {ex.Message}");
-				}
-			});
-		}
+			LogMessage("========================================");
+			LogMessage("[组件配置] 开始自动安装与检测 AI 语音转录环境...");
 
-		RefreshEnvironmentStatus();
-		MessageBox.Show(this, "AI 语音转录模型与引擎配置完毕！已完全就绪离线使用。", "配置完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			// 1. 检查或安装 Whisper CLI 推理引擎内核
+			string whisperCli = TranscribeEngine.FindWhisperCliPath();
+			if (string.IsNullOrEmpty(whisperCli) || !File.Exists(whisperCli))
+			{
+				bool hasNvidia = TranscribeEngine.IsCudaAvailable();
+				bool engineInstalled = false;
+				if (hasNvidia)
+				{
+					LogMessage("[引擎配置] 检测到系统配备 NVIDIA 独立显卡，正在优先拉取 GPU CUDA 硬件加速内核...");
+					engineInstalled = await TranscribeEngine.InstallCudaBuildAsync(LogMessage, _cts.Token);
+				}
+
+				if (!engineInstalled)
+				{
+					LogMessage("[引擎配置] 正在拉取通用 CPU 版 Whisper 离线推理引擎 (全机型免显卡兼容)...");
+					engineInstalled = await TranscribeEngine.InstallCpuBuildAsync(LogMessage, _cts.Token);
+				}
+
+				if (!engineInstalled)
+				{
+					throw new Exception("Whisper 推理内核自动拉取失败，请检查网络连接或开启代理后重试！");
+				}
+			}
+			else
+			{
+				LogMessage($"[引擎配置] 本地已存在 Whisper 内核: {whisperCli}");
+			}
+
+			// 2. 检查或下载 AI 语音模型 (优先 Base 模型快速建立基础能力，140MB 极速下载)
+			string baseModel = TranscribeEngine.FindModelPath("base");
+			string smallModel = TranscribeEngine.FindModelPath("small");
+
+			if (string.IsNullOrEmpty(baseModel) && string.IsNullOrEmpty(smallModel))
+			{
+				LogMessage("[模型配置] 正在从高速镜像拉取 ggml-base.bin 多语种基础模型 (约 141MB，英/葡/西全语种)...");
+				bool modelOk = await TranscribeEngine.DownloadModelAsync("base", LogMessage, _cts.Token);
+				if (!modelOk)
+				{
+					throw new Exception("AI 语音转录模型下载失败，请检查网络连接后重试。");
+				}
+			}
+			else
+			{
+				LogMessage("[模型配置] 本地已检测到可用 AI 语音模型。");
+			}
+
+			RefreshEnvironmentStatus();
+
+			whisperCli = TranscribeEngine.FindWhisperCliPath();
+			baseModel = TranscribeEngine.FindModelPath("base");
+			smallModel = TranscribeEngine.FindModelPath("small");
+
+			if (!string.IsNullOrEmpty(whisperCli) && (!string.IsNullOrEmpty(baseModel) || !string.IsNullOrEmpty(smallModel)))
+			{
+				string typeName = TranscribeEngine.IsCudaBuild(whisperCli) ? "GPU 硬件加速版" : "CPU 通用版";
+				MessageBox.Show(this, $"AI 语音转录模型与引擎配置完毕！已完全就绪离线使用。\n\n当前状态：\n• Whisper 内核：{typeName}\n• AI 语音模型：已就绪\n\n现在您可以随时拖入视频进行一键批量转录！", "配置完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			}
+			else
+			{
+				MessageBox.Show(this, "AI 组件配置未能完整就绪，请查看底部日志并检查网络后重试。", "配置未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			}
+		}
+		catch (Exception ex)
+		{
+			LogMessage($"[配置异常] {ex.Message}");
+			MessageBox.Show(this, $"AI 组件安装出现异常: {ex.Message}\n请检查网络连接后重试！", "配置失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+		}
+		finally
+		{
+			_btnInstallModel.Enabled = true;
+			RefreshEnvironmentStatus();
+		}
 	}
 
 	public void OnActivated()
@@ -988,44 +1040,59 @@ internal sealed class TranscribePanel : UserControl
 		string whisperCli = TranscribeEngine.FindWhisperCliPath();
 		if (string.IsNullOrEmpty(whisperCli) || !File.Exists(whisperCli))
 		{
-			MessageBox.Show(this, "未检测到 whisper-cli 引擎组件，请先点击右上角【一键配置 AI 组件】！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			var ask = MessageBox.Show(this, "尚未检测到 Whisper 离线推理引擎！\n\n是否立即启动一键自动配置（自动下载离线推理引擎与多语种基础模型）？", "缺少推理引擎", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+			if (ask == DialogResult.Yes)
+			{
+				await AutoInstallAiComponentsAsync();
+			}
 			return;
+		}
+
+		string ffmpegCheck = Downloader.DownloadEngine.FindFFmpegPath();
+		if (string.IsNullOrEmpty(ffmpegCheck) || !File.Exists(ffmpegCheck))
+		{
+			MessageBox.Show(this, "未检测到音视频核心 ffmpeg.exe，无法提取音轨！\n\n• 建议从 GitHub 发布页下载【VideoBatchStudio_Portable.zip 完整便携包】解压使用；\n• 或将 ffmpeg.exe 复制到当前软件同级目录下即可立即使用。", "缺少 FFmpeg 组件", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			return;
+		}
+
+		if (_currentInputMode == 1)
+		{
+			string ytdlpCheck = Downloader.DownloadEngine.FindYtDlpPath();
+			if (string.IsNullOrEmpty(ytdlpCheck) || !File.Exists(ytdlpCheck))
+			{
+				MessageBox.Show(this, "转录在线视频需要 yt-dlp 组件辅助拉取音频流！\n请切换到【📥 视频下载】页面，点击【一键配置组件】下载 yt-dlp 后重试。", "缺少 yt-dlp 组件", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
+			}
 		}
 
 		string modelChoice = _cboModel.SelectedIndex switch
 		{
 			0 => "base",
 			1 => "small",
-			_ => "large-v3-turbo-q5_0"
+			_ => "turbo"
 		};
 		string modelPath = TranscribeEngine.FindModelPath(modelChoice);
 		if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
 		{
-			if (_cboModel.SelectedIndex == 2)
+			LogMessage($"[模型拉取] 本地未找到 {modelChoice} 模型，正在通过高速镜像自动下载...");
+			bool dlOk = await TranscribeEngine.DownloadModelAsync(modelChoice, LogMessage, _cts.Token);
+			if (dlOk)
 			{
-				string turboDest = Path.Combine(TranscribeEngine.GetWhisperInstallDir(), "models", "ggml-large-v3-turbo-q5_0.bin");
-				LogMessage("[模型下载] 正在自动拉取 ggml-large-v3-turbo-q5_0.bin 旗舰显卡模型 (574MB)...");
-				try
-				{
-					await TranscribeEngine.DownloadFileAsync("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin", turboDest, LogMessage, _cts.Token);
-					modelPath = turboDest;
-				}
-				catch (Exception ex)
-				{
-					LogMessage($"[下载中断] 旗舰模型下载中断，自动切换使用 Small 模型: {ex.Message}");
-					modelPath = TranscribeEngine.FindModelPath("small");
-				}
+				modelPath = TranscribeEngine.FindModelPath(modelChoice);
 			}
 			else
 			{
-				modelPath = TranscribeEngine.FindModelPath("small");
-				if (string.IsNullOrEmpty(modelPath)) modelPath = TranscribeEngine.FindModelPath("base");
+				modelPath = TranscribeEngine.FindModelPath("small") ?? TranscribeEngine.FindModelPath("base");
 			}
 		}
 
 		if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
 		{
-			MessageBox.Show(this, "本地尚未找到选中的 AI 模型文件，请先点击右上角【一键配置 AI 组件】下载模型！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			var ask = MessageBox.Show(this, "本地尚未找到选中的 AI 模型文件！\n是否立即一键自动下载基础模型？", "缺少模型", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+			if (ask == DialogResult.Yes)
+			{
+				await AutoInstallAiComponentsAsync();
+			}
 			return;
 		}
 

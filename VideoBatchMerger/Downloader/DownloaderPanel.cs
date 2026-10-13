@@ -936,35 +936,50 @@ internal sealed class DownloaderPanel : UserControl
 	{
 		LogMessage("[组件配置] 正在检测本地或官方源中的 yt-dlp.exe...");
 		string targetPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yt-dlp.exe");
-		string backupPath = @"D:\工具\视频拼接\VideoBatchStudio\yt-dlp.exe";
+		string ytdlpExisting = DownloadEngine.FindYtDlpPath();
 
-		if (File.Exists(targetPath) || File.Exists(backupPath))
+		if (!string.IsNullOrEmpty(ytdlpExisting) && File.Exists(ytdlpExisting))
 		{
-			LogMessage("[组件配置] 本地已找到可用组件！正在刷新系统状态...");
+			LogMessage($"[组件配置] 本地已找到可用组件 ({ytdlpExisting})！正在刷新状态...");
 			RefreshEnvironmentStatus();
-			MessageBox.Show(this, "核心组件已就绪，可直接解析并下载各平台视频！", "环境正常", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			MessageBox.Show(this, "yt-dlp 核心组件已就绪，可直接解析并下载各主流平台视频！", "环境正常", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			return;
 		}
 
 		try
 		{
-			LogMessage("[组件配置] 正在启动 winget 自动安装通道...");
-			var psi = new ProcessStartInfo
+			LogMessage("[组件配置] 正在通过高速镜像源下载最新版 yt-dlp.exe (约 15MB)...");
+			bool ok = await Transcriber.TranscribeEngine.DownloadWithMirrorAsync("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe", targetPath, LogMessage, CancellationToken.None);
+
+			if (!ok || !File.Exists(targetPath))
 			{
-				FileName = "winget",
-				Arguments = "install yt-dlp.yt-dlp --accept-source-agreements --accept-package-agreements",
-				UseShellExecute = false,
-				CreateNoWindow = true
-			};
-			using var proc = Process.Start(psi);
-			await Task.Run(() => proc?.WaitForExit());
+				LogMessage("[组件配置] 镜像直连失败，尝试启动系统 winget 安装通道...");
+				var psi = new ProcessStartInfo
+				{
+					FileName = "winget",
+					Arguments = "install yt-dlp.yt-dlp --accept-source-agreements --accept-package-agreements",
+					UseShellExecute = false,
+					CreateNoWindow = true
+				};
+				using var proc = Process.Start(psi);
+				await Task.Run(() => proc?.WaitForExit());
+			}
 
 			RefreshEnvironmentStatus();
-			MessageBox.Show(this, "组件安装完成！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			string finalPath = DownloadEngine.FindYtDlpPath();
+			if (!string.IsNullOrEmpty(finalPath) && File.Exists(finalPath))
+			{
+				MessageBox.Show(this, "yt-dlp 视频解析组件已成功安装并就绪！", "配置完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			}
+			else
+			{
+				MessageBox.Show(this, "yt-dlp 组件安装未能完成，请检查网络连接（或代理设置）后重试。", "配置未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			}
 		}
 		catch (Exception ex)
 		{
 			LogMessage($"[组件配置异常] {ex.Message}");
+			MessageBox.Show(this, $"组件配置出现异常: {ex.Message}\n请检查网络连接后重试！", "配置失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 		}
 	}
 
