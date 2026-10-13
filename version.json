@@ -8,5 +8,8 @@
     "【云端预装完整就绪】GitHub Actions 绿色完整便携包（VideoBatchStudio_Portable.zip）全面预装 ggml-base 离线识别模型，解压即用无需下载",
     "【双模推理全自动部署】NVIDIA GPU 显卡加速版与 CPU 全机型通用版全自动探测并静默部署，实时报告下载流百分比与状态"
   ],
-  "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/latest"
+  "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v8.9.3",
+  "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v8.9.3/VideoBatchStudio_Portable.zip",
+  "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v8.9.3/VideoBatchStudio_Portable.zip",
+  "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v8.9.3/VideoBatchStudio.exe"
 }

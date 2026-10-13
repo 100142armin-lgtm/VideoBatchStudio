@@ -17,9 +17,9 @@ internal sealed class UpdateNotificationForm : Form
 	public UpdateNotificationForm(string currentVer, string newVer, string releaseTitle, string releaseDate, IEnumerable<string> changelog, string downloadUrl)
 	{
 		Text = $"🎉 发现新版本 V{newVer} · 视频批处理工具升级提示";
-		Width = 620;
-		Height = 490;
-		MinimumSize = new Size(540, 420);
+		Width = 720;
+		Height = 520;
+		MinimumSize = new Size(640, 460);
 		StartPosition = FormStartPosition.CenterScreen;
 		BackColor = Color.FromArgb(15, 20, 28);
 		ForeColor = Color.White;
@@ -50,8 +50,8 @@ internal sealed class UpdateNotificationForm : Form
 		string dateStr = string.IsNullOrEmpty(releaseDate) ? DateTime.Now.ToString("yyyy-MM-dd") : releaseDate;
 		Label bannerSub = new Label
 		{
-			Text = $"当前版本: V{currentVer}  ➔  最新版本: V{newVer}  (发布日期: {dateStr})",
-			Font = new Font("Microsoft YaHei UI", 9f),
+			Text = $"当前版本: V{currentVer}  ➔  最新版本: V{newVer} ({dateStr}) · 推荐下载内置全部离线 AI 模型的完整免配置便携包",
+			Font = new Font("Microsoft YaHei UI", 8.75f),
 			ForeColor = Color.FromArgb(148, 163, 184),
 			AutoSize = true,
 			Location = new Point(20, 40)
@@ -63,21 +63,52 @@ internal sealed class UpdateNotificationForm : Form
 		Panel bottomBar = new Panel
 		{
 			Dock = DockStyle.Bottom,
-			Height = 64,
+			Height = 68,
 			BackColor = Color.FromArgb(20, 26, 38),
-			Padding = new Padding(16, 12, 16, 12)
+			Padding = new Padding(16, 14, 16, 14)
 		};
+
+		string tagUrl = $"https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v{newVer}";
+		string portableZipUrl = $"https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v{newVer}/VideoBatchStudio_Portable.zip";
+		string fastPortableZipUrl = $"https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v{newVer}/VideoBatchStudio_Portable.zip";
+		string exeUrl = $"https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v{newVer}/VideoBatchStudio.exe";
+
+		Button btnFastDownload = new Button
+		{
+			Text = "⚡ 国内极速下载便携包",
+			Size = new Size(175, 38),
+			Location = new Point(bottomBar.ClientSize.Width - 190, 14),
+			Anchor = AnchorStyles.Top | AnchorStyles.Right,
+			FlatStyle = FlatStyle.Flat,
+			BackColor = Color.FromArgb(16, 185, 129),
+			ForeColor = Color.White,
+			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
+			Cursor = Cursors.Hand
+		};
+		btnFastDownload.FlatAppearance.BorderSize = 0;
+		btnFastDownload.Click += delegate
+		{
+			try
+			{
+				Process.Start(new ProcessStartInfo(fastPortableZipUrl) { UseShellExecute = true });
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(this, "打开极速下载链接失败: " + ex.Message, "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			}
+		};
+		bottomBar.Controls.Add(btnFastDownload);
 
 		Button btnDownload = new Button
 		{
-			Text = "🚀 立即前往下载新版",
-			Size = new Size(160, 36),
-			Location = new Point(bottomBar.ClientSize.Width - 176, 14),
+			Text = "📦 官方原包",
+			Size = new Size(100, 38),
+			Location = new Point(bottomBar.ClientSize.Width - 298, 14),
 			Anchor = AnchorStyles.Top | AnchorStyles.Right,
 			FlatStyle = FlatStyle.Flat,
 			BackColor = Color.FromArgb(37, 99, 235),
 			ForeColor = Color.White,
-			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
+			Font = new Font("Microsoft YaHei UI", 9f),
 			Cursor = Cursors.Hand
 		};
 		btnDownload.FlatAppearance.BorderSize = 0;
@@ -85,25 +116,46 @@ internal sealed class UpdateNotificationForm : Form
 		{
 			try
 			{
-				string url = string.IsNullOrEmpty(downloadUrl) ? "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/latest" : downloadUrl;
-				if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-				{
-					url = "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/latest";
-				}
-				Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+				Process.Start(new ProcessStartInfo(portableZipUrl) { UseShellExecute = true });
 			}
 			catch (Exception ex)
 			{
-				MessageBox.Show(this, "打开浏览器失败: " + ex.Message, "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				MessageBox.Show(this, "打开官方下载链接失败: " + ex.Message, "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 			}
 		};
 		bottomBar.Controls.Add(btnDownload);
 
+		Button btnOpenPage = new Button
+		{
+			Text = "🌐 发布页面",
+			Size = new Size(95, 38),
+			Location = new Point(bottomBar.ClientSize.Width - 400, 14),
+			Anchor = AnchorStyles.Top | AnchorStyles.Right,
+			FlatStyle = FlatStyle.Flat,
+			BackColor = Color.FromArgb(30, 41, 59),
+			ForeColor = Color.FromArgb(226, 232, 240),
+			Font = new Font("Microsoft YaHei UI", 9f),
+			Cursor = Cursors.Hand
+		};
+		btnOpenPage.FlatAppearance.BorderSize = 0;
+		btnOpenPage.Click += delegate
+		{
+			try
+			{
+				Process.Start(new ProcessStartInfo(tagUrl) { UseShellExecute = true });
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(this, "打开发布主页失败: " + ex.Message, "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			}
+		};
+		bottomBar.Controls.Add(btnOpenPage);
+
 		Button btnCopyLink = new Button
 		{
-			Text = "📋 复制发布链接",
-			Size = new Size(120, 36),
-			Location = new Point(bottomBar.ClientSize.Width - 308, 14),
+			Text = "📋 复制链接",
+			Size = new Size(90, 38),
+			Location = new Point(bottomBar.ClientSize.Width - 498, 14),
 			Anchor = AnchorStyles.Top | AnchorStyles.Right,
 			FlatStyle = FlatStyle.Flat,
 			BackColor = Color.FromArgb(30, 41, 59),
@@ -116,13 +168,13 @@ internal sealed class UpdateNotificationForm : Form
 		{
 			try
 			{
-				string url = string.IsNullOrEmpty(downloadUrl) ? "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/latest" : downloadUrl;
-				if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-				{
-					url = "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/latest";
-				}
-				Clipboard.SetText(url);
-				MessageBox.Show(this, "下载链接已复制到剪贴板！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+				string text = $"VideoBatchStudio V{newVer} 最新版本下载地址：\r\n" +
+				              $"1. 国内极速下载便携包 (含离线模型/解压即用):\r\n   {fastPortableZipUrl}\r\n\r\n" +
+				              $"2. GitHub 官方原包下载:\r\n   {portableZipUrl}\r\n\r\n" +
+				              $"3. 独立程序 EXE:\r\n   {exeUrl}\r\n\r\n" +
+				              $"4. 官方发布主页:\r\n   {tagUrl}";
+				Clipboard.SetText(text);
+				MessageBox.Show(this, $"V{newVer} 最新版本的全部高速与官方下载链接已复制到剪贴板！可以直接发送给团队成员。", "复制成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			}
 			catch { }
 		};
@@ -131,7 +183,7 @@ internal sealed class UpdateNotificationForm : Form
 		Button btnRemindLater = new Button
 		{
 			Text = "稍后提醒",
-			Size = new Size(92, 36),
+			Size = new Size(82, 38),
 			Location = new Point(16, 14),
 			FlatStyle = FlatStyle.Flat,
 			BackColor = Color.FromArgb(30, 41, 59),

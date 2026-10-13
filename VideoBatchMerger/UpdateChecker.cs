@@ -46,14 +46,17 @@ internal static class UpdateChecker
 
 				string json = null;
 
-				// 1. Try fetching from raw version.json (Fast, no API rate limit)
+				// 1. Try fetching from raw version.json (Fast, no API rate limit, with cache-busting)
 				try
 				{
-					HttpWebRequest req = (HttpWebRequest)WebRequest.Create(RawVersionUrl);
+					string rawUrl = RawVersionUrl + "?t=" + DateTime.UtcNow.Ticks;
+					HttpWebRequest req = (HttpWebRequest)WebRequest.Create(rawUrl);
 					req.Method = "GET";
 					req.UserAgent = "VideoBatchStudio-Updater/" + currentVersion;
 					req.Timeout = 6000;
 					req.ReadWriteTimeout = 6000;
+					req.Headers[HttpRequestHeader.CacheControl] = "no-cache";
+					req.Headers[HttpRequestHeader.Pragma] = "no-cache";
 
 					using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
 					using (Stream stream = resp.GetResponseStream())
@@ -67,11 +70,14 @@ internal static class UpdateChecker
 					// Fallback to GitHub Release API
 					try
 					{
-						HttpWebRequest reqApi = (HttpWebRequest)WebRequest.Create(GitHubReleaseApiUrl);
+						string apiUrl = GitHubReleaseApiUrl + "?t=" + DateTime.UtcNow.Ticks;
+						HttpWebRequest reqApi = (HttpWebRequest)WebRequest.Create(apiUrl);
 						reqApi.Method = "GET";
 						reqApi.UserAgent = "VideoBatchStudio-Updater/" + currentVersion;
 						reqApi.Timeout = 6000;
 						reqApi.ReadWriteTimeout = 6000;
+						reqApi.Headers[HttpRequestHeader.CacheControl] = "no-cache";
+						reqApi.Headers[HttpRequestHeader.Pragma] = "no-cache";
 
 						using (HttpWebResponse respApi = (HttpWebResponse)reqApi.GetResponse())
 						using (Stream streamApi = respApi.GetResponseStream())
@@ -126,12 +132,14 @@ internal static class UpdateChecker
 				}
 
 				string downloadUrl = ExtractJsonString(json, "downloadUrl");
-				if (string.IsNullOrEmpty(downloadUrl)) downloadUrl = ExtractJsonString(json, "html_url");
-				if (string.IsNullOrEmpty(downloadUrl)) downloadUrl = RepoUrl + "/releases/latest";
+				if (string.IsNullOrEmpty(downloadUrl) || downloadUrl.Contains("releases/latest"))
+				{
+					downloadUrl = $"{RepoUrl}/releases/tag/v{remoteVersion}";
+				}
 				if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var validatedUri) ||
 				    (validatedUri.Scheme != Uri.UriSchemeHttp && validatedUri.Scheme != Uri.UriSchemeHttps))
 				{
-					downloadUrl = RepoUrl + "/releases/latest";
+					downloadUrl = $"{RepoUrl}/releases/tag/v{remoteVersion}";
 				}
 
 				List<string> changelog = ExtractJsonArray(json, "changelog");
