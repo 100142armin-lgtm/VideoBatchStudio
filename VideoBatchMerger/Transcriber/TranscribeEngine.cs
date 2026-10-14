@@ -818,30 +818,81 @@ public static class TranscribeEngine
 		return string.Empty;
 	}
 
+	public static bool HasChinese(string text)
+	{
+		if (string.IsNullOrWhiteSpace(text)) return false;
+		foreach (char c in text)
+		{
+			if (c >= 0x4E00 && c <= 0x9FA5) return true;
+		}
+		return false;
+	}
+
+	private static string MapSourceLang(string sourceLanguage)
+	{
+		return sourceLanguage?.ToLowerInvariant() switch
+		{
+			"english" or "en" => "en",
+			"portuguese" or "pt" => "pt",
+			"spanish" or "es" => "es",
+			"french" or "fr" => "fr",
+			"german" or "de" => "de",
+			"russian" or "ru" => "ru",
+			"japanese" or "ja" => "ja",
+			_ => "auto"
+		};
+	}
+
+	/// <summary>多源神经网络翻译（自动容灾：Google Chrome 引擎 -> MyMemory 国际通道 -> 网易有道 -> Google GTX）</summary>
 	public static async Task<string> TranslateToChineseAsync(string text, string sourceLanguage = "auto")
 	{
 		if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+		if (HasChinese(text) && text.Length > 2) return text;
 
+		ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+
+		// 通道 1: Google Chrome 扩展专用 API (dict-chrome-ex，高并发不被 429 拦截)
+		string res1 = await TryGoogleTranslateAsync(text, "dict-chrome-ex", sourceLanguage);
+		if (!string.IsNullOrEmpty(res1) && (HasChinese(res1) || res1 != text))
+		{
+			return res1;
+		}
+
+		// 通道 2: MyMemory 国际神经网络翻译 (直连海外与国内通用网络)
+		string res2 = await TryMyMemoryTranslateAsync(text, sourceLanguage);
+		if (!string.IsNullOrEmpty(res2) && (HasChinese(res2) || res2 != text))
+		{
+			return res2;
+		}
+
+		// 通道 3: 网易有道神经网络翻译引擎 (国内极速直连)
+		string res3 = await TryYoudaoTranslateAsync(text);
+		if (!string.IsNullOrEmpty(res3) && (HasChinese(res3) || res3 != text))
+		{
+			return res3;
+		}
+
+		// 通道 4: Google GTX 备用通道
+		string res4 = await TryGoogleTranslateAsync(text, "gtx", sourceLanguage);
+		if (!string.IsNullOrEmpty(res4) && (HasChinese(res4) || res4 != text))
+		{
+			return res4;
+		}
+
+		return null;
+	}
+
+	private static async Task<string> TryGoogleTranslateAsync(string text, string client, string sourceLanguage)
+	{
 		try
 		{
-			ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-			string srcLang = sourceLanguage?.ToLowerInvariant() switch
-			{
-				"english" or "en" => "en",
-				"portuguese" or "pt" => "pt",
-				"spanish" or "es" => "es",
-				"french" or "fr" => "fr",
-				"german" or "de" => "de",
-				"russian" or "ru" => "ru",
-				"japanese" or "ja" => "ja",
-				_ => "auto"
-			};
-
-			string url = $"https://translate.googleapis.com/translate_a/single?client=gtx&sl={srcLang}&tl=zh-CN&dt=t&q={Uri.EscapeDataString(text)}";
+			string srcLang = MapSourceLang(sourceLanguage);
+			string url = $"https://translate.googleapis.com/translate_a/single?client={client}&sl={srcLang}&tl=zh-CN&dt=t&q={Uri.EscapeDataString(text)}";
 			var request = new HttpRequestMessage(HttpMethod.Get, url);
-			request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+			request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
-			var response = await s_httpClient.SendAsync(request);
+			using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+			var response = await s_httpClient.SendAsync(request, cts.Token);
 			if (response.IsSuccessStatusCode)
 			{
 				string json = await response.Content.ReadAsStringAsync();
@@ -867,58 +918,126 @@ public static class TranscribeEngine
 			}
 		}
 		catch { }
+		return null;
+	}
 
-		return text;
+	private static async Task<string> TryMyMemoryTranslateAsync(string text, string sourceLanguage)
+	{
+		try
+		{
+			string srcLang = MapSourceLang(sourceLanguage);
+			if (srcLang == "auto") srcLang = "es";
+			string url = $"https://api.mymemory.translated.net/get?q={Uri.EscapeDataString(text)}&langpair={srcLang}|zh-CN";
+			var request = new HttpRequestMessage(HttpMethod.Get, url);
+			request.Headers.Add("User-Agent", "Mozilla/5.0 VideoBatchStudio");
+
+			using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+			var response = await s_httpClient.SendAsync(request, cts.Token);
+			if (response.IsSuccessStatusCode)
+			{
+				string json = await response.Content.ReadAsStringAsync();
+				var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+				var dict = serializer.DeserializeObject(json) as System.Collections.IDictionary;
+				if (dict != null && dict.Contains("responseData"))
+				{
+					var responseData = dict["responseData"] as System.Collections.IDictionary;
+					if (responseData != null && responseData.Contains("translatedText"))
+					{
+						string translated = responseData["translatedText"] as string;
+						if (!string.IsNullOrEmpty(translated) && !translated.Contains("MYMEMORY WARNING"))
+						{
+							return System.Net.WebUtility.HtmlDecode(translated.Trim());
+						}
+					}
+				}
+			}
+		}
+		catch { }
+		return null;
+	}
+
+	private static async Task<string> TryYoudaoTranslateAsync(string text)
+	{
+		try
+		{
+			string url = "https://aidemo.youdao.com/trans";
+			var content = new FormUrlEncodedContent(new[]
+			{
+				new KeyValuePair<string, string>("q", text),
+				new KeyValuePair<string, string>("from", "Auto"),
+				new KeyValuePair<string, string>("to", "zh-CHS")
+			});
+
+			using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+			var response = await s_httpClient.PostAsync(url, content, cts.Token);
+			if (response.IsSuccessStatusCode)
+			{
+				string json = await response.Content.ReadAsStringAsync();
+				var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+				var dict = serializer.DeserializeObject(json) as System.Collections.IDictionary;
+				if (dict != null && dict.Contains("translation"))
+				{
+					if (dict["translation"] is System.Collections.IList transList && transList.Count > 0)
+					{
+						string translated = transList[0] as string;
+						if (!string.IsNullOrEmpty(translated)) return translated.Trim();
+					}
+				}
+			}
+		}
+		catch { }
+		return null;
 	}
 
 	public static async Task TranslateSegmentsAsync(List<SubtitleSegment> segments, string sourceLanguage, Action<string> logCallback, CancellationToken ct)
 	{
 		if (segments == null || segments.Count == 0) return;
-		logCallback?.Invoke($"[AI智能翻译] 正在翻译 {segments.Count} 句字幕为简体中文 (支持英文/葡萄牙语/西班牙语)...");
+		logCallback?.Invoke($"[AI智能翻译] 正在翻译 {segments.Count} 句字幕为简体中文 (多通道神经网络自适应容灾)...");
 
-		int batchSize = 10;
-		for (int i = 0; i < segments.Count; i += batchSize)
+		// 1. 优先映射环境音标
+		foreach (var seg in segments)
 		{
-			if (ct.IsCancellationRequested) break;
-			var chunk = segments.Skip(i).Take(batchSize).ToList();
-
-			// 优先映射环境音标
-			foreach (var seg in chunk)
-			{
-				string ambient = FormatAmbientSound(seg.OriginalText);
-				if (!string.IsNullOrEmpty(ambient)) seg.TranslatedText = ambient;
-			}
-
-			var needTrans = chunk.Where(s => string.IsNullOrEmpty(s.TranslatedText)).ToList();
-			if (needTrans.Count > 0)
-			{
-				var combinedText = string.Join("\n", needTrans.Select(s => s.OriginalText));
-				string translatedCombined = await TranslateToChineseAsync(combinedText, sourceLanguage);
-				string[] translatedLines = translatedCombined.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-
-				if (translatedLines.Length == needTrans.Count)
-				{
-					for (int j = 0; j < needTrans.Count; j++)
-					{
-						needTrans[j].TranslatedText = translatedLines[j].Trim();
-					}
-				}
-				else
-				{
-					foreach (var seg in needTrans)
-					{
-						if (ct.IsCancellationRequested) break;
-						seg.TranslatedText = await TranslateToChineseAsync(seg.OriginalText, sourceLanguage);
-						await Task.Delay(40, ct);
-					}
-				}
-			}
-
-			logCallback?.Invoke($"[翻译进度] 已完成: {Math.Min(i + batchSize, segments.Count)} / {segments.Count} 句");
-			await Task.Delay(50, ct);
+			string ambient = FormatAmbientSound(seg.OriginalText);
+			if (!string.IsNullOrEmpty(ambient)) seg.TranslatedText = ambient;
 		}
 
-		logCallback?.Invoke("[AI智能翻译完成] 全部中文译文字幕对照就绪！");
+		var needTrans = segments.Where(s => string.IsNullOrEmpty(s.TranslatedText)).ToList();
+		int successCount = 0;
+
+		// 2. 逐句进行高可靠翻译（确保每句精准对应，避免合并请求被频控拦截）
+		for (int i = 0; i < needTrans.Count; i++)
+		{
+			if (ct.IsCancellationRequested) break;
+			var seg = needTrans[i];
+
+			string trans = await TranslateToChineseAsync(seg.OriginalText, sourceLanguage);
+			if (!string.IsNullOrEmpty(trans) && (HasChinese(trans) || trans != seg.OriginalText))
+			{
+				seg.TranslatedText = trans;
+				successCount++;
+			}
+			else
+			{
+				// 临时兜底
+				seg.TranslatedText = seg.OriginalText;
+			}
+
+			if ((i + 1) % 5 == 0 || i == needTrans.Count - 1)
+			{
+				logCallback?.Invoke($"[翻译进度] 已完成: {i + 1} / {needTrans.Count} 句 (成功译出中文: {successCount} 句)");
+			}
+
+			await Task.Delay(35, ct);
+		}
+
+		if (successCount > 0)
+		{
+			logCallback?.Invoke($"[AI智能翻译完成] 全部中文译文字幕对照就绪！(共成功翻译 {successCount}/{needTrans.Count} 句)");
+		}
+		else
+		{
+			logCallback?.Invoke("[翻译警告] 所有在线翻译通道当前均无响应，请检查电脑网络连接！");
+		}
 	}
 
 	public static string ExportToSrt(IEnumerable<SubtitleSegment> segments, bool includeOriginal, bool includeTranslated)

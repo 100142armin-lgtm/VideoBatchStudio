@@ -1469,9 +1469,12 @@ internal sealed class TranscribePanel : UserControl
 				sbTrans.AppendLine();
 			}
 
-			// 按照视频的名称 显示每个视频转录的文字 文本格式显示即可，不要时间戳
-			sbOrig.AppendLine($"【{item.SourceName}】");
-			sbTrans.AppendLine($"【{item.SourceName}】");
+			// 多视频归类展示时标注视频标题，单视频时直接清晰呈现对白
+			if (completedItems.Count > 1)
+			{
+				sbOrig.AppendLine($"【{item.SourceName}】");
+				sbTrans.AppendLine($"【{item.SourceName}】");
+			}
 
 			foreach (var seg in item.Segments)
 			{
@@ -1479,7 +1482,7 @@ internal sealed class TranscribePanel : UserControl
 				{
 					sbOrig.AppendLine(seg.OriginalText.Trim());
 				}
-				string trans = !string.IsNullOrWhiteSpace(seg.TranslatedText) ? seg.TranslatedText.Trim() : seg.OriginalText.Trim();
+				string trans = !string.IsNullOrWhiteSpace(seg.TranslatedText) ? seg.TranslatedText.Trim() : (TranscribeEngine.HasChinese(seg.OriginalText) ? seg.OriginalText.Trim() : "[等待翻译...]");
 				if (!string.IsNullOrWhiteSpace(trans))
 				{
 					sbTrans.AppendLine(trans);

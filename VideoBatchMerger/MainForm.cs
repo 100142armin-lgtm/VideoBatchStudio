@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.9.3";
+	public const string CurrentAppVersion = "8.9.4";
 
 	public const int WorkspaceMerge = 0;
 	public const int WorkspaceSplit = 1;
