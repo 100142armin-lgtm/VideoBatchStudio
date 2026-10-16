@@ -1,15 +1,15 @@
 {
-  "version": "8.9.4",
-  "releaseDate": "2026-10-14",
-  "title": "VideoBatchStudio V8.9.4 紧急热修：多源神经网络翻译容灾引擎上线，彻底根治中文未译出问题",
+  "version": "8.9.5",
+  "releaseDate": "2026-10-16",
+  "title": "VideoBatchStudio V8.9.5 体验升级：智能字幕板块全静默无弹窗操作 + 多源神经翻译稳健护航",
   "changelog": [
-    "【多源神经网络翻译容灾系统】重构翻译内核，新增 Google Chrome 专属接口、MyMemory 国际神经翻译与网易有道引擎三大直连通道，彻底绕开 Google GTX 的 HTTP 429 频控封锁",
-    "【智能中文校验与实时重试】增加译文字符集验证机制，杜绝外文原文被误当作中文结果展示，保证每一句字幕均精准译为地道简体中文",
-    "【单视频与多视频归类智能呈现】单视频转录时直接呈现纯净对白与中文译文，多视频转录时自动以视频名称分组归类，避免标题冗余",
+    "【智能字幕全静默操作】全面移除智能字幕板块点击按钮时的弹窗提醒（复制原文、复制纯中文、复制双语对照、粘贴链接、组件配置等均直接执行并通过底部状态栏与日志静默反馈），彻底告别弹窗打断",
+    "【多源神经网络翻译容灾系统】内置 Google Chrome 专属接口、MyMemory 国际神经翻译与网易有道引擎多通道自动容灾，确保中文字幕稳定输出",
+    "【单视频与多视频归类智能呈现】单视频转录直接呈现纯净对白与中文译文，多视频转录自动按视频标题分组归类",
     "【HTTP 308 与高速镜像全打通】全面保持全协议重定向穿透与离线模型极速下载特性，开箱即用稳定可靠"
   ],
-  "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v8.9.4",
-  "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v8.9.4/VideoBatchStudio_Portable.zip",
-  "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v8.9.4/VideoBatchStudio_Portable.zip",
-  "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v8.9.4/VideoBatchStudio.exe"
+  "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v8.9.5",
+  "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v8.9.5/VideoBatchStudio_Portable.zip",
+  "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v8.9.5/VideoBatchStudio_Portable.zip",
+  "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v8.9.5/VideoBatchStudio.exe"
 }

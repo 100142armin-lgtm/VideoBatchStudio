@@ -771,7 +771,8 @@ internal sealed class TranscribePanel : UserControl
 		}
 		else
 		{
-			MessageBox.Show(this, "剪贴板中未检测到文本内容！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			LogMessage("[链接粘贴] 剪贴板中未检测到文本内容。");
+			_statusLabel.Text = "剪贴板中未检测到文本内容";
 		}
 	}
 
@@ -808,10 +809,12 @@ internal sealed class TranscribePanel : UserControl
 			_txtOnlineUrls.Lines = current.ToArray();
 			UpdateInputCount();
 			LogMessage($"[链接粘贴] 成功添加 {added} 个在线视频链接。");
+			_statusLabel.Text = $"✓ 成功粘贴添加 {added} 个在线视频链接";
 		}
 		else
 		{
-			MessageBox.Show(this, "未能从剪贴板提取到有效的网页视频链接 (如 YouTube, TikTok, Facebook Reel 等)！", "未检测到链接", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			LogMessage("[链接粘贴] 未能从剪贴板提取到有效的网页视频链接。");
+			_statusLabel.Text = "未能从剪贴板提取到有效视频链接";
 		}
 	}
 
@@ -923,17 +926,19 @@ internal sealed class TranscribePanel : UserControl
 			if (!string.IsNullOrEmpty(whisperCli) && (!string.IsNullOrEmpty(baseModel) || !string.IsNullOrEmpty(smallModel)))
 			{
 				string typeName = TranscribeEngine.IsCudaBuild(whisperCli) ? "GPU 硬件加速版" : "CPU 通用版";
-				MessageBox.Show(this, $"AI 语音转录模型与引擎配置完毕！已完全就绪离线使用。\n\n当前状态：\n• Whisper 内核：{typeName}\n• AI 语音模型：已就绪\n\n现在您可以随时拖入视频进行一键批量转录！", "配置完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+				LogMessage($"[组件配置] AI 语音转录模型与引擎配置完毕 ({typeName})，已完全就绪！");
+				_statusLabel.Text = $"✓ AI 语音转录模型与引擎 ({typeName}) 已配置就绪";
 			}
 			else
 			{
-				MessageBox.Show(this, "AI 组件配置未能完整就绪，请查看底部日志并检查网络后重试。", "配置未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				LogMessage("[组件配置] AI 组件配置未能完整就绪，请检查网络后重试。");
+				_statusLabel.Text = "⚠ AI 组件配置未完成，请查看日志";
 			}
 		}
 		catch (Exception ex)
 		{
 			LogMessage($"[配置异常] {ex.Message}");
-			MessageBox.Show(this, $"AI 组件安装出现异常: {ex.Message}\n请检查网络连接后重试！", "配置失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			_statusLabel.Text = $"⚠ AI 组件配置异常: {ex.Message}";
 		}
 		finally
 		{
@@ -1042,18 +1047,21 @@ internal sealed class TranscribePanel : UserControl
 		string whisperCli = TranscribeEngine.FindWhisperCliPath();
 		if (string.IsNullOrEmpty(whisperCli) || !File.Exists(whisperCli))
 		{
-			var ask = MessageBox.Show(this, "尚未检测到 Whisper 离线推理引擎！\n\n是否立即启动一键自动配置（自动下载离线推理引擎与多语种基础模型）？", "缺少推理引擎", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-			if (ask == DialogResult.Yes)
+			LogMessage("[环境检测] 尚未检测到 Whisper 离线推理引擎，正在自动配置 AI 组件...");
+			_statusLabel.Text = "正在自动配置 AI 推理引擎与模型...";
+			await AutoInstallAiComponentsAsync();
+			whisperCli = TranscribeEngine.FindWhisperCliPath();
+			if (string.IsNullOrEmpty(whisperCli) || !File.Exists(whisperCli))
 			{
-				await AutoInstallAiComponentsAsync();
+				return;
 			}
-			return;
 		}
 
 		string ffmpegCheck = Downloader.DownloadEngine.FindFFmpegPath();
 		if (string.IsNullOrEmpty(ffmpegCheck) || !File.Exists(ffmpegCheck))
 		{
-			MessageBox.Show(this, "未检测到音视频核心 ffmpeg.exe，无法提取音轨！\n\n• 建议从 GitHub 发布页下载【VideoBatchStudio_Portable.zip 完整便携包】解压使用；\n• 或将 ffmpeg.exe 复制到当前软件同级目录下即可立即使用。", "缺少 FFmpeg 组件", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			LogMessage("[环境检测] 未检测到音视频核心 ffmpeg.exe，无法提取音轨。");
+			_statusLabel.Text = "⚠ 未检测到 ffmpeg.exe 组件，无法提取音轨";
 			return;
 		}
 
@@ -1062,7 +1070,8 @@ internal sealed class TranscribePanel : UserControl
 			string ytdlpCheck = Downloader.DownloadEngine.FindYtDlpPath();
 			if (string.IsNullOrEmpty(ytdlpCheck) || !File.Exists(ytdlpCheck))
 			{
-				MessageBox.Show(this, "转录在线视频需要 yt-dlp 组件辅助拉取音频流！\n请切换到【📥 视频下载】页面，点击【一键配置组件】下载 yt-dlp 后重试。", "缺少 yt-dlp 组件", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				LogMessage("[环境检测] 转录在线视频需要 yt-dlp 组件辅助拉取音频流，请先配置组件。");
+				_statusLabel.Text = "⚠ 缺少 yt-dlp 组件，无法拉取在线视频音轨";
 				return;
 			}
 		}
@@ -1090,12 +1099,14 @@ internal sealed class TranscribePanel : UserControl
 
 		if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
 		{
-			var ask = MessageBox.Show(this, "本地尚未找到选中的 AI 模型文件！\n是否立即一键自动下载基础模型？", "缺少模型", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-			if (ask == DialogResult.Yes)
+			LogMessage("[模型检测] 本地尚未找到可用的 AI 模型文件，正在自动配置基础模型...");
+			_statusLabel.Text = "正在自动下载基础 AI 模型...";
+			await AutoInstallAiComponentsAsync();
+			modelPath = TranscribeEngine.FindModelPath(modelChoice) ?? TranscribeEngine.FindModelPath("small") ?? TranscribeEngine.FindModelPath("base");
+			if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
 			{
-				await AutoInstallAiComponentsAsync();
+				return;
 			}
-			return;
 		}
 
 		_items.Clear();
@@ -1141,7 +1152,8 @@ internal sealed class TranscribePanel : UserControl
 
 		if (_items.Count == 0)
 		{
-			MessageBox.Show(this, "请先添加本地媒体文件或粘贴在线视频链接！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			LogMessage("[提示] 请先添加本地媒体文件或粘贴在线视频链接。");
+			_statusLabel.Text = "请先添加本地媒体文件或粘贴在线视频链接";
 			return;
 		}
 
@@ -1560,12 +1572,37 @@ internal sealed class TranscribePanel : UserControl
 		return $"\"{escaped}\"";
 	}
 
+	private bool TrySetClipboardText(string text)
+	{
+		if (string.IsNullOrEmpty(text)) return false;
+		try
+		{
+			Clipboard.SetDataObject(text, true, 5, 50);
+			return true;
+		}
+		catch
+		{
+			try
+			{
+				Clipboard.SetText(text);
+				return true;
+			}
+			catch (Exception ex)
+			{
+				LogMessage($"[剪贴板提示] 写入剪贴板受阻: {ex.Message}");
+				_statusLabel.Text = "⚠ 剪贴板正被其他程序占用，请稍后重试";
+				return false;
+			}
+		}
+	}
+
 	private void CopyOriginalText()
 	{
 		var targets = GetTargetItems();
 		if (targets.Count == 0)
 		{
-			MessageBox.Show(this, "当前没有识别出的原文内容可复制！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			LogMessage("[复制原文] 当前没有识别出的原文内容可复制。");
+			_statusLabel.Text = "当前没有识别出的原文内容可复制";
 			return;
 		}
 
@@ -1587,9 +1624,12 @@ internal sealed class TranscribePanel : UserControl
 			sb.Append(FormatSpreadsheetCell(videoCellText));
 		}
 
-		Clipboard.SetText(sb.ToString().Trim());
-		int totalLines = targets.Sum(t => t.Segments.Count);
-		MessageBox.Show(this, $"成功复制全部 {targets.Count} 个视频共 {totalLines} 句识别原文！\n已采用表格单单元格格式打包，直接粘贴到谷歌表格/Excel 中即可实现【每个视频的文字完整放在一个单元格】。", "已复制原文", MessageBoxButtons.OK, MessageBoxIcon.Information);
+		if (TrySetClipboardText(sb.ToString().Trim()))
+		{
+			int totalLines = targets.Sum(t => t.Segments.Count);
+			LogMessage($"[复制原文] 已复制全部 {targets.Count} 个视频共 {totalLines} 句识别原文至剪贴板。");
+			_statusLabel.Text = $"✓ 已复制 {targets.Count} 个视频共 {totalLines} 句识别原文";
+		}
 	}
 
 	private void CopyChineseText()
@@ -1597,7 +1637,8 @@ internal sealed class TranscribePanel : UserControl
 		var targets = GetTargetItems();
 		if (targets.Count == 0)
 		{
-			MessageBox.Show(this, "当前没有中文翻译内容可复制！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			LogMessage("[复制纯中文] 当前没有中文翻译内容可复制。");
+			_statusLabel.Text = "当前没有中文翻译内容可复制";
 			return;
 		}
 
@@ -1620,9 +1661,12 @@ internal sealed class TranscribePanel : UserControl
 			sb.Append(FormatSpreadsheetCell(videoCellText));
 		}
 
-		Clipboard.SetText(sb.ToString().Trim());
-		int totalLines = targets.Sum(t => t.Segments.Count);
-		MessageBox.Show(this, $"成功复制全部 {targets.Count} 个视频共 {totalLines} 句纯中文译文！\n已采用表格单单元格格式打包，直接粘贴到谷歌表格/Excel 中即可实现【每个视频的文字完整放在一个单元格】。", "已复制中文", MessageBoxButtons.OK, MessageBoxIcon.Information);
+		if (TrySetClipboardText(sb.ToString().Trim()))
+		{
+			int totalLines = targets.Sum(t => t.Segments.Count);
+			LogMessage($"[复制纯中文] 已复制全部 {targets.Count} 个视频共 {totalLines} 句纯中文译文至剪贴板。");
+			_statusLabel.Text = $"✓ 已复制 {targets.Count} 个视频共 {totalLines} 句纯中文译文";
+		}
 	}
 
 	private void CopyBilingualText()
@@ -1630,7 +1674,8 @@ internal sealed class TranscribePanel : UserControl
 		var targets = GetTargetItems();
 		if (targets.Count == 0)
 		{
-			MessageBox.Show(this, "当前没有双语字幕内容可复制！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			LogMessage("[复制双语] 当前没有双语字幕内容可复制。");
+			_statusLabel.Text = "当前没有双语字幕内容可复制";
 			return;
 		}
 
@@ -1664,9 +1709,12 @@ internal sealed class TranscribePanel : UserControl
 			sb.Append(origCell).Append("\t").Append(transCell);
 		}
 
-		Clipboard.SetText(sb.ToString().Trim());
-		int totalLines = targets.Sum(t => t.Segments.Count);
-		MessageBox.Show(this, $"成功复制全部 {targets.Count} 个视频共 {totalLines} 句双语对照！\n已采用双列对照格式打包，直接粘贴到谷歌表格/Excel 中即可实现【A列外文，B列对应中文，每视频一行一格】。", "已复制双语", MessageBoxButtons.OK, MessageBoxIcon.Information);
+		if (TrySetClipboardText(sb.ToString().Trim()))
+		{
+			int totalLines = targets.Sum(t => t.Segments.Count);
+			LogMessage($"[复制双语] 已复制全部 {targets.Count} 个视频共 {totalLines} 句双语对照至剪贴板。");
+			_statusLabel.Text = $"✓ 已复制 {targets.Count} 个视频共 {totalLines} 句双语对照";
+		}
 	}
 
 	private void ExportSrtFile()
@@ -1674,7 +1722,8 @@ internal sealed class TranscribePanel : UserControl
 		var targets = GetTargetItems();
 		if (targets.Count == 0)
 		{
-			MessageBox.Show(this, "当前没有字幕可导出！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			LogMessage("[导出SRT] 当前没有字幕可导出。");
+			_statusLabel.Text = "当前没有字幕可导出";
 			return;
 		}
 
@@ -1697,7 +1746,8 @@ internal sealed class TranscribePanel : UserControl
 				sb.Append(TranscribeEngine.ExportToSrt(item.Segments, includeOrig, includeTrans));
 			}
 			File.WriteAllText(sfd.FileName, sb.ToString(), Encoding.UTF8);
-			MessageBox.Show(this, $"字幕文件已成功保存至:\n{sfd.FileName}", "导出成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			LogMessage($"[导出SRT] 字幕文件已成功保存至: {sfd.FileName}");
+			_statusLabel.Text = $"✓ SRT 字幕已保存: {Path.GetFileName(sfd.FileName)}";
 		}
 	}
 
@@ -1706,7 +1756,8 @@ internal sealed class TranscribePanel : UserControl
 		var targets = GetTargetItems();
 		if (targets.Count == 0)
 		{
-			MessageBox.Show(this, "当前没有文本可导出！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			LogMessage("[导出TXT] 当前没有文本可导出。");
+			_statusLabel.Text = "当前没有文本可导出";
 			return;
 		}
 
@@ -1733,7 +1784,8 @@ internal sealed class TranscribePanel : UserControl
 				sb.AppendLine(txt);
 			}
 			File.WriteAllText(sfd.FileName, sb.ToString(), Encoding.UTF8);
-			MessageBox.Show(this, $"TXT 对照字幕文件已成功保存至:\n{sfd.FileName}", "导出成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			LogMessage($"[导出TXT] TXT 对照字幕文件已成功保存至: {sfd.FileName}");
+			_statusLabel.Text = $"✓ TXT 字幕已保存: {Path.GetFileName(sfd.FileName)}";
 		}
 	}
 
