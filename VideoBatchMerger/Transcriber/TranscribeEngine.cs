@@ -241,7 +241,7 @@ public static class TranscribeEngine
 		}
 	}
 
-	/// <summary>多镜像容灾大文件流式下载（自动尝试国内加速镜像与官方直连）</summary>
+	/// <summary>多镜像容灾大文件流式下载（自动尝试高速加速镜像与官方直连）</summary>
 	public static async Task<bool> DownloadWithMirrorAsync(string primaryUrl, string destPath, Action<string> logCallback, CancellationToken ct)
 	{
 		var urls = new List<string>();

@@ -14,22 +14,20 @@ using System.Windows.Forms;
 namespace VideoBatchMerger;
 
 /// <summary>
-/// 现代化暗黑风格新版本全自动更新弹窗
-/// 支持呈现新功能列表、版本对比、一键静默极速下载、自动解压覆盖并重启
+/// 极简全自动静默热更新弹窗
+/// 仅保留【稍后提醒】与【立即更新】两个核心按钮，用户确认后全自动流式下载、解压覆盖并重启
 /// </summary>
 internal sealed class UpdateNotificationForm : Form
 {
 	private readonly string _currentVer;
 	private readonly string _newVer;
-	private readonly string _tagUrl;
 	private readonly string _fastPortableZipUrl;
 	private readonly string _portableZipUrl;
 
 	private Label _lblStatus;
 	private ProgressBar _pbProgress;
-	private Button _btnAutoUpdate;
-	private Button _btnOpenPage;
-	private Button _btnRemindLater;
+	private Button _btnUpdateNow;
+	private Button _btnCancel;
 	private bool _isUpdating = false;
 	private CancellationTokenSource _cts;
 
@@ -45,7 +43,6 @@ internal sealed class UpdateNotificationForm : Form
 	{
 		_currentVer = currentVer;
 		_newVer = newVer;
-		_tagUrl = string.IsNullOrWhiteSpace(downloadUrl) ? $"https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v{newVer}" : downloadUrl;
 		_fastPortableZipUrl = string.IsNullOrWhiteSpace(fastPortableZipUrl)
 			? $"https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v{newVer}/VideoBatchStudio_Portable.zip"
 			: fastPortableZipUrl;
@@ -53,10 +50,10 @@ internal sealed class UpdateNotificationForm : Form
 			? $"https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v{newVer}/VideoBatchStudio_Portable.zip"
 			: portableZipUrl;
 
-		Text = $"🎉 发现新版本 V{newVer} · 视频批处理工具";
-		Width = 720;
-		Height = 540;
-		MinimumSize = new Size(640, 480);
+		Text = $"🎉 发现新版本 V{newVer} · 视频批处理工具升级提示";
+		Width = 680;
+		Height = 490;
+		MinimumSize = new Size(600, 420);
 		StartPosition = FormStartPosition.CenterScreen;
 		BackColor = Color.FromArgb(15, 20, 28);
 		ForeColor = Color.White;
@@ -65,13 +62,13 @@ internal sealed class UpdateNotificationForm : Form
 		MinimizeBox = false;
 		KeyPreview = true;
 
-		// 1. Header Banner
+		// 1. 顶部状态横幅
 		Panel headerPanel = new Panel
 		{
 			Dock = DockStyle.Top,
-			Height = 72,
+			Height = 68,
 			BackColor = Color.FromArgb(24, 32, 46),
-			Padding = new Padding(20, 12, 20, 10)
+			Padding = new Padding(20, 12, 20, 8)
 		};
 
 		Label bannerTitle = new Label
@@ -87,31 +84,31 @@ internal sealed class UpdateNotificationForm : Form
 		string dateStr = string.IsNullOrEmpty(releaseDate) ? DateTime.Now.ToString("yyyy-MM-dd") : releaseDate;
 		Label bannerSub = new Label
 		{
-			Text = $"当前版本: V{currentVer}  ➔  最新版本: V{newVer} ({dateStr}) · 支持一键无感全自动升级",
+			Text = $"当前版本: V{currentVer}  ➔  最新版本: V{newVer} ({dateStr}) · 点击立即更新将全自动静默升级",
 			Font = new Font("Microsoft YaHei UI", 8.75f),
 			ForeColor = Color.FromArgb(148, 163, 184),
 			AutoSize = true,
-			Location = new Point(20, 40)
+			Location = new Point(20, 38)
 		};
 		headerPanel.Controls.Add(bannerSub);
 		Controls.Add(headerPanel);
 
-		// 2. Bottom Controls Bar
+		// 2. 底部极简操作栏（仅 2 个按钮 + 进度条）
 		Panel bottomBar = new Panel
 		{
 			Dock = DockStyle.Bottom,
-			Height = 96,
+			Height = 84,
 			BackColor = Color.FromArgb(20, 26, 38),
-			Padding = new Padding(16, 8, 16, 12)
+			Padding = new Padding(20, 8, 20, 12)
 		};
 
 		_lblStatus = new Label
 		{
-			Text = "💡 点击【一键自动升级】，软件将自动极速下载、静默覆盖并重新启动，无需手动解压。",
+			Text = "💡 点击【立即更新】，软件将自动静默下载、覆盖旧版并重启生效。",
 			Font = new Font("Microsoft YaHei UI", 9f),
 			ForeColor = Color.FromArgb(148, 163, 184),
-			Location = new Point(16, 10),
-			Size = new Size(bottomBar.ClientSize.Width - 32, 20),
+			Location = new Point(20, 10),
+			Size = new Size(bottomBar.ClientSize.Width - 40, 18),
 			Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
 			AutoEllipsis = true
 		};
@@ -119,8 +116,8 @@ internal sealed class UpdateNotificationForm : Form
 
 		_pbProgress = new ProgressBar
 		{
-			Location = new Point(16, 32),
-			Size = new Size(bottomBar.ClientSize.Width - 32, 8),
+			Location = new Point(20, 30),
+			Size = new Size(bottomBar.ClientSize.Width - 40, 8),
 			Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
 			Minimum = 0,
 			Maximum = 100,
@@ -129,11 +126,11 @@ internal sealed class UpdateNotificationForm : Form
 		};
 		bottomBar.Controls.Add(_pbProgress);
 
-		_btnRemindLater = new Button
+		_btnCancel = new Button
 		{
 			Text = "稍后提醒",
-			Size = new Size(84, 38),
-			Location = new Point(16, 48),
+			Size = new Size(95, 36),
+			Location = new Point(20, 42),
 			Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
 			FlatStyle = FlatStyle.Flat,
 			BackColor = Color.FromArgb(30, 41, 59),
@@ -141,80 +138,54 @@ internal sealed class UpdateNotificationForm : Form
 			Font = new Font("Microsoft YaHei UI", 9f),
 			Cursor = Cursors.Hand
 		};
-		_btnRemindLater.FlatAppearance.BorderSize = 0;
-		_btnRemindLater.Click += delegate { Close(); };
-		bottomBar.Controls.Add(_btnRemindLater);
+		_btnCancel.FlatAppearance.BorderSize = 0;
+		_btnCancel.Click += delegate { Close(); };
+		bottomBar.Controls.Add(_btnCancel);
 
-		_btnOpenPage = new Button
+		_btnUpdateNow = new Button
 		{
-			Text = "🌐 发布主页",
-			Size = new Size(100, 38),
-			Location = new Point(bottomBar.ClientSize.Width - 315, 48),
-			Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-			FlatStyle = FlatStyle.Flat,
-			BackColor = Color.FromArgb(30, 41, 59),
-			ForeColor = Color.FromArgb(226, 232, 240),
-			Font = new Font("Microsoft YaHei UI", 9f),
-			Cursor = Cursors.Hand
-		};
-		_btnOpenPage.FlatAppearance.BorderSize = 0;
-		_btnOpenPage.Click += delegate
-		{
-			try
-			{
-				Process.Start(new ProcessStartInfo(_tagUrl) { UseShellExecute = true });
-			}
-			catch (Exception ex)
-			{
-				MessageBox.Show(this, "打开发布主页失败: " + ex.Message, "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-			}
-		};
-		bottomBar.Controls.Add(_btnOpenPage);
-
-		_btnAutoUpdate = new Button
-		{
-			Text = "⚡ 一键自动升级 (推荐)",
-			Size = new Size(190, 38),
-			Location = new Point(bottomBar.ClientSize.Width - 206, 48),
+			Text = "🚀 立即更新",
+			Size = new Size(160, 36),
+			Location = new Point(bottomBar.ClientSize.Width - 180, 42),
 			Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
 			FlatStyle = FlatStyle.Flat,
 			BackColor = Color.FromArgb(16, 185, 129),
 			ForeColor = Color.White,
-			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
+			Font = new Font("Microsoft YaHei UI", 10f, FontStyle.Bold),
 			Cursor = Cursors.Hand
 		};
-		_btnAutoUpdate.FlatAppearance.BorderSize = 0;
-		_btnAutoUpdate.Click += async (s, e) => await StartAutoUpdateAsync();
-		bottomBar.Controls.Add(_btnAutoUpdate);
+		_btnUpdateNow.FlatAppearance.BorderSize = 0;
+		_btnUpdateNow.Click += async (s, e) => await StartAutoUpdateAsync();
+		bottomBar.Controls.Add(_btnUpdateNow);
 
 		Controls.Add(bottomBar);
 
-		// 3. Central Content: Changelog Details
+		// 3. 中间内容区：更新日志
 		Panel contentPanel = new Panel
 		{
 			Dock = DockStyle.Fill,
 			BackColor = Color.FromArgb(15, 20, 28),
-			Padding = new Padding(20, 16, 20, 10)
+			Padding = new Padding(20, 14, 20, 8)
 		};
 
 		Label lblChangeTitle = new Label
 		{
-			Text = string.IsNullOrEmpty(releaseTitle) ? "💡 本次更新内容与新功能说明：" : $"💡 {releaseTitle}：",
+			Text = string.IsNullOrEmpty(releaseTitle) ? "💡 本次更新内容：" : $"💡 {releaseTitle}：",
 			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
 			ForeColor = Color.FromArgb(226, 232, 240),
 			AutoSize = true,
-			Location = new Point(20, 16)
+			Location = new Point(20, 14)
 		};
 		contentPanel.Controls.Add(lblChangeTitle);
 
 		TextBox tbChangelog = new TextBox
 		{
-			Location = new Point(20, 44),
-			Size = new Size(contentPanel.ClientSize.Width - 40, contentPanel.ClientSize.Height - 56),
+			Location = new Point(20, 38),
+			Size = new Size(contentPanel.ClientSize.Width - 40, contentPanel.ClientSize.Height - 48),
 			Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
 			BackColor = Color.FromArgb(20, 26, 38),
 			ForeColor = Color.FromArgb(226, 232, 240),
-			Font = new Font("Microsoft YaHei UI", 9.5f),
+			Font = new Font("Microsoft YaHei UI", 9.25f),
 			BorderStyle = BorderStyle.FixedSingle,
 			ReadOnly = true,
 			Multiline = true,
@@ -250,7 +221,7 @@ internal sealed class UpdateNotificationForm : Form
 	{
 		if (_isUpdating)
 		{
-			var dr = MessageBox.Show(this, "新版本正在后台极速下载中，确定要取消本次自动升级吗？", "取消更新", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+			var dr = MessageBox.Show(this, "新版本正在静默下载中，确定要取消本次升级吗？", "取消更新", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
 			if (dr == DialogResult.No)
 			{
 				e.Cancel = true;
@@ -265,7 +236,7 @@ internal sealed class UpdateNotificationForm : Form
 	}
 
 	/// <summary>
-	/// 执行一键全自动下载、解压覆盖与重启
+	/// 用户确认后，全自动静默下载、解压覆盖并重启
 	/// </summary>
 	private async Task StartAutoUpdateAsync()
 	{
@@ -273,26 +244,26 @@ internal sealed class UpdateNotificationForm : Form
 		_isUpdating = true;
 		_cts = new CancellationTokenSource();
 
-		_btnAutoUpdate.Enabled = false;
-		_btnAutoUpdate.Text = "⏳ 正在准备下载...";
-		_btnRemindLater.Enabled = false;
+		_btnUpdateNow.Enabled = false;
+		_btnUpdateNow.Text = "⏳ 正在更新...";
+		_btnCancel.Enabled = false;
 		_pbProgress.Visible = true;
 		_pbProgress.Value = 0;
 		_lblStatus.ForeColor = Color.FromArgb(56, 189, 248);
-		_lblStatus.Text = "🚀 正在连接高速下载节点...";
+		_lblStatus.Text = "🚀 正在连接高速通道下载更新包...";
 
 		string tempZip = Path.Combine(Path.GetTempPath(), $"vbs_update_{_newVer}_{DateTime.Now.Ticks}.zip");
 		string tempExtractDir = Path.Combine(Path.GetTempPath(), $"vbs_extract_{_newVer}_{DateTime.Now.Ticks}");
 
 		try
 		{
-			// 1. 下载更新包
+			// 1. 静默下载更新包
 			await DownloadWithFallbackAsync(_fastPortableZipUrl, _portableZipUrl, tempZip, _cts.Token);
 
-			_lblStatus.Text = "📦 下载完成，正在解压更新包准备就绪...";
+			_lblStatus.Text = "📦 下载完成，正在解压并准备自动重启...";
 			_pbProgress.Value = 100;
 
-			// 2. 解压更新包并在后台准备重启脚本
+			// 2. 解压并在后台启动替换脚本
 			await Task.Run(() =>
 			{
 				if (Directory.Exists(tempExtractDir)) Directory.Delete(tempExtractDir, true);
@@ -300,33 +271,25 @@ internal sealed class UpdateNotificationForm : Form
 
 				ZipFile.ExtractToDirectory(tempZip, tempExtractDir);
 
-				// 智能探测 VideoBatchStudio.exe 所在层级
 				string exeFound = Directory.GetFiles(tempExtractDir, "VideoBatchStudio.exe", SearchOption.AllDirectories).FirstOrDefault();
 				if (string.IsNullOrEmpty(exeFound))
 				{
-					throw new Exception("更新包中未检测到核心可执行文件 VideoBatchStudio.exe！");
+					throw new Exception("更新包中未检测到可执行程序 VideoBatchStudio.exe！");
 				}
 
 				string sourceFolder = Path.GetDirectoryName(exeFound);
 				string currentAppDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
 
-				// 3. 生成独立后台升级批处理脚本
 				string updaterBat = Path.Combine(Path.GetTempPath(), $"vbs_updater_{DateTime.Now.Ticks}.bat");
 				string batScript =
 					"@echo off\r\n" +
 					"chcp 65001 >nul\r\n" +
 					"title 正在升级 VideoBatchStudio...\r\n" +
-					"echo ========================================================\r\n" +
-					$"echo   正在将 VideoBatchStudio 升级至最新版本 V{_newVer}\r\n" +
-					"echo   请稍候，升级覆盖完成后将自动重新启动软件...\r\n" +
-					"echo ========================================================\r\n" +
 					"timeout /t 2 /nobreak >nul\r\n" +
-					$":: 覆盖新文件，但绝不覆盖或删除用户的私有密钥与配置文件\r\n" +
 					$"robocopy \"{sourceFolder}\" \"{currentAppDir}\" /E /IS /IT /XF \"*keys.json\" \"*settings.json\" \"*.key\" /XD \"auditions\" /R:2 /W:1 >nul\r\n" +
 					"if %ERRORLEVEL% GEQ 8 (\r\n" +
 					$"    xcopy /y /e /h /r \"{sourceFolder}\\*\" \"{currentAppDir}\\\" >nul\r\n" +
 					")\r\n" +
-					"echo 升级成功，正在启动新版本...\r\n" +
 					$"start \"\" \"{currentAppDir}\\VideoBatchStudio.exe\"\r\n" +
 					"timeout /t 2 /nobreak >nul\r\n" +
 					$"rd /s /q \"{tempExtractDir}\" 2>nul\r\n" +
@@ -336,7 +299,6 @@ internal sealed class UpdateNotificationForm : Form
 
 				File.WriteAllText(updaterBat, batScript, new UTF8Encoding(false));
 
-				// 启动后台更新脚本并安全退出主程序
 				var psi = new ProcessStartInfo
 				{
 					FileName = "cmd.exe",
@@ -347,10 +309,9 @@ internal sealed class UpdateNotificationForm : Form
 				Process.Start(psi);
 			});
 
-			_lblStatus.Text = "🎉 升级完成！正在重新启动软件...";
+			_lblStatus.Text = "🎉 升级成功！正在自动重启软件...";
 			await Task.Delay(800);
 
-			// 安全退出当前旧进程
 			Application.Exit();
 			Environment.Exit(0);
 		}
@@ -358,10 +319,10 @@ internal sealed class UpdateNotificationForm : Form
 		{
 			_isUpdating = false;
 			_lblStatus.ForeColor = Color.FromArgb(148, 163, 184);
-			_lblStatus.Text = "💡 已取消本次更新。";
-			_btnAutoUpdate.Enabled = true;
-			_btnAutoUpdate.Text = "⚡ 一键自动升级 (推荐)";
-			_btnRemindLater.Enabled = true;
+			_lblStatus.Text = "💡 已取消本次升级。";
+			_btnUpdateNow.Enabled = true;
+			_btnUpdateNow.Text = "🚀 立即更新";
+			_btnCancel.Enabled = true;
 			_pbProgress.Visible = false;
 			TryCleanFiles(tempZip, tempExtractDir);
 		}
@@ -369,17 +330,14 @@ internal sealed class UpdateNotificationForm : Form
 		{
 			_isUpdating = false;
 			_lblStatus.ForeColor = Color.FromArgb(239, 68, 68);
-			_lblStatus.Text = $"❌ 自动升级失败: {ex.Message}，您可点击【发布主页】手动下载。";
-			_btnAutoUpdate.Enabled = true;
-			_btnAutoUpdate.Text = "🔄 重试自动升级";
-			_btnRemindLater.Enabled = true;
+			_lblStatus.Text = $"❌ 自动升级失败: {ex.Message}";
+			_btnUpdateNow.Enabled = true;
+			_btnUpdateNow.Text = "🔄 重试更新";
+			_btnCancel.Enabled = true;
 			TryCleanFiles(tempZip, tempExtractDir);
 		}
 	}
 
-	/// <summary>
-	/// 带国内 CDN 极速加速与 GitHub 官方源自动容灾回退的下载器
-	/// </summary>
 	private async Task DownloadWithFallbackAsync(string fastUrl, string fallbackUrl, string destinationFile, CancellationToken ct)
 	{
 		try
@@ -391,12 +349,11 @@ internal sealed class UpdateNotificationForm : Form
 		bool downloadSuccess = false;
 		Exception lastError = null;
 
-		// 1. 优先尝试极速镜像节点
 		if (!string.IsNullOrEmpty(fastUrl))
 		{
 			try
 			{
-				await PerformDownloadStreamAsync(fastUrl, destinationFile, "极速节点", ct);
+				await PerformDownloadStreamAsync(fastUrl, destinationFile, ct);
 				downloadSuccess = true;
 			}
 			catch (OperationCanceledException) { throw; }
@@ -407,19 +364,18 @@ internal sealed class UpdateNotificationForm : Form
 			}
 		}
 
-		// 2. 若极速节点失败或不存在，回退至官方原包
 		if (!downloadSuccess && !string.IsNullOrEmpty(fallbackUrl))
 		{
 			ct.ThrowIfCancellationRequested();
 			Invoke((MethodInvoker)delegate
 			{
-				_lblStatus.Text = "极速节点响应超时，正在切换至 GitHub 官方备用节点下载...";
+				_lblStatus.Text = "节点响应超时，正在切换备用节点下载...";
 				_lblStatus.ForeColor = Color.FromArgb(245, 158, 11);
 			});
 
 			try
 			{
-				await PerformDownloadStreamAsync(fallbackUrl, destinationFile, "官方备用节点", ct);
+				await PerformDownloadStreamAsync(fallbackUrl, destinationFile, ct);
 				downloadSuccess = true;
 			}
 			catch (OperationCanceledException) { throw; }
@@ -432,14 +388,11 @@ internal sealed class UpdateNotificationForm : Form
 
 		if (!downloadSuccess)
 		{
-			throw new Exception(lastError?.Message ?? "无法连接到更新服务器，请检查网络或代理设置！");
+			throw new Exception(lastError?.Message ?? "无法连接到更新服务器，请检查网络设置！");
 		}
 	}
 
-	/// <summary>
-	/// 流式下载并实时反馈进度与速率
-	/// </summary>
-	private async Task PerformDownloadStreamAsync(string url, string destinationFile, string nodeName, CancellationToken ct)
+	private async Task PerformDownloadStreamAsync(string url, string destinationFile, CancellationToken ct)
 	{
 		var req = (HttpWebRequest)WebRequest.Create(url);
 		req.Method = "GET";
@@ -453,7 +406,7 @@ internal sealed class UpdateNotificationForm : Form
 		{
 			if (response.StatusCode != HttpStatusCode.OK)
 			{
-				throw new Exception($"服务器返回异常状态码: {(int)response.StatusCode} {response.StatusDescription}");
+				throw new Exception($"服务器返回异常状态: {(int)response.StatusCode}");
 			}
 
 			long totalBytes = response.ContentLength;
@@ -490,7 +443,7 @@ internal sealed class UpdateNotificationForm : Form
 						{
 							_pbProgress.Value = percent;
 							_lblStatus.ForeColor = Color.FromArgb(56, 189, 248);
-							_lblStatus.Text = $"正在通过{nodeName}极速下载: {percent}% ({downloadedMb} MB / {totalMb} MB) · {speedMB:0.0} MB/s";
+							_lblStatus.Text = $"正在静默下载: {percent}% ({downloadedMb} MB / {totalMb} MB) · {speedMB:0.0} MB/s";
 						});
 					}
 				}

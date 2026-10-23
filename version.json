@@ -7,7 +7,7 @@
     "【文字成片·自由拖拽与等比缩放】各功能板块支持鼠标自由拖拽边缘等比缩放画布，滑块实时联动，响应丝滑无卡顿",
     "【动态贴纸·多GIF叠加与时间轴控制】支持多图层叠加 GIF 动图，具备缩放、旋转角度、出现起止时间与循环控制",
     "【安全与注入加固】全面转义音视频多轨道处理参数防命令注入，敏感凭证严密隔离保护，团队各用各的独立Key",
-    "【国内极速CDN镜像容灾】内置国内 CDN 高速镜像通道，自动容灾回退，保障海量团队成员秒级更新"
+    "【全球高速CDN镜像容灾】内置全球高速 CDN 加速通道，自动容灾回退，保障海量团队成员秒级更新"
   ],
   "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v9.4.0",
   "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.4.0/VideoBatchStudio_Portable.zip",
