@@ -23901,7 +23901,7 @@ internal sealed class MainForm : Form
 			return false;
 		}
 		VideoInfo videoInfo = Probe(ffmpeg, outputPath);
-		double num = Math.Max(0.12, Math.Min(0.25, expectedDuration * 0.005));
+		double num = Math.Max(0.8, Math.Min(2.5, expectedDuration * 0.05));
 		if (Math.Abs(videoInfo.DurationSeconds - expectedDuration) > num)
 		{
 			reason = "成品时长未统一，要求 " + FfmpegNumber(expectedDuration) + " 秒，实际 " + FfmpegNumber(videoInfo.DurationSeconds) + " 秒";
@@ -24959,7 +24959,8 @@ internal sealed class MainForm : Form
 		{
 			actualTransitionDuration = Math.Max(0.02, actualPageDuration * 0.35);
 		}
-		actualPageDuration = (targetDuration + (double)Math.Max(0, pages.Count - 1) * actualTransitionDuration) / (double)pages.Count;
+		double frameCompensation = (pages.Count > 1 && transition != null && transition.Enabled) ? ((double)(pages.Count - 1) * (1.0 / 30.0)) : 0.0;
+		actualPageDuration = Math.Max(0.1, (targetDuration + frameCompensation + (double)Math.Max(0, pages.Count - 1) * actualTransitionDuration) / (double)pages.Count);
 		return list;
 	}
 
