@@ -1145,7 +1145,7 @@ internal sealed class MainForm : Form
 	public MainForm()
 	{
 		InitCutEditTracks();
-		Text = $"视频批处理工具 V{CurrentAppVersion} - [AI声音克隆 · 4重质检 · 9:16视界专版]";
+		Text = $"视频批处理工具 V{CurrentAppVersion}";
 		base.StartPosition = FormStartPosition.CenterScreen;
 		MinimumSize = new Size(1000, 640);
 		Rectangle rectangle = ((Screen.PrimaryScreen == null) ? new Rectangle(0, 0, 1366, 768) : Screen.PrimaryScreen.WorkingArea);
