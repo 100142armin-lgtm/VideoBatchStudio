@@ -36,27 +36,47 @@ jobs:
           New-Item -ItemType Directory -Force -Path release_assets | Out-Null
           New-Item -ItemType Directory -Force -Path staging/VideoBatchStudio | Out-Null
 
-          # Copy compiled binary
+          # Copy entire build output (executable, WebView2 DLLs, runtimes, web_preview, config)
+          Copy-Item -Path "bin/Release/net48/*" -Destination "staging/VideoBatchStudio/" -Recurse -Force
           Copy-Item -Path "bin/Release/net48/VideoBatchStudio.exe" -Destination "release_assets/VideoBatchStudio.exe" -Force
-          Copy-Item -Path "bin/Release/net48/VideoBatchStudio.exe" -Destination "staging/VideoBatchStudio/VideoBatchStudio.exe" -Force
+
+          # Copy python worker for free Edge-TTS
+          if (Test-Path "VideoBatchMerger/ScriptBatch/edge_tts_worker.py") {
+            Copy-Item -Path "VideoBatchMerger/ScriptBatch/edge_tts_worker.py" -Destination "staging/VideoBatchStudio/edge_tts_worker.py" -Force
+          }
+
+          # Ensure web_preview HTML & JS canvas assets are in place
+          if (Test-Path "web_preview") {
+            Copy-Item -Path "web_preview" -Destination "staging/VideoBatchStudio/web_preview" -Recurse -Force
+          }
+
+          # Clean any sensitive or personal development cache
+          Remove-Item -Path "staging/VideoBatchStudio/*settings.json" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "staging/VideoBatchStudio/*keys.json" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "staging/VideoBatchStudio/*.key" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "staging/VideoBatchStudio/*.pdb" -Force -ErrorAction SilentlyContinue
 
           # Copy fonts and documentation
-          Copy-Item -Path "fonts" -Destination "staging/VideoBatchStudio/fonts" -Recurse -Force
-          Copy-Item -Path "完整使用说明.md" -Destination "staging/VideoBatchStudio/" -Force
-          Copy-Item -Path "使用说明.txt" -Destination "staging/VideoBatchStudio/" -Force
-          Copy-Item -Path "THIRD_PARTY_NOTICES.txt" -Destination "staging/VideoBatchStudio/" -Force
-          Copy-Item -Path "README.md" -Destination "staging/VideoBatchStudio/" -Force
+          if (Test-Path "fonts") {
+            Copy-Item -Path "fonts" -Destination "staging/VideoBatchStudio/fonts" -Recurse -Force
+          }
+          Copy-Item -Path "完整使用说明.md" -Destination "staging/VideoBatchStudio/" -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "使用说明.txt" -Destination "staging/VideoBatchStudio/" -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "THIRD_PARTY_NOTICES.txt" -Destination "staging/VideoBatchStudio/" -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "README.md" -Destination "staging/VideoBatchStudio/" -Force -ErrorAction SilentlyContinue
 
-          # Copy bundled FFmpeg (pre-installed on windows-latest runner)
+          # Ensure FFmpeg is bundled
           $ffmpegCmd = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
+          if (-not $ffmpegCmd) {
+            Write-Host "Installing FFmpeg via choco..."
+            choco install ffmpeg -y --no-progress
+            $ffmpegCmd = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
+          }
           if ($ffmpegCmd) {
             Copy-Item -Path $ffmpegCmd.Source -Destination "staging/VideoBatchStudio/ffmpeg.exe" -Force
             Write-Host "Bundled FFmpeg from: $($ffmpegCmd.Source)"
-          } else {
-            Write-Host "ffmpeg.exe not found on PATH, attempting chocolatey bin..."
-            if (Test-Path "C:\ProgramData\chocolatey\bin\ffmpeg.exe") {
-              Copy-Item -Path "C:\ProgramData\chocolatey\bin\ffmpeg.exe" -Destination "staging/VideoBatchStudio/ffmpeg.exe" -Force
-            }
+          } elseif (Test-Path "C:\ProgramData\chocolatey\bin\ffmpeg.exe") {
+            Copy-Item -Path "C:\ProgramData\chocolatey\bin\ffmpeg.exe" -Destination "staging/VideoBatchStudio/ffmpeg.exe" -Force
           }
 
           # Download and bundle yt-dlp.exe
