@@ -142,6 +142,9 @@ internal static class UpdateChecker
 					downloadUrl = $"{RepoUrl}/releases/tag/v{remoteVersion}";
 				}
 
+				string fastPortableZipUrl = ExtractJsonString(json, "fastPortableZipUrl");
+				string portableZipUrl = ExtractJsonString(json, "portableZipUrl");
+
 				List<string> changelog = ExtractJsonArray(json, "changelog");
 				if (changelog.Count == 0)
 				{
@@ -176,7 +179,7 @@ internal static class UpdateChecker
 						owner.BeginInvoke((MethodInvoker)delegate
 						{
 							if (owner.IsDisposed) return;
-							using (var form = new UpdateNotificationForm(currentVersion, remoteVersion, releaseTitle, releaseDate, changelog, downloadUrl))
+							using (var form = new UpdateNotificationForm(currentVersion, remoteVersion, releaseTitle, releaseDate, changelog, downloadUrl, fastPortableZipUrl, portableZipUrl))
 							{
 								form.ShowDialog(owner);
 							}

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VideoBatchStudio - 60FPS WYSIWYG Canvas Preview</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body {
+            background-color: #070A12;
+            color: #E2E8F0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        #stage-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: calc(100vh - 46px);
+            padding: 20px 16px;
+        }
+        #phone-shell {
+            position: relative;
+            background: #0D1322;
+            border-radius: 20px;
+            box-shadow: 0 14px 40px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(71, 85, 105, 0.5);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #phone-shell.highlight-active {
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 0 2px #3B82F6;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: default;
+        }
+        #overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: auto;
+        }
+        /* 底部迷你动效控制栏 */
+        #toolbar {
+            width: 100%;
+            height: 42px;
+            background: #0F172A;
+            border-top: 1px solid #1E293B;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 12px;
+            font-size: 12px;
+        }
+        .btn {
+            background: #1E293B;
+            color: #E2E8F0;
+            border: 1px solid #334155;
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .btn:hover { background: #3B82F6; border-color: #3B82F6; color: white; }
+        .btn.active { background: #F59E0B; border-color: #F59E0B; color: black; font-weight: bold; }
+        .timeline-slider {
+            flex: 1;
+            margin: 0 12px;
+            height: 5px;
+            accent-color: #3B82F6;
+            cursor: pointer;
+        }
+        #fps-badge {
+            font-family: monospace;
+            color: #10B981;
+            font-size: 10px;
+            background: rgba(16, 185, 129, 0.12);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div id="stage-container">
+        <div id="phone-shell">
+            <canvas id="video-canvas"></canvas>
+            <canvas id="overlay-canvas"></canvas>
+        </div>
+    </div>
+    <div id="toolbar">
+        <button id="btn-play" class="btn" title="播放/暂停动效预览">▶️ 动效</button>
+        <button id="btn-reset" class="btn" title="复位时间轴">⏮️</button>
+        <input type="range" id="time-slider" class="timeline-slider" min="0" max="3000" value="1200" step="10">
+        <span id="time-label" style="font-size:11px; color:#94A3B8; width:46px;">1.20s</span>
+        <span id="fps-badge">60 FPS</span>
+    </div>
+
+    <script src="presets.js"></script>
+    <script src="canvas-renderer.js"></script>
+    <script>
+        // 初始化舞台与双向通信
+        const stage = new PreviewStage();
+        stage.start();
+
+        // 供 C# WinForms 通过 ExecuteScriptAsync 调用
+        window.updateFromHost = function(jsonStr) {
+            try {
+                const data = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+                stage.applyHostSettings(data);
+            } catch (e) {
+                console.error("updateFromHost error:", e);
+            }
+        };
+
+        // 挂载消息桥梁
+        window.notifyHost = function(action, payload) {
+            if (window.chrome && window.chrome.webview) {
+                window.chrome.webview.postMessage({ action: action, payload: payload });
+            }
+        };
+    </script>
+</body>
+</html>

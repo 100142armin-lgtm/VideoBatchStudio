@@ -17,10 +17,11 @@ namespace VideoBatchMerger
 		public string FontFamily { get; set; } = "Microsoft YaHei UI";
 		public FontStyle FontStyle { get; set; } = FontStyle.Bold;
 		public Color MainTextColor { get; set; } = Color.White;
+		public Color HighlightTextColor { get; set; } = Color.Transparent;
 		public Color SubTextColor { get; set; } = Color.FromArgb(220, 220, 220);
 		public Color StrokeColor { get; set; } = Color.Transparent;
 		public float StrokeWidthRatio { get; set; } = 0f;
-		public string BannerType { get; set; } = "None"; // None, YellowCard, RedAlertCard, NavyBar, MatteBlackCard, NeonCyanCard, MintGlassCard, LuxuryGoldCard, CrimsonSealCard, UrbanStreetCard, TechGlassCard
+		public string BannerType { get; set; } = "None"; // None, ViralYellowBar, YellowCard, RedAlertCard, NavyBar, MatteBlackCard, NeonCyanCard, MintGlassCard, LuxuryGoldCard, CrimsonSealCard, UrbanStreetCard, TechGlassCard
 		public Color BannerBgColor { get; set; } = Color.Transparent;
 		public Color BannerBorderColor { get; set; } = Color.Transparent;
 		public float BannerBorderWidth { get; set; } = 0f;
@@ -34,11 +35,30 @@ namespace VideoBatchMerger
 		{
 			new MergeTitleStyle
 			{
+				Id = "viral_yellow_red",
+				Name = "🔥 【海外爆款拼屏】醒目黄底黑字 + 重点词标红 (Viral Yellow & Red Highlight)",
+				FontFamily = "Georgia",
+				FontStyle = FontStyle.Bold,
+				MainTextColor = Color.FromArgb(15, 15, 15),
+				HighlightTextColor = Color.FromArgb(215, 28, 28),
+				SubTextColor = Color.FromArgb(35, 35, 35),
+				StrokeColor = Color.Transparent,
+				StrokeWidthRatio = 0f,
+				BannerType = "ViralYellowBar",
+				BannerBgColor = Color.FromArgb(255, 242, 65),
+				BannerBorderColor = Color.Transparent,
+				BannerBorderWidth = 0f,
+				ShadowColor = Color.Transparent,
+				ShadowOffset = new PointF(0f, 0f)
+			},
+			new MergeTitleStyle
+			{
 				Id = "tiktok_yellow",
 				Name = "🌟 【抖音/快手爆款】醒目黄底纯黑大字 (TikTok Black on Yellow Card)",
 				FontFamily = "Microsoft YaHei UI",
 				FontStyle = FontStyle.Bold,
 				MainTextColor = Color.FromArgb(15, 23, 42),
+				HighlightTextColor = Color.FromArgb(215, 28, 28),
 				SubTextColor = Color.FromArgb(30, 41, 59),
 				StrokeColor = Color.Transparent,
 				StrokeWidthRatio = 0f,
@@ -304,6 +324,88 @@ namespace VideoBatchMerger
 			return result.Trim();
 		}
 
+		private static string StripHighlightBrackets(string text)
+		{
+			if (string.IsNullOrEmpty(text)) return "";
+			return text.Replace("[", "").Replace("]", "");
+		}
+
+		private static string PrepareHighlightText(string text, MergeTitleStyle style)
+		{
+			if (string.IsNullOrWhiteSpace(text)) return "";
+			if (style == null || style.HighlightTextColor.A == 0)
+			{
+				return StripHighlightBrackets(text);
+			}
+			// If user already used [...] to mark highlight words, use their markers directly
+			if (text.Contains("[") && text.Contains("]"))
+			{
+				return text;
+			}
+			// For viral_yellow_red style, automatically highlight the first number phrase (e.g., "3 Things", "3件事") if no [...] was provided
+			if (string.Equals(style.Id, "viral_yellow_red", StringComparison.OrdinalIgnoreCase))
+			{
+				var autoRegex = new Regex(@"(\b\d+(?:st|nd|rd|th)?(?:\s+[A-Za-z]+)?\b|\d+\s*[个件种条次点秒天年岁步招句%]+)");
+				if (autoRegex.IsMatch(text))
+				{
+					return autoRegex.Replace(text, "[$1]", 1);
+				}
+			}
+			return text;
+		}
+
+		private static List<(string CleanLine, List<CharacterRange> HighlightRanges)> ExtractLineHighlightRanges(List<string> markedLines)
+		{
+			var result = new List<(string CleanLine, List<CharacterRange> HighlightRanges)>();
+			bool inHighlight = false;
+
+			foreach (string rawLine in markedLines)
+			{
+				StringBuilder cleanSb = new StringBuilder();
+				List<CharacterRange> ranges = new List<CharacterRange>();
+				int rangeStart = inHighlight ? 0 : -1;
+
+				for (int i = 0; i < rawLine.Length; i++)
+				{
+					char c = rawLine[i];
+					if (c == '[')
+					{
+						if (!inHighlight)
+						{
+							inHighlight = true;
+							rangeStart = cleanSb.Length;
+						}
+					}
+					else if (c == ']')
+					{
+						if (inHighlight)
+						{
+							int len = cleanSb.Length - rangeStart;
+							if (rangeStart >= 0 && len > 0)
+							{
+								ranges.Add(new CharacterRange(rangeStart, len));
+							}
+							inHighlight = false;
+							rangeStart = -1;
+						}
+					}
+					else
+					{
+						cleanSb.Append(c);
+					}
+				}
+
+				if (inHighlight && rangeStart >= 0 && cleanSb.Length > rangeStart)
+				{
+					ranges.Add(new CharacterRange(rangeStart, cleanSb.Length - rangeStart));
+				}
+
+				result.Add((cleanSb.ToString(), ranges));
+			}
+
+			return result;
+		}
+
 		public static Bitmap RenderTitleBitmap(MergeTitlePlan plan, int targetW, int targetH, string resolvedMainText, string resolvedSubText)
 		{
 			if (targetW <= 0) targetW = 1080;
@@ -320,35 +422,45 @@ namespace VideoBatchMerger
 				if (string.IsNullOrWhiteSpace(resolvedMainText)) return bmp;
 
 				MergeTitleStyle style = GetStyle(plan.StyleId);
+				string pos = plan.Position ?? "中间分割线";
+				bool isRightColumnOnly = pos.Contains("右侧栏");
+
+				float zoneLeft = isRightColumnOnly ? targetW * 0.38f : 0f;
+				float zoneWidth = isRightColumnOnly ? targetW * 0.62f : (float)targetW;
+				float targetCenterX = zoneLeft + zoneWidth / 2f;
 
 				float refDim = Math.Min(targetW, targetH);
 				float resScale = refDim / 1080f;
 				float userScale = Math.Max(0.2f, Math.Min(2.5f, plan.FontSizeScale));
-				float baseFontSize = (targetH >= targetW ? 92f : 64f) * resScale * userScale;
+				float defaultBasePt = isRightColumnOnly ? (targetH >= targetW ? 44f : 36f) : (targetH >= targetW ? 92f : 64f);
+				float baseFontSize = defaultBasePt * resScale * userScale;
 				if (baseFontSize < 14f * resScale) baseFontSize = 14f * resScale;
+
+				string markedMainText = PrepareHighlightText(resolvedMainText, style);
 
 				// Resolve Font
 				Font fontMain = CreateSafeFont(style.FontFamily, baseFontSize, style.FontStyle);
-				float maxAllowedW = targetW * 0.82f; // Safe margin: 82% of target width
+				float maxAllowedW = isRightColumnOnly ? (zoneWidth * 0.90f) : (targetW * 0.82f);
+				int maxLinesAllowed = (isRightColumnOnly || style.BannerType == "ViralYellowBar") ? 4 : 3;
 
-				List<string> lines = WrapTextToBalancedLines(g, resolvedMainText, fontMain, maxAllowedW);
+				List<string> lines = WrapTextToBalancedLines(g, markedMainText, fontMain, maxAllowedW);
 
 				// Safety Auto-Downscale Loop:
-				// As long as any line exceeds maxAllowedW, or lines > 3, reduce font size until it fits perfectly!
+				// As long as any line exceeds maxAllowedW, or lines > maxLinesAllowed, reduce font size until it fits perfectly!
 				float minAllowedFontSize = 12f * resScale;
 				while (baseFontSize > minAllowedFontSize)
 				{
 					bool anyLineOverflows = false;
 					foreach (var l in lines)
 					{
-						if (g.MeasureString(l, fontMain).Width > maxAllowedW)
+						if (g.MeasureString(StripHighlightBrackets(l), fontMain).Width > maxAllowedW)
 						{
 							anyLineOverflows = true;
 							break;
 						}
 					}
 
-					if (!anyLineOverflows && lines.Count <= 3)
+					if (!anyLineOverflows && lines.Count <= maxLinesAllowed)
 					{
 						break;
 					}
@@ -356,15 +468,16 @@ namespace VideoBatchMerger
 					baseFontSize -= Math.Max(1.5f * resScale, baseFontSize * 0.05f);
 					fontMain.Dispose();
 					fontMain = CreateSafeFont(style.FontFamily, baseFontSize, style.FontStyle);
-					lines = WrapTextToBalancedLines(g, resolvedMainText, fontMain, maxAllowedW);
+					lines = WrapTextToBalancedLines(g, markedMainText, fontMain, maxAllowedW);
 				}
 
 				using (fontMain)
 				{
-					if (lines.Count == 0) lines.Add(resolvedMainText);
+					if (lines.Count == 0) lines.Add(markedMainText);
+					var parsedLines = ExtractLineHighlightRanges(lines);
 
-					float mainLineHeight = fontMain.GetHeight(g) * 1.18f;
-					float mainBlockHeight = lines.Count * mainLineHeight;
+					float mainLineHeight = fontMain.GetHeight(g) * (isRightColumnOnly ? 1.12f : 1.18f);
+					float mainBlockHeight = parsedLines.Count * mainLineHeight;
 
 					bool hasSub = !string.IsNullOrWhiteSpace(resolvedSubText);
 					float subFontSize = Math.Max(12f * resScale, baseFontSize * 0.44f);
@@ -380,22 +493,25 @@ namespace VideoBatchMerger
 					{
 						float totalBlockH = mainBlockHeight + subBlockHeight;
 						float maxLineWidth = 0f;
-						foreach (string line in lines)
+						using (StringFormat sfMeasure = new StringFormat(StringFormat.GenericTypographic))
 						{
-							float lw = g.MeasureString(line, fontMain).Width;
-							if (lw > maxLineWidth) maxLineWidth = lw;
+							sfMeasure.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+							foreach (var pl in parsedLines)
+							{
+								float lw = g.MeasureString(pl.CleanLine, fontMain, PointF.Empty, sfMeasure).Width;
+								if (lw > maxLineWidth) maxLineWidth = lw;
+							}
 						}
 						if (hasSub && fontSub != null)
 						{
 							float sw = g.MeasureString(resolvedSubText, fontSub).Width + 40f * resScale;
 							if (sw > maxLineWidth) maxLineWidth = sw;
 						}
-						maxLineWidth = Math.Min(targetW * 0.94f, maxLineWidth);
+						maxLineWidth = Math.Min(zoneWidth * 0.94f, maxLineWidth);
 
 						// Determine Center Y based on position
 						float targetCenterY;
-						string pos = plan.Position ?? "中间分割线";
-						if (pos.Contains("中间分割线") || pos.Contains("分割线"))
+						if (pos.Contains("分割线"))
 						{
 							targetCenterY = targetH * 0.50f;
 						}
@@ -425,57 +541,93 @@ namespace VideoBatchMerger
 						}
 
 						targetCenterY += plan.CustomOffsetY * resScale;
-						float targetCenterX = targetW / 2f;
 						float blockTopY = targetCenterY - totalBlockH / 2f;
 						blockTopY = Math.Max(12f * resScale, Math.Min(targetH - totalBlockH - 12f * resScale, blockTopY));
 
 						// Draw Banner Background if any
-						DrawBanner(g, style, targetW, targetH, targetCenterX, blockTopY, totalBlockH, maxLineWidth, resScale);
+						DrawBanner(g, style, zoneLeft, zoneWidth, targetH, targetCenterX, blockTopY, totalBlockH, maxLineWidth, resScale);
 
 						// Draw Main Lines
 						float strokeW = baseFontSize * style.StrokeWidthRatio;
-						for (int i = 0; i < lines.Count; i++)
+						using (StringFormat sfTypo = new StringFormat(StringFormat.GenericTypographic))
 						{
-							string line = lines[i];
-							SizeF sz = g.MeasureString(line, fontMain);
-							float lx = targetCenterX - sz.Width / 2f;
-							float ly = blockTopY + i * mainLineHeight;
-
-							using (GraphicsPath path = new GraphicsPath())
+							sfTypo.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+							for (int i = 0; i < parsedLines.Count; i++)
 							{
-								path.AddString(line, fontMain.FontFamily, (int)fontMain.Style, fontMain.SizeInPoints * (g.DpiY / 72f), new PointF(lx, ly), StringFormat.GenericTypographic);
+								string cleanLine = parsedLines[i].CleanLine;
+								var hlRanges = parsedLines[i].HighlightRanges;
+								SizeF sz = g.MeasureString(cleanLine, fontMain, PointF.Empty, sfTypo);
+								float lx = targetCenterX - sz.Width / 2f;
+								float ly = blockTopY + i * mainLineHeight;
 
-								// Shadow
-								if (style.ShadowColor.A > 0)
+								using (GraphicsPath path = new GraphicsPath())
 								{
-									using (Matrix m = new Matrix())
+									path.AddString(cleanLine, fontMain.FontFamily, (int)fontMain.Style, fontMain.SizeInPoints * (g.DpiY / 72f), new PointF(lx, ly), StringFormat.GenericTypographic);
+
+									// Shadow
+									if (style.ShadowColor.A > 0)
 									{
-										m.Translate(style.ShadowOffset.X * resScale, style.ShadowOffset.Y * resScale);
-										using (GraphicsPath shadowPath = (GraphicsPath)path.Clone())
+										using (Matrix m = new Matrix())
 										{
-											shadowPath.Transform(m);
-											using (Brush sb = new SolidBrush(style.ShadowColor))
+											m.Translate(style.ShadowOffset.X * resScale, style.ShadowOffset.Y * resScale);
+											using (GraphicsPath shadowPath = (GraphicsPath)path.Clone())
 											{
-												g.FillPath(sb, shadowPath);
+												shadowPath.Transform(m);
+												using (Brush sb = new SolidBrush(style.ShadowColor))
+												{
+													g.FillPath(sb, shadowPath);
+												}
 											}
 										}
 									}
-								}
 
-								// Stroke
-								if (strokeW > 0.5f && style.StrokeColor.A > 0)
-								{
-									using (Pen pen = new Pen(style.StrokeColor, strokeW))
+									// Stroke
+									if (strokeW > 0.5f && style.StrokeColor.A > 0)
 									{
-										pen.LineJoin = LineJoin.Round;
-										g.DrawPath(pen, path);
+										using (Pen pen = new Pen(style.StrokeColor, strokeW))
+										{
+											pen.LineJoin = LineJoin.Round;
+											g.DrawPath(pen, path);
+										}
 									}
-								}
 
-								// Text Fill
-								using (Brush tb = new SolidBrush(style.MainTextColor))
-								{
-									g.FillPath(tb, path);
+									// Main Text Fill
+									using (Brush tb = new SolidBrush(style.MainTextColor))
+									{
+										g.FillPath(tb, path);
+									}
+
+									// Highlighted Words Fill (Red/Accent Color)
+									if (hlRanges != null && hlRanges.Count > 0 && style.HighlightTextColor.A > 0)
+									{
+										foreach (var cr in hlRanges)
+										{
+											try
+											{
+												using (StringFormat sfRange = new StringFormat(StringFormat.GenericTypographic))
+												{
+													sfRange.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+													sfRange.SetMeasurableCharacterRanges(new CharacterRange[] { cr });
+													Region[] regs = g.MeasureCharacterRanges(cleanLine, fontMain, new RectangleF(lx, ly, zoneWidth * 2f, mainLineHeight * 3f), sfRange);
+													if (regs != null && regs.Length > 0)
+													{
+														using (Region r = regs[0])
+														{
+															RectangleF hb = r.GetBounds(g);
+															GraphicsState gs = g.Save();
+															g.SetClip(new RectangleF(hb.X - 1f, ly - baseFontSize * 0.4f, hb.Width + 2f, mainLineHeight * 1.6f));
+															using (Brush hbBrush = new SolidBrush(style.HighlightTextColor))
+															{
+																g.FillPath(hbBrush, path);
+															}
+															g.Restore(gs);
+														}
+													}
+												}
+											}
+											catch { }
+										}
+									}
 								}
 							}
 						}
@@ -523,29 +675,44 @@ namespace VideoBatchMerger
 			return bmp;
 		}
 
-		private static void DrawBanner(Graphics g, MergeTitleStyle style, int w, int h, float centerX, float topY, float blockH, float maxLineW, float resScale)
+		private static void DrawBanner(Graphics g, MergeTitleStyle style, float zoneLeft, float zoneWidth, int h, float centerX, float topY, float blockH, float maxLineW, float resScale)
 		{
 			if (string.Equals(style.BannerType, "None", StringComparison.OrdinalIgnoreCase) || style.BannerBgColor.A == 0)
 				return;
 
+			if (style.BannerType == "ViralYellowBar")
+			{
+				float padY = 16f * resScale;
+				float barY = Math.Max(0f, topY - padY);
+				float barH = blockH + padY * 2f;
+				float leftInset = zoneLeft > 1f ? (3f * resScale) : 0f;
+				using (Brush bgBrush = new SolidBrush(style.BannerBgColor))
+				{
+					g.FillRectangle(bgBrush, zoneLeft + leftInset, barY, zoneWidth - leftInset, barH);
+				}
+				return;
+			}
+
 			if (style.BannerType == "NavyBar")
 			{
+				int barX = (int)Math.Round(zoneLeft);
+				int barW = (int)Math.Round(zoneWidth);
 				int barH = (int)(blockH + 60f * resScale);
 				int barY = (int)Math.Max(0, topY - 30f * resScale);
-				using (LinearGradientBrush lgb = new LinearGradientBrush(new Rectangle(0, barY, w, barH), Color.FromArgb(235, 15, 23, 42), Color.FromArgb(235, 30, 58, 138), LinearGradientMode.Horizontal))
+				using (LinearGradientBrush lgb = new LinearGradientBrush(new Rectangle(barX, barY, Math.Max(1, barW), Math.Max(1, barH)), Color.FromArgb(235, 15, 23, 42), Color.FromArgb(235, 30, 58, 138), LinearGradientMode.Horizontal))
 				{
-					g.FillRectangle(lgb, 0, barY, w, barH);
+					g.FillRectangle(lgb, barX, barY, barW, barH);
 				}
 				using (Pen cyanLine = new Pen(style.BannerBorderColor, style.BannerBorderWidth * resScale))
 				{
-					g.DrawLine(cyanLine, 0, barY, w, barY);
-					g.DrawLine(cyanLine, 0, barY + barH, w, barY + barH);
+					g.DrawLine(cyanLine, barX, barY, barX + barW, barY);
+					g.DrawLine(cyanLine, barX, barY + barH, barX + barW, barY + barH);
 				}
 				return;
 			}
 
 			// Rounded Card Banners
-			float cardW = Math.Min(w * 0.94f, maxLineW + 72f * resScale);
+			float cardW = Math.Min(zoneWidth * 0.94f, maxLineW + 64f * resScale);
 			float cardH = blockH + 38f * resScale;
 			RectangleF rect = new RectangleF(centerX - cardW / 2f, topY - 19f * resScale, cardW, cardH);
 			int radius = (int)(18f * resScale);
@@ -621,13 +788,48 @@ namespace VideoBatchMerger
 			return path;
 		}
 
+		private static List<string> TokenizePreservingBrackets(string text)
+		{
+			List<string> tokens = new List<string>();
+			StringBuilder cur = new StringBuilder();
+			bool inBracket = false;
+			for (int i = 0; i < text.Length; i++)
+			{
+				char c = text[i];
+				if (c == '[' || c == '【')
+				{
+					inBracket = true;
+					cur.Append(c);
+				}
+				else if (c == ']' || c == '】')
+				{
+					inBracket = false;
+					cur.Append(c);
+				}
+				else if (c == ' ' && !inBracket)
+				{
+					if (cur.Length > 0)
+					{
+						tokens.Add(cur.ToString());
+						cur.Clear();
+					}
+				}
+				else
+				{
+					cur.Append(c);
+				}
+			}
+			if (cur.Length > 0) tokens.Add(cur.ToString());
+			return tokens;
+		}
+
 		private static List<string> WrapTextToBalancedLines(Graphics g, string text, Font font, float maxWidth)
 		{
 			List<string> result = new List<string>();
 			if (string.IsNullOrWhiteSpace(text)) return result;
 
 			text = text.Trim();
-			float totalW = g.MeasureString(text, font).Width;
+			float totalW = g.MeasureString(StripHighlightBrackets(text), font).Width;
 			if (totalW <= maxWidth)
 			{
 				result.Add(text);
@@ -638,15 +840,17 @@ namespace VideoBatchMerger
 			bool hasSpaces = text.Contains(" ");
 			if (hasSpaces)
 			{
-				string[] words = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+				List<string> words = TokenizePreservingBrackets(text);
+				int estLines = Math.Max(2, Math.Min(4, (int)Math.Ceiling(totalW / (maxWidth * 0.88f))));
+				float balancedTargetW = Math.Min(maxWidth, Math.Max(maxWidth * 0.68f, (totalW / estLines) * 1.06f));
 				StringBuilder currentLine = new StringBuilder();
 
 				foreach (string word in words)
 				{
 					string testLine = currentLine.Length == 0 ? word : currentLine + " " + word;
-					float testW = g.MeasureString(testLine, font).Width;
+					float testW = g.MeasureString(StripHighlightBrackets(testLine), font).Width;
 
-					if (testW <= maxWidth)
+					if (testW <= balancedTargetW)
 					{
 						currentLine.Append(currentLine.Length == 0 ? word : " " + word);
 					}
@@ -659,13 +863,13 @@ namespace VideoBatchMerger
 						}
 
 						// If single word itself exceeds maxWidth, hard break by characters
-						if (g.MeasureString(word, font).Width > maxWidth)
+						if (g.MeasureString(StripHighlightBrackets(word), font).Width > maxWidth)
 						{
 							StringBuilder wordPart = new StringBuilder();
 							for (int ci = 0; ci < word.Length; ci++)
 							{
 								string testPart = wordPart.ToString() + word[ci];
-								if (g.MeasureString(testPart, font).Width <= maxWidth)
+								if (g.MeasureString(StripHighlightBrackets(testPart), font).Width <= maxWidth)
 								{
 									wordPart.Append(word[ci]);
 								}
@@ -704,7 +908,7 @@ namespace VideoBatchMerger
 				{
 					char c = text[i];
 					string testLine = currentLine.ToString() + c;
-					float testW = g.MeasureString(testLine, font).Width;
+					float testW = g.MeasureString(StripHighlightBrackets(testLine), font).Width;
 
 					if (testW <= maxWidth)
 					{
@@ -729,8 +933,8 @@ namespace VideoBatchMerger
 			// If wrapped into 2 lines, try to balance their lengths for aesthetics
 			if (result.Count == 2 && hasSpaces)
 			{
-				float w1 = g.MeasureString(result[0], font).Width;
-				float w2 = g.MeasureString(result[1], font).Width;
+				float w1 = g.MeasureString(StripHighlightBrackets(result[0]), font).Width;
+				float w2 = g.MeasureString(StripHighlightBrackets(result[1]), font).Width;
 				if (Math.Abs(w1 - w2) > maxWidth * 0.25f)
 				{
 					string[] words = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
@@ -740,8 +944,8 @@ namespace VideoBatchMerger
 					{
 						string l1 = string.Join(" ", words.Take(si));
 						string l2 = string.Join(" ", words.Skip(si));
-						float cw1 = g.MeasureString(l1, font).Width;
-						float cw2 = g.MeasureString(l2, font).Width;
+						float cw1 = g.MeasureString(StripHighlightBrackets(l1), font).Width;
+						float cw2 = g.MeasureString(StripHighlightBrackets(l2), font).Width;
 						if (cw1 <= maxWidth && cw2 <= maxWidth)
 						{
 							float diff = Math.Abs(cw1 - cw2);

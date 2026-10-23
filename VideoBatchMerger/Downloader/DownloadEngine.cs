@@ -455,8 +455,24 @@ public sealed class DownloadEngine
 		}
 		else
 		{
+			if (item.Platform == "Google Drive")
+			{
+				var gMatch = GoogleDriveIdRegex.Match(item.Url);
+				if (gMatch.Success)
+				{
+					string gFileId = gMatch.Groups[1].Value;
+					logCallback?.Invoke($"[Google Drive] yt-dlp 抓取受限(403)，自动切换内置直接下载通道重试: {gFileId}...");
+					bool directOk = await DownloadGoogleDriveDirectAsync(item, gFileId, targetDir, proxyUrl, logCallback, ct);
+					if (directOk) return true;
+				}
+			}
+
 			item.Status = "下载失败";
 			logCallback?.Invoke($"[下载失败] 进程退出码: {proc.ExitCode} {item.ErrorMessage}");
+			if (item.Platform == "Google Drive" || (item.ErrorMessage != null && item.ErrorMessage.Contains("403")))
+			{
+				logCallback?.Invoke("💡 [排查指引] 该链接返回 403 Forbidden。通常是因为谷歌网盘分享权限被设为了【受限】。请在 Google 云端硬盘中右键该文件 -> 点击【共享】-> 将常规访问权限从【受限】改为【知道链接的任何人】，即可免登录直接下载！");
+			}
 			return false;
 		}
 	}
@@ -499,6 +515,12 @@ public sealed class DownloadEngine
 			if (response.Content.Headers.ContentType?.MediaType?.Contains("html") == true)
 			{
 				string html = await response.Content.ReadAsStringAsync();
+				if (html.Contains("accounts.google.com") || html.Contains("Sign in to your Google Account") || html.Contains("ServiceLogin") || response.StatusCode == System.Net.HttpStatusCode.Unauthorized || response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+				{
+					logCallback?.Invoke($"💡 [Google Drive 权限诊断提示]：下载失败(401/403)，该网盘文件当前处于【受限】状态，未开放公开访问。\n👉 解决方案：请在 Google 云端硬盘中右键该文件 -> 选择【共享】-> 将常规访问权限从【受限】更改为【知道链接的任何人可查看】，即可免密直接高速下载！");
+					item.Status = "权限受限 (需改为公开)";
+					return false;
+				}
 
 				// 策略 A: 提取现代 Google Drive 下载表单 (action + hidden inputs)
 				var formMatch = Regex.Match(html, @"<form[^>]*action=""([^""]*)""");

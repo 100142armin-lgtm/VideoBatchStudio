@@ -32,6 +32,7 @@ public static class TranscribeEngine
 		new ModelInfo { Key = "base",  FileName = "ggml-base.bin",  Display = "极速 Base",  SizeText = "148MB" },
 		new ModelInfo { Key = "small", FileName = "ggml-small.bin", Display = "标准 Small", SizeText = "488MB" },
 		new ModelInfo { Key = "turbo", FileName = "ggml-large-v3-turbo-q5_0.bin", Display = "高精 Large-v3 Turbo (显卡推荐)", SizeText = "574MB" },
+		new ModelInfo { Key = "large", FileName = "ggml-large-v3-q5_0.bin", Display = "最高精度 Large-v3 (口音/噪音最稳)", SizeText = "1.08GB" },
 	};
 
 	public const string CudaBuildUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.0/whisper-cublas-12.4.0-bin-x64.zip";
@@ -673,16 +674,17 @@ public static class TranscribeEngine
 		}
 		catch { }
 
-		string langArg = string.IsNullOrWhiteSpace(language) || language.Equals("auto", StringComparison.OrdinalIgnoreCase)
+		string normLang = NormalizeWhisperLanguage(language);
+		string langArg = string.IsNullOrWhiteSpace(normLang) || normLang.Equals("auto", StringComparison.OrdinalIgnoreCase)
 			? "-l auto"
-			: $"-l {language}";
+			: $"-l {normLang}";
 
 		var args = new StringBuilder();
 		args.Append($"-m {QuoteArg(relativeModel)} ");
 		args.Append($"-f {QuoteArg(audioWavPath)} ");
 		args.Append($"{langArg} ");
-		// -pp 打印进度，-sns 抑制非语音字符，-nth 0.60 过滤无声与背景杂音
-		args.Append("-pp --no-prints -sns -nth 0.60 ");
+		// -pp 打印进度，-sns 抑制非语音字符，-nth 0.85 提升人声识别容错率，防止漏识别轻声/连读/背景音下的人声
+		args.Append("-pp --no-prints -sns -nth 0.85 ");
 
 		logCallback?.Invoke($"[Whisper 转录启动] 启动本地模型推理内核: {Path.GetFileName(modelPath)}");
 
@@ -771,6 +773,467 @@ public static class TranscribeEngine
 		}
 
 		logCallback?.Invoke($"[转录结束] 成功提取到 {segments.Count} 句原生字幕");
+		return segments;
+	}
+
+	// ======================================================================
+	// 逐词时间戳转录（-ojf）：句子按标点/停顿/字数重新断句，字幕与口型对齐
+	// ======================================================================
+
+	/// <summary>模型 Key（large / turbo / small / base）对应文件查找（修复 turbo 文件名与 key 不一致）</summary>
+	public static string FindModelPathByKey(string key)
+	{
+		if (string.IsNullOrWhiteSpace(key)) return string.Empty;
+		var m = Models.FirstOrDefault(x => x.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+		return FindModelPath(m != null ? m.FileName : key);
+	}
+
+	/// <summary>按精度从高到低挑选本机已有的最佳模型</summary>
+	public static string FindBestAvailableModelPath(out string modelKey)
+	{
+		foreach (var key in new[] { "large", "turbo", "small", "base" })
+		{
+			string p = FindModelPathByKey(key);
+			if (!string.IsNullOrEmpty(p) && File.Exists(p))
+			{
+				modelKey = key;
+				return p;
+			}
+		}
+		modelKey = string.Empty;
+		return string.Empty;
+	}
+
+	/// <summary>标准化语种代号为 Whisper CLI 原生支持的 2 位 ISO 语言代码（例如将 pt-ao 规范化为 pt，避免 whisper-cli 报错未知语种）</summary>
+	public static string NormalizeWhisperLanguage(string lang)
+	{
+		if (string.IsNullOrWhiteSpace(lang)) return "auto";
+		string lower = lang.Trim().ToLowerInvariant();
+		if (lower == "pt-ao" || lower == "pt_ao" || lower == "ao") return "pt";
+		if (lower == "zh-cn" || lower == "zh_cn" || lower == "cn") return "zh";
+		if (lower == "zh-tw" || lower == "zh_tw") return "zh";
+		if (lower == "en-us" || lower == "en-gb") return "en";
+		return lower;
+	}
+
+	/// <summary>构造初始提示词：优先使用用户标准文案（专有名词/地名/人名），否则给葡语(安哥拉/莫桑比克)默认提示</summary>
+	public static string BuildInitialPrompt(string langCode, string userScript)
+	{
+		if (!string.IsNullOrWhiteSpace(userScript))
+		{
+			string one = Regex.Replace(userScript.Trim(), @"\s+", " ");
+			return one.Length > 320 ? one.Substring(0, 320) : one;
+		}
+		if (string.Equals(langCode, "pt", StringComparison.OrdinalIgnoreCase) ||
+		    string.Equals(langCode, "pt-ao", StringComparison.OrdinalIgnoreCase) ||
+		    string.Equals(langCode, "ao", StringComparison.OrdinalIgnoreCase))
+		{
+			return "Conversa em português de Angola e Moçambique, com pontuação correta.";
+		}
+		return string.Empty;
+	}
+
+	// whisper-cli 通过 ANSI 命令行接收参数：仅保留能被系统代码页无损编码的词，避免提示词乱码误导模型
+	private static string SanitizePromptForAnsi(string prompt)
+	{
+		if (string.IsNullOrWhiteSpace(prompt)) return string.Empty;
+		var enc = Encoding.Default;
+		var keep = new List<string>();
+		foreach (var w in prompt.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries))
+		{
+			try
+			{
+				if (enc.GetString(enc.GetBytes(w)) == w) keep.Add(w);
+			}
+			catch { }
+		}
+		return string.Join(" ", keep).Trim();
+	}
+
+	private static string ToRelativeModelPath(string modelPath, string whisperDir)
+	{
+		try
+		{
+			string dirWithSlash = whisperDir.EndsWith("\\") || whisperDir.EndsWith("/") ? whisperDir : whisperDir + "\\";
+			Uri fromUri = new Uri(dirWithSlash);
+			Uri toUri = new Uri(modelPath);
+			if (string.Equals(fromUri.Scheme, toUri.Scheme, StringComparison.OrdinalIgnoreCase))
+			{
+				string relStr = Uri.UnescapeDataString(fromUri.MakeRelativeUri(toUri).ToString()).Replace('/', '\\');
+				if (!string.IsNullOrEmpty(relStr)) return relStr;
+			}
+		}
+		catch { }
+		return modelPath;
+	}
+
+	private static readonly Regex s_jsonTokenRegex = new Regex(
+		"\"text\":\\s*\"((?:[^\"\\\\]|\\\\.)*)\",\\s*\"timestamps\":\\s*\\{[^}]*\\},\\s*\"offsets\":\\s*\\{\\s*\"from\":\\s*(-?\\d+),\\s*\"to\":\\s*(-?\\d+)\\s*\\},\\s*\"id\":\\s*(\\d+),\\s*\"p\":\\s*(-?[0-9.eE+\\-]+)",
+		RegexOptions.Compiled);
+
+	private sealed class RawToken
+	{
+		public byte[] Bytes;
+		public int From;
+		public int To;
+		public double P;
+	}
+
+	// JSON 文件按 Latin-1 读取以保留原始字节，再按“词”整体做 UTF-8 解码，避免多字节字符被拆在两个 token 中变成乱码
+	private static byte[] UnescapeJsonToBytes(string latin1)
+	{
+		var buf = new List<byte>(latin1.Length);
+		for (int i = 0; i < latin1.Length; i++)
+		{
+			char c = latin1[i];
+			if (c != '\\' || i + 1 >= latin1.Length)
+			{
+				buf.Add((byte)c);
+				continue;
+			}
+			char n = latin1[++i];
+			switch (n)
+			{
+				case 'n': buf.Add((byte)'\n'); break;
+				case 't': buf.Add((byte)'\t'); break;
+				case 'r': buf.Add((byte)'\r'); break;
+				case 'b': buf.Add((byte)'\b'); break;
+				case 'f': buf.Add((byte)'\f'); break;
+				case '"': buf.Add((byte)'"'); break;
+				case '\\': buf.Add((byte)'\\'); break;
+				case '/': buf.Add((byte)'/'); break;
+				case 'u':
+					if (i + 4 < latin1.Length && int.TryParse(latin1.Substring(i + 1, 4), System.Globalization.NumberStyles.HexNumber, null, out int cp))
+					{
+						buf.AddRange(Encoding.UTF8.GetBytes(((char)cp).ToString()));
+						i += 4;
+					}
+					break;
+				default: buf.Add((byte)n); break;
+			}
+		}
+		return buf.ToArray();
+	}
+
+	private static List<RawToken> ParseJsonFullTokens(string jsonPath)
+	{
+		var list = new List<RawToken>();
+		string raw = Encoding.GetEncoding(28591).GetString(File.ReadAllBytes(jsonPath));
+		foreach (Match m in s_jsonTokenRegex.Matches(raw))
+		{
+			string rawText = m.Groups[1].Value;
+			if (rawText.StartsWith("[_") && rawText.EndsWith("]")) continue; // [_BEG_] [_TT_xxx] 等特殊 token
+			int.TryParse(m.Groups[2].Value, out int from);
+			int.TryParse(m.Groups[3].Value, out int to);
+			double.TryParse(m.Groups[5].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double p);
+			list.Add(new RawToken { Bytes = UnescapeJsonToBytes(rawText), From = from, To = to, P = p });
+		}
+		return list;
+	}
+
+	private static bool IsPunctOnly(byte[] bytes)
+	{
+		string tx = Encoding.UTF8.GetString(bytes).Trim();
+		if (tx.Length == 0 || tx.IndexOf('\uFFFD') >= 0) return false;
+		foreach (char ch in tx)
+		{
+			if (!char.IsPunctuation(ch)) return false;
+		}
+		return true;
+	}
+
+	private static List<WordTiming> BuildWordsFromTokens(List<RawToken> tokens, bool perToken)
+	{
+		var words = new List<WordTiming>();
+		List<byte> curBytes = null;
+		double curStart = 0, curEnd = 0, probSum = 0;
+		int probN = 0;
+
+		void Flush()
+		{
+			if (curBytes == null) return;
+			string text = Encoding.UTF8.GetString(curBytes.ToArray()).Trim();
+			if (text.Length > 0)
+			{
+				double s = curStart / 1000.0;
+				double e = Math.Max(curEnd / 1000.0, s + 0.03);
+				words.Add(new WordTiming { Text = text, StartSec = s, EndSec = e, Prob = probN > 0 ? probSum / probN : 1.0 });
+			}
+			curBytes = null;
+			probSum = 0;
+			probN = 0;
+		}
+
+		foreach (var tok in tokens)
+		{
+			bool startsWithSpace = tok.Bytes.Length > 0 && tok.Bytes[0] == 0x20;
+			bool punct = IsPunctOnly(tok.Bytes);
+			bool startNew = curBytes == null || perToken || (startsWithSpace && !punct);
+			if (startNew)
+			{
+				Flush();
+				curBytes = new List<byte>(tok.Bytes);
+				curStart = tok.From;
+				curEnd = tok.To;
+				probSum = 0;
+				probN = 0;
+				if (!punct) { probSum += tok.P; probN++; }
+			}
+			else
+			{
+				curBytes.AddRange(tok.Bytes);
+				if (!punct)
+				{
+					curEnd = Math.Max(curEnd, tok.To);
+					probSum += tok.P;
+					probN++;
+				}
+			}
+		}
+		Flush();
+		return words;
+	}
+
+	private static bool EndsSentence(string t)
+	{
+		if (string.IsNullOrEmpty(t)) return false;
+		char c = t[t.Length - 1];
+		return c == '.' || c == '?' || c == '!' || c == '…' || c == '。' || c == '！' || c == '？';
+	}
+
+	private static bool EndsClause(string t)
+	{
+		if (string.IsNullOrEmpty(t)) return false;
+		char c = t[t.Length - 1];
+		return c == ',' || c == ';' || c == ':' || c == '，' || c == '；' || c == '：' || c == '、';
+	}
+
+	/// <summary>把逐词序列重新断成适合短视频阅读的字幕行（句末标点 / 停顿≥0.75s / 逗号后超长 / 行宽上限 / 时长上限）</summary>
+	private static List<SubtitleSegment> BuildSegmentsFromWords(List<WordTiming> words, bool noSpaces, int maxChars)
+	{
+		var lines = new List<List<WordTiming>>();
+		var cur = new List<WordTiming>();
+		int curChars = 0;
+
+		for (int i = 0; i < words.Count; i++)
+		{
+			var w = words[i];
+			int add = w.Text.Length + (cur.Count > 0 && !noSpaces ? 1 : 0);
+			if (cur.Count > 0 && curChars + add > maxChars)
+			{
+				lines.Add(cur);
+				cur = new List<WordTiming>();
+				curChars = 0;
+				add = w.Text.Length;
+			}
+			cur.Add(w);
+			curChars += add;
+
+			bool last = i == words.Count - 1;
+			double gap = last ? 99 : words[i + 1].StartSec - w.EndSec;
+			double lineDur = w.EndSec - cur[0].StartSec;
+			if (last || gap >= 0.75 || EndsSentence(w.Text) || (EndsClause(w.Text) && curChars >= (maxChars * 2 / 3)) || lineDur >= 7.0)
+			{
+				lines.Add(cur);
+				cur = new List<WordTiming>();
+				curChars = 0;
+			}
+		}
+
+		// 合并过短的孤行（≤2词、<1s，且与下一行紧邻）
+		for (int i = 0; i < lines.Count - 1; i++)
+		{
+			var a = lines[i];
+			var b = lines[i + 1];
+			double aDur = a[a.Count - 1].EndSec - a[0].StartSec;
+			double gapAB = b[0].StartSec - a[a.Count - 1].EndSec;
+			int chars = a.Sum(x => x.Text.Length + 1) + b.Sum(x => x.Text.Length + 1);
+			if (a.Count <= 2 && aDur < 1.0 && gapAB < 0.3 && chars <= maxChars && !EndsSentence(a[a.Count - 1].Text))
+			{
+				a.AddRange(b);
+				lines.RemoveAt(i + 1);
+				i--;
+			}
+		}
+
+		var result = new List<SubtitleSegment>();
+		string prevText = null;
+		double prevEnd = -1;
+		for (int i = 0; i < lines.Count; i++)
+		{
+			var ln = lines[i];
+			string text = string.Join(noSpaces ? "" : " ", ln.Select(x => x.Text)).Trim();
+			if (IsHallucinationOrJunk(text)) continue;
+			double start = ln[0].StartSec;
+			double end = ln[ln.Count - 1].EndSec;
+			double conf = ln.Average(x => x.Prob);
+			if (conf < 0.02) continue; // 仅过滤接近0的极度无意义乱码，保留所有弱音与口音正常对话
+			// 重复循环幻觉：与上一句完全相同且几乎紧邻
+			if (prevText != null && string.Equals(prevText, text, StringComparison.OrdinalIgnoreCase) && start - prevEnd < 0.6) continue;
+			prevText = text;
+			prevEnd = end;
+
+			double nextStart = (i + 1 < lines.Count) ? lines[i + 1][0].StartSec : double.MaxValue;
+			double tail = Math.Min(0.12, Math.Max(0.0, nextStart - end - 0.02));
+			result.Add(new SubtitleSegment
+			{
+				Index = result.Count + 1,
+				StartTime = TimeSpan.FromSeconds(start),
+				EndTime = TimeSpan.FromSeconds(end + tail),
+				OriginalText = text,
+				Words = ln.Select(x => new WordTiming { Text = x.Text, StartSec = x.StartSec, EndSec = x.EndSec, Prob = x.Prob }).ToList(),
+				Confidence = conf
+			});
+		}
+		return result;
+	}
+
+	/// <summary>
+	/// 带真实逐词时间戳的转录：使用 whisper-cli -ojf；支持初始提示词(专名/口音语境)偏置；
+	/// 返回按短视频阅读习惯断句的字幕，每句携带 Words(真实词时间) 与 Confidence(置信度)。
+	/// </summary>
+	public static async Task<List<SubtitleSegment>> TranscribeWithWordsAsync(
+		string audioWavPath,
+		string whisperCliPath,
+		string modelPath,
+		string language,
+		string initialPrompt,
+		Action<string> logCallback,
+		CancellationToken ct,
+		Action<int> progressCallback = null)
+	{
+		string whisperDir = Path.GetDirectoryName(whisperCliPath);
+		string relativeModel = ToRelativeModelPath(modelPath, whisperDir);
+		string rawLang = string.IsNullOrWhiteSpace(language) ? "auto" : language.Trim().ToLowerInvariant();
+		string lang = NormalizeWhisperLanguage(rawLang);
+		string outBase = Path.Combine(Path.GetTempPath(), "whisper_words_" + Guid.NewGuid().ToString("N"));
+		string jsonPath = outBase + ".json";
+
+		var args = new StringBuilder();
+		args.Append($"-m {QuoteArg(relativeModel)} ");
+		args.Append($"-f {QuoteArg(audioWavPath)} ");
+		args.Append($"-l {lang} ");
+		args.Append($"-ojf -of {QuoteArg(outBase)} ");
+		// -pp 打印进度，-sns 抑制非语音字符，-nth 0.85 提升人声识别容错率，防止漏识别轻声/连读/背景音下的人声
+		args.Append("-pp -sns -nth 0.85 ");
+		string promptToUse = !string.IsNullOrWhiteSpace(initialPrompt) ? initialPrompt : BuildInitialPrompt(rawLang, null);
+		string safePrompt = SanitizePromptForAnsi(promptToUse);
+		if (!string.IsNullOrWhiteSpace(safePrompt))
+		{
+			// 注意：不能同时加 -mc 0，否则提示词会被截断到 1 个 token
+			args.Append($"--prompt {QuoteArg(safePrompt)} --carry-initial-prompt ");
+		}
+
+		logCallback?.Invoke($"[Whisper 逐词转录] 模型: {Path.GetFileName(modelPath)} | 语种: {lang}" + (string.IsNullOrEmpty(safePrompt) ? "" : " | 已注入提示词"));
+
+		var psi = new ProcessStartInfo
+		{
+			FileName = whisperCliPath,
+			Arguments = args.ToString(),
+			WorkingDirectory = whisperDir,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			StandardOutputEncoding = Encoding.UTF8,
+			StandardErrorEncoding = Encoding.UTF8
+		};
+
+		using var proc = new Process { StartInfo = psi };
+		proc.OutputDataReceived += (s, e) => { };
+		var errSb = new StringBuilder();
+		proc.ErrorDataReceived += (s, e) =>
+		{
+			if (string.IsNullOrWhiteSpace(e.Data)) return;
+			string d = e.Data.Trim();
+			var pm = Regex.Match(d, @"progress\s*=\s*(\d+)%");
+			if (pm.Success && int.TryParse(pm.Groups[1].Value, out int pVal)) progressCallback?.Invoke(pVal);
+			if (d.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0 || d.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0)
+			{
+				errSb.AppendLine(d);
+				logCallback?.Invoke($"[Whisper内核提示] {d}");
+			}
+		};
+
+		proc.Start();
+		proc.BeginOutputReadLine();
+		proc.BeginErrorReadLine();
+
+		using (ct.Register(() => { try { if (!proc.HasExited) proc.Kill(); } catch { } }))
+		{
+			await Task.Run(() => proc.WaitForExit(), ct);
+		}
+
+		// 自动容灾降级：若显卡版启动异常或未生成有效 json 输出，自动使用 -ng (CPU 模式) 重新推理
+		if (!File.Exists(jsonPath) && IsCudaBuild(whisperCliPath) && !ct.IsCancellationRequested)
+		{
+			logCallback?.Invoke("[GPU异常/无输出] 正在自动切换至 CPU 高兼容模式重新转录...");
+			var cpuArgs = new StringBuilder();
+			cpuArgs.Append($"-m {QuoteArg(relativeModel)} ");
+			cpuArgs.Append($"-f {QuoteArg(audioWavPath)} ");
+			cpuArgs.Append($"-l {lang} ");
+			cpuArgs.Append($"-ojf -of {QuoteArg(outBase)} ");
+			cpuArgs.Append("-ng -pp -sns -nth 0.85 ");
+			if (!string.IsNullOrWhiteSpace(safePrompt))
+			{
+				cpuArgs.Append($"--prompt {QuoteArg(safePrompt)} --carry-initial-prompt ");
+			}
+
+			var cpuPsi = new ProcessStartInfo
+			{
+				FileName = whisperCliPath,
+				Arguments = cpuArgs.ToString(),
+				WorkingDirectory = whisperDir,
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				StandardOutputEncoding = Encoding.UTF8,
+				StandardErrorEncoding = Encoding.UTF8
+			};
+
+			using var cpuProc = new Process { StartInfo = cpuPsi };
+			cpuProc.OutputDataReceived += (s, e) => { };
+			cpuProc.ErrorDataReceived += (s, e) =>
+			{
+				if (string.IsNullOrWhiteSpace(e.Data)) return;
+				var pm = Regex.Match(e.Data, @"progress\s*=\s*(\d+)%");
+				if (pm.Success && int.TryParse(pm.Groups[1].Value, out int pVal)) progressCallback?.Invoke(pVal);
+			};
+			cpuProc.Start();
+			cpuProc.BeginOutputReadLine();
+			cpuProc.BeginErrorReadLine();
+			using (ct.Register(() => { try { if (!cpuProc.HasExited) cpuProc.Kill(); } catch { } }))
+			{
+				await Task.Run(() => cpuProc.WaitForExit(), ct);
+			}
+		}
+
+		var segments = new List<SubtitleSegment>();
+		try
+		{
+			if (File.Exists(jsonPath))
+			{
+				bool perToken = lang == "zh" || lang == "ja" || lang == "ko";
+				var tokens = ParseJsonFullTokens(jsonPath);
+				var words = BuildWordsFromTokens(tokens, perToken);
+				segments = BuildSegmentsFromWords(words, perToken, perToken ? 22 : 44);
+			}
+			else
+			{
+				string errStr = errSb.ToString().Trim();
+				if (!string.IsNullOrEmpty(errStr))
+				{
+					logCallback?.Invoke($"[Whisper未能生成字幕] {errStr}");
+				}
+			}
+		}
+		finally
+		{
+			try { if (File.Exists(jsonPath)) File.Delete(jsonPath); } catch { }
+		}
+
+		logCallback?.Invoke($"[逐词转录结束] 共 {segments.Count} 句字幕（含真实词时间戳）");
 		return segments;
 	}
 

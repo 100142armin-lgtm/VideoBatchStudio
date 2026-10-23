@@ -396,8 +396,8 @@ internal sealed class TranscribePanel : UserControl
 			ForeColor = TextPrimary,
 			FlatStyle = FlatStyle.Flat
 		};
-		_cboModel.Items.AddRange(new object[] { "极速模式 (Base 148MB)", "标准推荐 (Small 488MB)", "高精影院 (Turbo 574MB)" });
-		_cboModel.SelectedIndex = 1;
+		_cboModel.Items.AddRange(new object[] { "极速模式 (Base 148MB)", "标准推荐 (Small 488MB)", "🔥 高精首选 (Large-v3 Turbo 574MB)", "👑 旗舰高精 (Large-v3 1.0GB)" });
+		_cboModel.SelectedIndex = 2;
 		paramPanel.Controls.Add(_cboModel);
 
 		Label lblSrcLang = new Label { Text = "视频语种:", Location = new Point(232, 10), AutoSize = true, ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) };
@@ -412,7 +412,7 @@ internal sealed class TranscribePanel : UserControl
 			ForeColor = TextPrimary,
 			FlatStyle = FlatStyle.Flat
 		};
-		_cboSourceLang.Items.AddRange(new object[] { "自动识别 (推荐)", "英语 (English)", "葡萄牙语 (Português)", "西班牙语 (Español)", "中文普通话 (Chinese)", "法语 (Français)", "德语 (Deutsch)", "俄语 (Русский)", "日语 (Japanese)" });
+		_cboSourceLang.Items.AddRange(new object[] { "自动识别 (推荐)", "🇦🇴 非洲葡萄牙语 (Angola/PALOP)", "葡萄牙语 (Português)", "英语 (English)", "西班牙语 (Español)", "中文普通话 (Chinese)", "法语 (Français)", "德语 (Deutsch)", "俄语 (Русский)", "日语 (Japanese)" });
 		_cboSourceLang.SelectedIndex = 0;
 		paramPanel.Controls.Add(_cboSourceLang);
 
@@ -513,9 +513,17 @@ internal sealed class TranscribePanel : UserControl
 		btnExportSrt.Location = new Point(308, 3);
 		topToolBar.Controls.Add(btnExportSrt);
 
-		Button btnExportTxt = MakeTechButton("导出 TXT 文本", 106, 28, Color.FromArgb(28, 42, 68), (s, e) => ExportTxtFile());
+		Button btnExportTxt = MakeTechButton("导出 TXT 文本", 102, 28, Color.FromArgb(28, 42, 68), (s, e) => ExportTxtFile());
 		btnExportTxt.Location = new Point(420, 3);
 		topToolBar.Controls.Add(btnExportTxt);
+
+		Button btnExportAss = MakeTechButton("✨ 导出逐词 ASS", 118, 28, Color.FromArgb(124, 58, 237), (s, e) => ExportDynamicAssFile());
+		btnExportAss.Location = new Point(528, 3);
+		topToolBar.Controls.Add(btnExportAss);
+
+		Button btnSendToCut = MakeTechButton("🎬 送入剪辑上轨", 118, 28, Color.FromArgb(37, 99, 235), (s, e) => SendSelectedToCutEditor());
+		btnSendToCut.Location = new Point(652, 3);
+		topToolBar.Controls.Add(btnSendToCut);
 
 		_progressTextLabel = new Label
 		{
@@ -1080,20 +1088,21 @@ internal sealed class TranscribePanel : UserControl
 		{
 			0 => "base",
 			1 => "small",
+			3 => "large",
 			_ => "turbo"
 		};
-		string modelPath = TranscribeEngine.FindModelPath(modelChoice);
+		string modelPath = TranscribeEngine.FindModelPathByKey(modelChoice);
 		if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
 		{
 			LogMessage($"[模型拉取] 本地未找到 {modelChoice} 模型，正在通过高速镜像自动下载...");
 			bool dlOk = await TranscribeEngine.DownloadModelAsync(modelChoice, LogMessage, _cts.Token);
 			if (dlOk)
 			{
-				modelPath = TranscribeEngine.FindModelPath(modelChoice);
+				modelPath = TranscribeEngine.FindModelPathByKey(modelChoice);
 			}
 			else
 			{
-				modelPath = TranscribeEngine.FindModelPath("small") ?? TranscribeEngine.FindModelPath("base");
+				modelPath = TranscribeEngine.FindBestAvailableModelPath(out _);
 			}
 		}
 
@@ -1102,7 +1111,7 @@ internal sealed class TranscribePanel : UserControl
 			LogMessage("[模型检测] 本地尚未找到可用的 AI 模型文件，正在自动配置基础模型...");
 			_statusLabel.Text = "正在自动下载基础 AI 模型...";
 			await AutoInstallAiComponentsAsync();
-			modelPath = TranscribeEngine.FindModelPath(modelChoice) ?? TranscribeEngine.FindModelPath("small") ?? TranscribeEngine.FindModelPath("base");
+			modelPath = TranscribeEngine.FindModelPathByKey(modelChoice) ?? TranscribeEngine.FindBestAvailableModelPath(out _);
 			if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
 			{
 				return;
@@ -1168,14 +1177,15 @@ internal sealed class TranscribePanel : UserControl
 		string ytdlp = Downloader.DownloadEngine.FindYtDlpPath();
 		string language = _cboSourceLang.SelectedIndex switch
 		{
-			1 => "en",
+			1 => "pt-ao",
 			2 => "pt",
-			3 => "es",
-			4 => "zh",
-			5 => "fr",
-			6 => "de",
-			7 => "ru",
-			8 => "ja",
+			3 => "en",
+			4 => "es",
+			5 => "zh",
+			6 => "fr",
+			7 => "de",
+			8 => "ru",
+			9 => "ja",
 			_ => "auto"
 		};
 
@@ -1240,20 +1250,20 @@ internal sealed class TranscribePanel : UserControl
 					if (string.Equals(language, "auto", StringComparison.OrdinalIgnoreCase))
 					{
 						string nameUpper = (item.SourceName ?? string.Empty).ToUpperInvariant();
-						if (nameUpper.Contains("-PT") || nameUpper.Contains("_PT") || nameUpper.EndsWith("PT")) effectiveLang = "pt";
+						if (nameUpper.Contains("-PT") || nameUpper.Contains("_PT") || nameUpper.EndsWith("PT") || nameUpper.Contains("AO")) effectiveLang = "pt-ao";
 						else if (nameUpper.Contains("-ES") || nameUpper.Contains("_ES") || nameUpper.EndsWith("ES")) effectiveLang = "es";
 						else if (nameUpper.Contains("-EN") || nameUpper.Contains("_EN") || nameUpper.EndsWith("EN")) effectiveLang = "en";
 						else if (nameUpper.Contains("-FR") || nameUpper.Contains("_FR") || nameUpper.EndsWith("FR")) effectiveLang = "fr";
 					}
 					item.DetectedLanguage = effectiveLang.ToUpperInvariant();
 
-					// 3. 执行 Whisper 本地神经网络语音识别
+					// 3. 执行 Whisper 本地神经网络语音识别 (开启逐词毫秒级时间戳 + 非洲葡语语境增强)
 					item.Status = "AI 转录中...";
 					UpdateTaskListView();
 					try
 					{
-						item.Segments = await TranscribeEngine.TranscribeAsync(
-							wavPath, whisperCli, modelPath, effectiveLang, LogMessage, _cts.Token,
+						item.Segments = await TranscribeEngine.TranscribeWithWordsAsync(
+							wavPath, whisperCli, modelPath, effectiveLang, null, LogMessage, _cts.Token,
 							pct =>
 							{
 								item.ProgressPercent = Math.Min(80, 15 + (int)(pct * 0.65));
@@ -1787,6 +1797,61 @@ internal sealed class TranscribePanel : UserControl
 			LogMessage($"[导出TXT] TXT 对照字幕文件已成功保存至: {sfd.FileName}");
 			_statusLabel.Text = $"✓ TXT 字幕已保存: {Path.GetFileName(sfd.FileName)}";
 		}
+	}
+
+	private void ExportDynamicAssFile()
+	{
+		var targets = GetTargetItems();
+		if (targets.Count == 0)
+		{
+			LogMessage("[导出ASS] 当前没有已识别字幕可导出。");
+			_statusLabel.Text = "当前没有已识别字幕可导出";
+			return;
+		}
+
+		var item = targets[0];
+		int mode = _cboSubMode.SelectedIndex;
+		bool incOrig = (mode == 0 || mode == 2);
+		bool incTrans = (mode == 0 || mode == 1);
+
+		using var sfd = new SaveFileDialog
+		{
+			Title = "导出为随音频逐词弹出 ASS 动态花字字幕",
+			Filter = "ASS 动态花字字幕 (*.ass)|*.ass|所有文件 (*.*)|*.*",
+			FileName = $"{SanitizeFileName(item.SourceName)}_逐词动态花字.ass"
+		};
+
+		if (sfd.ShowDialog(this) == DialogResult.OK)
+		{
+			string ass = SmartCutEngine.ExportDynamicAssSubtitles(item.Segments, wordAnimMode: 1, includeOriginal: incOrig, includeTranslated: incTrans);
+			File.WriteAllText(sfd.FileName, ass, Encoding.UTF8);
+			LogMessage($"[导出ASS] 随音频逐词动态花字 ASS 字幕已保存至: {sfd.FileName}");
+			_statusLabel.Text = $"✓ 逐词 ASS 字幕已保存: {Path.GetFileName(sfd.FileName)}";
+		}
+	}
+
+	private void SendSelectedToCutEditor()
+	{
+		var targets = GetTargetItems();
+		if (targets.Count == 0)
+		{
+			LogMessage("[联动剪辑] 请先完成至少一条本地视频的语音转录后再送入剪辑台。");
+			_statusLabel.Text = "请先转录视频后再送入剪辑台";
+			return;
+		}
+
+		var item = targets.FirstOrDefault(t => !string.IsNullOrEmpty(t.LocalMediaFilePath) && File.Exists(t.LocalMediaFilePath))
+			?? targets.FirstOrDefault(t => !t.IsOnlineUrl && File.Exists(t.SourcePathOrUrl))
+			?? targets[0];
+
+		string mediaPath = (!string.IsNullOrEmpty(item.LocalMediaFilePath) && File.Exists(item.LocalMediaFilePath))
+			? item.LocalMediaFilePath
+			: item.SourcePathOrUrl;
+
+		int subMode = _cboSubMode.SelectedIndex; // 0: 双语, 1: 仅中文, 2: 仅原文
+		_mainForm?.ImportTranscribedMediaAndSubtitlesToCutEditor(mediaPath, item.Segments, subMode);
+		LogMessage($"[联动剪辑] 已将【{item.SourceName}】及 {item.Segments.Count} 句字幕直接铺入【视频剪辑】轨道！");
+		_statusLabel.Text = $"✓ 已送入【视频剪辑】并自动铺设 {item.Segments.Count} 句字幕轨";
 	}
 
 	private static string SanitizeTitle(string title)

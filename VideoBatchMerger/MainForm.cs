@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "8.9.5";
+	public const string CurrentAppVersion = "9.4.0";
 
 	public const int WorkspaceMerge = 0;
 	public const int WorkspaceSplit = 1;
@@ -51,9 +51,11 @@ internal sealed class MainForm : Form
 	public const int WorkspaceCutEdit = 6;
 	public const int WorkspaceDeliver = 7;
 	public const int WorkspaceTranscribe = 8;
+	public const int WorkspaceScriptBatch = 9;
 
 	private VideoBatchMerger.Downloader.DownloaderPanel _downloaderPanel;
 	private VideoBatchMerger.Transcriber.TranscribePanel _transcribePanel;
+	private VideoBatchMerger.ScriptBatch.ScriptBatchStudioPanel _scriptBatchPanel;
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton = null;
 	private readonly List<Button> _navButtons = new List<Button>();
@@ -157,7 +159,6 @@ internal sealed class MainForm : Form
 	private Button _cutEditMediaPoolViewThumbBtn;
 	private Button _cutEditMediaPoolAppendEndBtn;
 	private Button _cutEditMediaPoolInsertPlayheadBtn;
-	private Button _cutEditMediaPoolInsertStartBtn;
 
 	// Real audio waveform cache
 	private readonly Dictionary<string, Image> _cutEditWaveformCache = new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
@@ -185,6 +186,7 @@ internal sealed class MainForm : Form
 	// Multi-segment Text & Image Overlays (Phase 2)
 	private readonly List<CutOverlayItem> _cutEditOverlays = new List<CutOverlayItem>();
 	private CutOverlayItem _selectedOverlay = null;
+	private readonly HashSet<string> _selectedOverlayIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 	private readonly Dictionary<string, Rectangle> _cachedOverlayRects = new Dictionary<string, Rectangle>(StringComparer.OrdinalIgnoreCase);
 	private readonly Dictionary<string, Image> _overlayImageCache = new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
 	private bool _isDraggingOverlay = false;
@@ -195,12 +197,17 @@ internal sealed class MainForm : Form
 	private CutOverlayItem _draggedOverlayItem = null;
 	private bool _updatingOverlayInspector = false;
 
+	private Panel _cutEditTitlePanel;
 	private ComboBox _overlayItemCombo;
 	private CheckBox _overlayItemEnabledCheckBox;
+	private CheckBox _syncAllSubtitlesCheckBox;
+	private Button _overlayAddTitleBtn;
 	private Button _overlayAddTextBtn;
 	private Button _overlayAddImageBtn;
 	private Button _overlayDuplicateBtn;
 	private Button _overlayDeleteBtn;
+	private Button _overlaySelectAllSubtitlesBtn;
+	private Button _overlayApplyToAllSubtitlesBtn;
 	private NumericUpDown _overlayStartTimeNum;
 	private NumericUpDown _overlayDurationNum;
 	private ComboBox _overlayPositionCombo;
@@ -261,7 +268,7 @@ internal sealed class MainForm : Form
 
 	internal double CutEditDuration => _cutEditDuration;
 	internal int CutEditSubtitleBottomOffset => _cutEditSubtitleBottomOffset;
-	private int _cutEditSubtitleBottomOffset = 407;
+	private int _cutEditSubtitleBottomOffset = 120;
 	private CutEditPopoutPreviewForm _cutEditPopoutForm;
 	private TrackBar _cutEditSubtitlePosTrackBar;
 	private Label _cutEditSubtitlePosLabel;
@@ -276,6 +283,98 @@ internal sealed class MainForm : Form
 	private int _cutEditBgmVolume = 40;
 	private Button _cutEditFitWindowBtn;
 	private ComboBox _cutEditSpeedCombo;
+
+	// AI Smart Cut, Word-by-Word Dynamic Subtitles, Script Alignment, TTS Scenery Montage & CapCut Visual/Audio Effects
+	private HScrollBar _cutEditTimelineHScrollBar;
+	private string _cutEditOriginalRawSourcePath;
+	private Button _cutEditRestoreOrigAudioBtn;
+	private ComboBox _cutEditSilencePadCombo;
+	private ComboBox _aiSubItemCombo;
+	private readonly List<CutOverlayItem> _aiSubComboItems = new List<CutOverlayItem>();
+	private readonly List<CutOverlayItem> _titleComboItems = new List<CutOverlayItem>();
+	private TextBox _aiSubTextEditBox;
+	private NumericUpDown _aiSubStartNum;
+	private NumericUpDown _aiSubDurNum;
+	private TrackBar _aiSubFontSizeSlider;
+	private Label _aiSubFontSizeLabel;
+	private ComboBox _aiSubFontCombo;
+	private Button _aiSubFontPickBtn;
+	private ComboBox _aiSubColorCombo;
+	private Button _aiSubCustomColorBtn;
+	private ComboBox _aiSubStrokeCombo;
+	private Button _aiSubCustomStrokeColorBtn;
+	private ComboBox _aiSubBannerCombo;
+	private CheckBox _aiSubSyncTrackCheckBox;
+
+	private class FontComboItem
+	{
+		public string DisplayName { get; }
+		public string FamilyName { get; }
+		public FontComboItem(string displayName, string familyName)
+		{
+			DisplayName = displayName;
+			FamilyName = familyName;
+		}
+		public override string ToString() => DisplayName;
+	}
+
+	private static readonly FontComboItem[] SubtitleFontPresets = new[]
+	{
+		new FontComboItem("微软雅黑 (默认推荐)", "Microsoft YaHei UI"),
+		new FontComboItem("黑体 (醒目粗体)", "SimHei"),
+		new FontComboItem("楷体 (优雅手写)", "KaiTi"),
+		new FontComboItem("宋体 (经典衬线)", "SimSun"),
+		new FontComboItem("仿宋 (标准公文)", "FangSong"),
+		new FontComboItem("思源黑体 (高清推荐)", "Source Han Sans CN"),
+		new FontComboItem("Arial (国际经典)", "Arial"),
+		new FontComboItem("Impact (短剧爆款)", "Impact"),
+		new FontComboItem("Arial Black (加厚超粗)", "Arial Black"),
+		new FontComboItem("Segoe UI (现代极简)", "Segoe UI")
+	};
+
+	private ComboBox _cutEditWordAnimCombo;
+	private ComboBox _cutEditAiLangCombo;
+	private ComboBox _cutEditAiModelCombo;
+	private ComboBox _cutEditAiWordModeCombo;
+	private ComboBox _cutEditAiSubPosCombo;
+	private TextBox _cutEditStandardScriptText;
+	private ComboBox _cutEditScriptConflictModeCombo;
+	private CheckBox _cutEditAiAutoSilenceCutCheckBox;
+	private CheckBox _cutEditAutoCutBadTakesCheckBox;
+	private CheckBox _cutEditAiTranslateZhCheckBox;
+	private Button _cutEditClearTrackMenuBtn;
+	private ComboBox _cutEditSilenceDbCombo;
+	private ComboBox _cutEditSilenceMinDurCombo;
+	private Label _cutEditAiSmartStatusLabel;
+	private Button _btnRunAiCaptionAlign;
+	private TextBox _cutEditTtsScriptText;
+	private ComboBox _cutEditTtsVoiceCombo;
+	private TrackBar _cutEditTtsRateTrackBar;
+	private Label _cutEditTtsRateLabel;
+	private TextBox _cutEditSceneryFolderText;
+	private CheckBox _cutEditDenoiseCheckBox;
+	private ComboBox _cutEditAiDenoiseModeCombo;
+	private CheckBox _cutEditAiAutoDenoiseCheckBox;
+	private Button _cutEditAiDenoiseNowBtn;
+	private CheckBox _cutEditLoudnormCheckBox;
+	private CheckBox _cutEditBgmDuckingCheckBox;
+	private ComboBox _cutEditVoiceMorphCombo;
+	private ComboBox _cutEditVisualEffectCombo;
+	private List<VideoBatchMerger.Transcriber.SubtitleSegment> _lastAsrSegments;
+	private List<(double StartSec, double EndSec, string Reason)> _lastBadTakeRanges;
+	private ComboBox _cutEditColorGradeCombo;
+	private ComboBox _cutEditChromaKeyCombo;
+	private bool _isAiSmartCutRunning;
+
+	// CutEdit anti-lag caches & debounce state
+	private string _lastCutEditWpfOverlayStateKey;
+	private string _lastDeliverWpfOverlayStateKey;
+	private System.Windows.Forms.Timer _cutEditPreviewDebounceTimer;
+	private bool _pendingForcePreviewSelected;
+	private readonly Dictionary<string, (double Duration, int Width, int Height, bool HasAudio, bool HasVideo)> _mediaProbeCache = new Dictionary<string, (double, int, int, bool, bool)>(StringComparer.OrdinalIgnoreCase);
+	private int _lastInspectorLayoutWidth = -1;
+	private int _lastInspectorLayoutTabIdx = -1;
+	private bool _isAdjustingInspectorLayout;
 
 	private TextBox _deliverOutputFolder;
 	private TextBox _deliverOutputFileName;
@@ -345,7 +444,17 @@ internal sealed class MainForm : Form
 		("radial", "🔄 径向旋转 (Radial Spin)", "旋转"),
 		("pixelize", "🔲 像素马赛克 (Pixelize)", "马赛克"),
 		("hblur", "💨 动态水平模糊 (Motion Blur)", "动模"),
-		("circleopen", "⭕ 圆形展开 (Circle Open)", "圆展")
+		("circleopen", "⭕ 圆形展开 (Circle Open)", "圆展"),
+		("circleclose", "⚫ 圆形收拢 (Circle Close)", "圆收"),
+		("smoothleft", "🌊 丝滑向左推镜 (Smooth Left)", "丝左"),
+		("smoothright", "🌊 丝滑向右推镜 (Smooth Right)", "丝右"),
+		("smoothup", "🌊 丝滑向上推镜 (Smooth Up)", "丝上"),
+		("smoothdown", "🌊 丝滑向下推镜 (Smooth Down)", "丝下"),
+		("horzopen", "↔️ 水平中分展开 (Horz Open)", "中开"),
+		("vertopen", "↕️ 垂直上下展开 (Vert Open)", "竖开"),
+		("diagtl", "↖️ 对角线斜切擦除 (Diagonal Wipe)", "斜擦"),
+		("hlslice", "🪟 水平百叶窗切片 (Blinds Slice)", "百叶"),
+		("squeezeh", "🪗 水平挤压变形 (Squeeze H)", "挤压")
 	};
 
 	private readonly List<string> _videos = new List<string>();
@@ -1036,7 +1145,7 @@ internal sealed class MainForm : Form
 	public MainForm()
 	{
 		InitCutEditTracks();
-		Text = $"视频批处理工具 V{CurrentAppVersion}";
+		Text = $"视频批处理工具 V{CurrentAppVersion} - [AI声音克隆 · 4重质检 · 9:16视界专版]";
 		base.StartPosition = FormStartPosition.CenterScreen;
 		MinimumSize = new Size(1000, 640);
 		Rectangle rectangle = ((Screen.PrimaryScreen == null) ? new Rectangle(0, 0, 1366, 768) : Screen.PrimaryScreen.WorkingArea);
@@ -1132,12 +1241,14 @@ internal sealed class MainForm : Form
 		_tabs.TabPages.Add(BuildCutEditTab());      // 6
 		_tabs.TabPages.Add(BuildDeliverTab());      // 7
 		_tabs.TabPages.Add(BuildTranscribeTab());   // 8 (智能字幕)
+		_tabs.TabPages.Add(BuildScriptBatchTab());  // 9 (文案成片)
 		tableLayoutPanel.Controls.Add(_tabs, 0, 0);
 
 		_bottomNavBar = new Panel();
 		_bottomNavBar.Dock = DockStyle.Fill;
 		_bottomNavBar.Margin = new Padding(0);
 		_bottomNavBar.BackColor = HeaderColor;
+		_bottomNavBar.MinimumSize = new Size(0, 52);
 
 		_bottomNavLine = new Panel();
 		_bottomNavLine.Dock = DockStyle.Top;
@@ -1190,6 +1301,7 @@ internal sealed class MainForm : Form
 
 		navCenter.Controls.Add(MakeNavButton("📥 视频下载", WorkspaceDownload));
 		navCenter.Controls.Add(MakeNavButton("🎙️ 智能字幕", WorkspaceTranscribe));
+		navCenter.Controls.Add(MakeNavButton("📝 文案成片", WorkspaceScriptBatch));
 		navCenter.Controls.Add(MakeNavButton("▦ 视频拼屏", WorkspaceSplitScreen));
 		navCenter.Controls.Add(MakeNavButton("🎬 视频剪辑", WorkspaceCutEdit));
 		navCenter.Controls.Add(MakeNavButton("🚀 导出交付", WorkspaceDeliver));
@@ -1197,17 +1309,35 @@ internal sealed class MainForm : Form
 
 		void CenterNavButtons()
 		{
-			if (_bottomNavBar.ClientSize.Width > 0 && navCenter.PreferredSize.Width > 0)
+			int navW = _bottomNavBar.ClientSize.Width;
+			int navH = _bottomNavBar.ClientSize.Height;
+			if (navW <= 0 || navH <= 0) return;
+
+			navRight.Width = navRight.PreferredSize.Width;
+			int rightWidth = navRight.Width;
+
+			// 自适应宽度防溢出保护：当可用空间紧凑时，平滑微调按钮宽度，确保全部 10 个板块按钮完整显示绝不遮挡
+			int availForCenter = navW - rightWidth - 16;
+			int btnCount = _navButtons.Count;
+			if (availForCenter > 200 && btnCount > 0)
 			{
-				navRight.Width = navRight.PreferredSize.Width;
-				int rightWidth = navRight.Width;
-				int centerWidth = navCenter.PreferredSize.Width;
-				int idealX = (_bottomNavBar.ClientSize.Width - centerWidth) / 2;
-				int maxX = _bottomNavBar.ClientSize.Width - rightWidth - centerWidth - 8;
-				int finalX = Math.Max(6, Math.Min(idealX, maxX));
-				navCenter.Location = new Point(finalX, Math.Max(0, (_bottomNavBar.ClientSize.Height - navCenter.PreferredSize.Height) / 2));
-				navRight.BringToFront();
+				int maxAllowedBtnW = Math.Max(66, (availForCenter - 24) / btnCount - 4);
+				int targetBtnW = Math.Min(94, maxAllowedBtnW);
+				foreach (var btn in _navButtons)
+				{
+					if (btn.Width != targetBtnW) btn.Width = targetBtnW;
+				}
 			}
+
+			int centerWidth = navCenter.PreferredSize.Width;
+			int idealX = (navW - centerWidth) / 2;
+			int maxX = Math.Max(4, navW - rightWidth - centerWidth - 6);
+			int finalX = Math.Max(4, Math.Min(idealX, maxX));
+			int finalY = Math.Max(0, (navH - navCenter.PreferredSize.Height) / 2);
+
+			navCenter.Location = new Point(finalX, finalY);
+			navCenter.BringToFront();
+			navRight.BringToFront();
 		}
 
 		_bottomNavBar.Resize += delegate
@@ -1227,10 +1357,10 @@ internal sealed class MainForm : Form
 
 	private Button MakeNavButton(string text, int tabIndex)
 	{
-		Button btn = MakeButton(text, 96);
+		Button btn = MakeButton(text, 92);
 		btn.Height = 33;
-		btn.Font = new Font(Font.FontFamily, 8.75f);
-		btn.Margin = new Padding(0, 0, 5, 0);
+		btn.Font = new Font(Font.FontFamily, 8.5f);
+		btn.Margin = new Padding(0, 0, 4, 0);
 		btn.Tag = (tabIndex == (_tabs?.SelectedIndex ?? 0)) ? "nav-active" : "nav";
 		btn.Click += delegate
 		{
@@ -2475,38 +2605,20 @@ internal sealed class MainForm : Form
 		TabPage tabPage = new TabPage("视频剪辑");
 		tabPage.BackColor = CanvasColor;
 
-		// Top Bar: Open video, info, and Deliver Studio shortcut
+		// Top Bar: Status info and Deliver Studio shortcut (removed duplicate import button)
 		Panel topBar = new Panel
 		{
 			Dock = DockStyle.Top,
-			Height = 48,
+			Height = 44,
 			BackColor = SurfaceColor,
-			Padding = new Padding(12, 6, 12, 6)
+			Padding = new Padding(12, 4, 12, 4)
 		};
 
-		Button openVideoBtn = MakeButton("📂 导入视频素材…", 140);
-		openVideoBtn.Height = 36;
-		openVideoBtn.Location = new Point(12, 6);
-		openVideoBtn.Click += delegate
-		{
-			using (OpenFileDialog ofd = new OpenFileDialog())
-			{
-				ofd.Title = "选择需要剪辑的视频素材（支持多选）";
-				ofd.Filter = "视频文件 (*.mp4;*.mov;*.mkv;*.flv;*.avi;*.wmv)|*.mp4;*.mov;*.mkv;*.flv;*.avi;*.wmv|所有文件 (*.*)|*.*";
-				ofd.Multiselect = true;
-				if (ofd.ShowDialog(this) == DialogResult.OK)
-				{
-					AddCutEditMediaPoolPaths(ofd.FileNames);
-				}
-			}
-		};
-		topBar.Controls.Add(openVideoBtn);
-
-		Button goToDeliverBtn = MakeButton("🚀 前往【导出交付】工作台 (Deliver) →", 270);
+		Button goToDeliverBtn = MakeButton("🚀 导出交付 (Deliver) →", 190);
 		goToDeliverBtn.Tag = "accent";
-		goToDeliverBtn.Height = 36;
+		goToDeliverBtn.Height = 32;
 		goToDeliverBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-		goToDeliverBtn.Location = new Point(tabPage.ClientSize.Width - 282, 6);
+		goToDeliverBtn.Location = new Point(tabPage.ClientSize.Width - 202, 6);
 		goToDeliverBtn.Click += delegate
 		{
 			SwitchToWorkspace(WorkspaceDeliver);
@@ -2519,11 +2631,11 @@ internal sealed class MainForm : Form
 
 		_cutEditVideoInfoLabel = new Label
 		{
-			Location = new Point(162, 14),
+			Location = new Point(12, 12),
 			AutoSize = true,
-			Text = "尚未载入视频 | 支持在左侧【素材媒体池】中拖拽添加多个视频，或双击素材直接载入时间轴",
+			Text = "尚未载入视频 | 在下方【素材媒体池】点击「＋导入」或直接拖入视频/音频/图片，双击即可载入轨道",
 			ForeColor = MutedColor,
-			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Regular)
+			Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular)
 		};
 		topBar.Controls.Add(_cutEditVideoInfoLabel);
 		topBar.Paint += delegate(object s, PaintEventArgs e)
@@ -2546,46 +2658,37 @@ internal sealed class MainForm : Form
 		splitMain.Panel2.BackColor = SurfaceColor;
 
 		// --- Panel1: Top section (Media Pool, Viewer, Title Inspector) ---
-		// Left: Media Pool (Width: 280px, supports Images, Thumbnails & Details view, Add to Timeline options)
 		Panel mediaPoolPanel = new Panel
 		{
 			Dock = DockStyle.Left,
-			Width = 340,
+			Width = 330,
 			BackColor = SurfaceColor,
 			Padding = new Padding(8, 6, 8, 6)
 		};
 
 		Label mpTitle = new Label
 		{
-			Text = "🎬 素材媒体池 (Media Pool)",
-			Font = new Font("Microsoft YaHei UI", 9.75f, FontStyle.Bold),
+			Text = "🎬 素材媒体池",
+			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
 			ForeColor = _isDarkMode ? Color.White : Color.FromArgb(15, 23, 42),
 			AutoSize = true,
-			Location = new Point(8, 8)
+			Location = new Point(8, 6)
 		};
 		mediaPoolPanel.Controls.Add(mpTitle);
 
-		Label mpSub = new Label
-		{
-			Text = "拖入视频/音频/图片素材，自由加入轨道",
-			Font = new Font("Microsoft YaHei UI", 8.25f),
-			ForeColor = MutedColor,
-			AutoSize = true,
-			Location = new Point(8, 28)
-		};
-		mediaPoolPanel.Controls.Add(mpSub);
-
-		// Row 1: Import, Remove, Clear, and View mode toggle
+		// Compact unified toolbar for Media Pool (deduplicated & icon-compact with hover tooltips)
 		FlowLayoutPanel mpBar1 = new FlowLayoutPanel
 		{
-			Location = new Point(6, 46),
-			Width = 328,
-			Height = 32,
+			Location = new Point(6, 30),
+			Width = 316,
+			Height = 28,
 			FlowDirection = FlowDirection.LeftToRight,
 			WrapContents = false
 		};
-		_cutEditMediaPoolAddButton = MakeButton("＋ 导入", 58);
-		_cutEditMediaPoolAddButton.Height = 28;
+		_cutEditMediaPoolAddButton = MakeButton("＋导入", 56);
+		_cutEditMediaPoolAddButton.Tag = "accent";
+		_cutEditMediaPoolAddButton.Height = 25;
+		_cutEditMediaPoolAddButton.Font = new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold);
 		_cutEditMediaPoolAddButton.Click += delegate
 		{
 			using (OpenFileDialog ofd = new OpenFileDialog())
@@ -2601,8 +2704,28 @@ internal sealed class MainForm : Form
 		};
 		mpBar1.Controls.Add(_cutEditMediaPoolAddButton);
 
-		_cutEditMediaPoolRemoveButton = MakeButton("移除", 46);
-		_cutEditMediaPoolRemoveButton.Height = 28;
+		_cutEditMediaPoolAppendEndBtn = MakeButton("⤵ 入轨", 56);
+		_cutEditMediaPoolAppendEndBtn.Height = 25;
+		_cutEditMediaPoolAppendEndBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditMediaPoolAppendEndBtn.Font = new Font("Microsoft YaHei UI", 8.25f);
+		_cutEditMediaPoolAppendEndBtn.Click += delegate
+		{
+			InsertSelectedMediaPoolToTimeline(2); // Append to timeline
+		};
+		mpBar1.Controls.Add(_cutEditMediaPoolAppendEndBtn);
+
+		_cutEditMediaPoolInsertPlayheadBtn = MakeButton("⬇ 插指针", 62);
+		_cutEditMediaPoolInsertPlayheadBtn.Height = 25;
+		_cutEditMediaPoolInsertPlayheadBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditMediaPoolInsertPlayheadBtn.Font = new Font("Microsoft YaHei UI", 8.25f);
+		_cutEditMediaPoolInsertPlayheadBtn.Click += delegate
+		{
+			InsertSelectedMediaPoolToTimeline(1); // Insert at Playhead
+		};
+		mpBar1.Controls.Add(_cutEditMediaPoolInsertPlayheadBtn);
+
+		_cutEditMediaPoolRemoveButton = MakeButton("➖", 28);
+		_cutEditMediaPoolRemoveButton.Height = 25;
 		_cutEditMediaPoolRemoveButton.Margin = new Padding(3, 0, 0, 0);
 		_cutEditMediaPoolRemoveButton.Click += delegate
 		{
@@ -2618,9 +2741,9 @@ internal sealed class MainForm : Form
 		};
 		mpBar1.Controls.Add(_cutEditMediaPoolRemoveButton);
 
-		_cutEditMediaPoolClearButton = MakeButton("清空", 46);
-		_cutEditMediaPoolClearButton.Height = 28;
-		_cutEditMediaPoolClearButton.Margin = new Padding(3, 0, 0, 0);
+		_cutEditMediaPoolClearButton = MakeButton("🗑", 28);
+		_cutEditMediaPoolClearButton.Height = 25;
+		_cutEditMediaPoolClearButton.Margin = new Padding(2, 0, 0, 0);
 		_cutEditMediaPoolClearButton.Click += delegate
 		{
 			_cutEditMediaPool.Clear();
@@ -2628,56 +2751,19 @@ internal sealed class MainForm : Form
 		};
 		mpBar1.Controls.Add(_cutEditMediaPoolClearButton);
 
-		_cutEditMediaPoolViewListBtn = MakeButton("📋 列表", 70);
-		_cutEditMediaPoolViewListBtn.Height = 28;
+		_cutEditMediaPoolViewListBtn = MakeButton("☰", 30);
+		_cutEditMediaPoolViewListBtn.Height = 25;
 		_cutEditMediaPoolViewListBtn.Margin = new Padding(4, 0, 0, 0);
 		_cutEditMediaPoolViewListBtn.Tag = "accent";
 		_cutEditMediaPoolViewListBtn.Click += delegate { SwitchMediaPoolView(false); };
 		mpBar1.Controls.Add(_cutEditMediaPoolViewListBtn);
 
-		_cutEditMediaPoolViewThumbBtn = MakeButton("🖼 缩略图", 80);
-		_cutEditMediaPoolViewThumbBtn.Height = 28;
-		_cutEditMediaPoolViewThumbBtn.Margin = new Padding(3, 0, 0, 0);
+		_cutEditMediaPoolViewThumbBtn = MakeButton("⊞", 30);
+		_cutEditMediaPoolViewThumbBtn.Height = 25;
+		_cutEditMediaPoolViewThumbBtn.Margin = new Padding(2, 0, 0, 0);
 		_cutEditMediaPoolViewThumbBtn.Click += delegate { SwitchMediaPoolView(true); };
 		mpBar1.Controls.Add(_cutEditMediaPoolViewThumbBtn);
 		mediaPoolPanel.Controls.Add(mpBar1);
-
-		// Row 2: Add to Timeline actions (Append, Insert Playhead, Insert Start)
-		FlowLayoutPanel mpBar2 = new FlowLayoutPanel
-		{
-			Location = new Point(6, 78),
-			Width = 328,
-			Height = 32,
-			FlowDirection = FlowDirection.LeftToRight,
-			WrapContents = false
-		};
-		_cutEditMediaPoolAppendEndBtn = MakeButton("➕ 末尾追加", 102);
-		_cutEditMediaPoolAppendEndBtn.Tag = "accent";
-		_cutEditMediaPoolAppendEndBtn.Height = 28;
-		_cutEditMediaPoolAppendEndBtn.Click += delegate
-		{
-			InsertSelectedMediaPoolToTimeline(2); // 2: Append
-		};
-		mpBar2.Controls.Add(_cutEditMediaPoolAppendEndBtn);
-
-		_cutEditMediaPoolInsertPlayheadBtn = MakeButton("⬇ 插入指针", 102);
-		_cutEditMediaPoolInsertPlayheadBtn.Height = 28;
-		_cutEditMediaPoolInsertPlayheadBtn.Margin = new Padding(4, 0, 0, 0);
-		_cutEditMediaPoolInsertPlayheadBtn.Click += delegate
-		{
-			InsertSelectedMediaPoolToTimeline(1); // 1: At Playhead
-		};
-		mpBar2.Controls.Add(_cutEditMediaPoolInsertPlayheadBtn);
-
-		_cutEditMediaPoolInsertStartBtn = MakeButton("⬆ 插入最前", 102);
-		_cutEditMediaPoolInsertStartBtn.Height = 28;
-		_cutEditMediaPoolInsertStartBtn.Margin = new Padding(4, 0, 0, 0);
-		_cutEditMediaPoolInsertStartBtn.Click += delegate
-		{
-			InsertSelectedMediaPoolToTimeline(0); // 0: Start
-		};
-		mpBar2.Controls.Add(_cutEditMediaPoolInsertStartBtn);
-		mediaPoolPanel.Controls.Add(mpBar2);
 
 		_cutEditMediaPoolImageList = new ImageList
 		{
@@ -2687,8 +2773,9 @@ internal sealed class MainForm : Form
 
 		_cutEditMediaPoolList = new ListView
 		{
-			Location = new Point(8, 114),
-			Width = 324,
+			Location = new Point(8, 62),
+			Width = 314,
+			Height = mediaPoolPanel.ClientSize.Height - 68,
 			Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
 			View = View.Details,
 			FullRowSelect = true,
@@ -2702,9 +2789,9 @@ internal sealed class MainForm : Form
 			LargeImageList = _cutEditMediaPoolImageList,
 			Font = new Font("Microsoft YaHei UI", 9f)
 		};
-		_cutEditMediaPoolList.Columns.Add("素材文件", 146);
-		_cutEditMediaPoolList.Columns.Add("时长", 74);
-		_cutEditMediaPoolList.Columns.Add("分辨率", 84);
+		_cutEditMediaPoolList.Columns.Add("素材文件", 156);
+		_cutEditMediaPoolList.Columns.Add("时长", 72);
+		_cutEditMediaPoolList.Columns.Add("分辨率", 82);
 		_cutEditMediaPoolList.DrawColumnHeader += DrawVideoListColumnHeader;
 		_cutEditMediaPoolList.DrawItem += delegate(object s, DrawListViewItemEventArgs e)
 		{
@@ -2714,13 +2801,13 @@ internal sealed class MainForm : Form
 				return;
 			}
 
-			// Custom draw for LargeIcon Thumbnail view
+			// Custom draw for LargeIcon Thumbnail view — dynamically scales with item bounds!
 			var g = e.Graphics;
 			g.SmoothingMode = SmoothingMode.AntiAlias;
 			g.InterpolationMode = InterpolationMode.HighQualityBicubic;
 
 			Rectangle r = e.Bounds;
-			r.Inflate(-2, -2);
+			r.Inflate(-3, -3);
 			bool isSelected = e.Item.Selected;
 
 			using (var bgBrush = new SolidBrush(isSelected ? Color.FromArgb(36, 52, 78) : Color.FromArgb(24, 28, 38)))
@@ -2731,7 +2818,13 @@ internal sealed class MainForm : Form
 			}
 
 			string path = e.Item.Tag as string;
-			Rectangle thumbRect = new Rectangle(r.X + (r.Width - 96) / 2, r.Y + 6, 96, 64);
+			int textReserveH = Math.Max(26, (int)(r.Height * 0.28f));
+			int availThumbW = Math.Max(64, r.Width - 12);
+			int availThumbH = Math.Max(42, r.Height - textReserveH - 10);
+			int thumbW = availThumbW;
+			int thumbH = Math.Min(availThumbH, (int)Math.Round(thumbW * 2.0 / 3.0));
+			thumbW = Math.Min(availThumbW, (int)Math.Round(thumbH * 1.5));
+			Rectangle thumbRect = new Rectangle(r.X + (r.Width - thumbW) / 2, r.Y + 5, thumbW, thumbH);
 			Image thumbImg = null;
 			lock (_cutEditMediaPoolThumbCache)
 			{
@@ -2755,7 +2848,7 @@ internal sealed class MainForm : Form
 				{
 					g.DrawRectangle(phBorder, thumbRect);
 				}
-				TextRenderer.DrawText(g, IsImage(path) ? "🖼 图片" : "🎬 视频", this.Font, thumbRect, Color.Gray, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+				TextRenderer.DrawText(g, IsImage(path) ? "🖼 图片" : "🎬 视频", _cutEditMediaPoolList.Font, thumbRect, Color.Gray, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
 			}
 
 			// Pill duration tag on bottom-right of thumbRect
@@ -2774,10 +2867,10 @@ internal sealed class MainForm : Form
 				}
 			}
 
-			// Text below thumbnail
-			Rectangle tRect = new Rectangle(r.X + 4, thumbRect.Bottom + 4, r.Width - 8, r.Bottom - thumbRect.Bottom - 6);
+			// Text below thumbnail (scales with _cutEditMediaPoolList.Font)
+			Rectangle tRect = new Rectangle(r.X + 4, thumbRect.Bottom + 3, r.Width - 8, Math.Max(18, r.Bottom - thumbRect.Bottom - 4));
 			string name = Path.GetFileName(path ?? e.Item.Text);
-			TextRenderer.DrawText(g, name, this.Font, tRect, isSelected ? Color.White : Color.FromArgb(215, 222, 235), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
+			TextRenderer.DrawText(g, name, _cutEditMediaPoolList.Font, tRect, isSelected ? Color.White : Color.FromArgb(215, 222, 235), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
 		};
 		_cutEditMediaPoolList.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs e)
 		{
@@ -2811,21 +2904,31 @@ internal sealed class MainForm : Form
 		};
 		mediaPoolPanel.Controls.Add(_cutEditMediaPoolList);
 
+		// Proportional scaling of Media Pool list and thumbnails when user drags leftSplitter
+		mediaPoolPanel.Resize += delegate
+		{
+			int availW = Math.Max(200, mediaPoolPanel.ClientSize.Width - 16);
+			mpBar1.Width = availW + 4;
+			ScaleMediaPoolContentProportionally();
+		};
+
+
 		// Right: Inspector / Title Designer
 		// Right: Inspector / Title Designer with Modern Tabs (Directly matching Fig 3 multi-tab toolbox)
 		Panel titlePanel = new Panel
 		{
 			Dock = DockStyle.Right,
-			Width = 340,
+			Width = 410,
 			BackColor = SurfaceColor,
 			Padding = new Padding(4, 4, 4, 4)
 		};
+		_cutEditTitlePanel = titlePanel;
 
 		TabControl inspectorTabs = new TabControl
 		{
 			Dock = DockStyle.Fill,
 			DrawMode = TabDrawMode.OwnerDrawFixed,
-			ItemSize = new Size(76, 28),
+			ItemSize = new Size(92, 28),
 			SizeMode = TabSizeMode.Fixed,
 			Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold)
 		};
@@ -2846,28 +2949,30 @@ internal sealed class MainForm : Form
 			}
 		};
 
-		// Tab 1: 图文与贴片包装 (Text & Overlay Studio)
-		TabPage tabTitle = new TabPage("🏷️ 图文贴片");
+		// Tab 1: 影片标题与贴图设计 (Focused strictly on Film Titles & Logo/Image Overlays)
+		TabPage tabTitle = new LiveScrollTabPage("🏷️ 影片标题");
 		tabTitle.BackColor = SurfaceColor;
 		tabTitle.AutoScroll = true;
 
-		// 1. Group: Overlay Item Management (List & Actions)
-		GroupBox overlayListGroup = MakeGroupBox("🏷️ 图文与贴片管理 (Overlay Studio)", 4, 4, 314, 86);
+		// 1. Group: Title & Image Overlay Management
+		GroupBox overlayListGroup = MakeGroupBox("🎬 1. 影片标题与贴图对象管理", 4, 4, 384, 92);
 		overlayListGroup.Dock = DockStyle.Top;
 
 		_overlayItemCombo = new ComboBox
 		{
 			Location = new Point(12, 22),
-			Width = 288,
+			Width = 358,
 			DropDownStyle = ComboBoxStyle.DropDownList,
 			Font = new Font("Microsoft YaHei UI", 8.5f)
 		};
 		_overlayItemCombo.SelectedIndexChanged += delegate
 		{
 			if (_updatingOverlayInspector || _overlayItemCombo.SelectedIndex < 0) return;
-			if (_overlayItemCombo.SelectedIndex < _cutEditOverlays.Count)
+			if (_overlayItemCombo.SelectedIndex < _titleComboItems.Count)
 			{
-				_selectedOverlay = _cutEditOverlays[_overlayItemCombo.SelectedIndex];
+				_selectedOverlay = _titleComboItems[_overlayItemCombo.SelectedIndex];
+				_selectedOverlayIds.Clear();
+				_selectedOverlayIds.Add(_selectedOverlay.Id);
 				SyncSelectedOverlayToControls();
 				_cutEditTimelineCanvas?.Invalidate();
 				TriggerTitleLivePreview();
@@ -2878,40 +2983,44 @@ internal sealed class MainForm : Form
 		FlowLayoutPanel overlayBtnFlow = new FlowLayoutPanel
 		{
 			Location = new Point(12, 52),
-			Width = 288,
-			Height = 28,
+			Width = 368,
+			Height = 30,
 			FlowDirection = FlowDirection.LeftToRight,
 			WrapContents = false
 		};
 
-		_overlayAddTextBtn = MakeButton("➕ 文案", 68);
-		_overlayAddTextBtn.Height = 25;
-		_overlayAddTextBtn.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
-		_overlayAddTextBtn.Click += delegate
+		_overlayAddTitleBtn = MakeButton("🎬 +新标题", 76);
+		_overlayAddTitleBtn.Tag = "accent";
+		_overlayAddTitleBtn.Height = 26;
+		_overlayAddTitleBtn.Font = new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold);
+		_overlayAddTitleBtn.Click += delegate
 		{
-			PushCutEditUndoState("添加文案包装");
+			PushCutEditUndoState("添加影片标题");
 			var newItem = new CutOverlayItem
 			{
 				Type = OverlayItemType.Text,
-				Name = $"文案 #{_cutEditOverlays.Count + 1}",
+				TrackId = "T1",
+				Name = $"标题 #{_cutEditOverlays.Count(x => !x.IsSubtitleRole && x.Type == OverlayItemType.Text) + 1}",
 				StartSeconds = Math.Max(0.0, _cutEditCurrentPos),
-				Duration = 5.0,
-				TextContent = "在此输入重点文字/联系方式",
+				Duration = 4.0,
+				TextContent = "在此输入影片主标题",
 				SubtitleContent = "",
-				PositionPreset = "居中偏下",
-				FontSize = 42,
+				PositionPreset = "居中偏上 (标题推荐)",
+				FontSize = 56,
 				TextColorIndex = 0,
 				StrokeIndex = 0,
-				BannerBgIndex = 0
+				BannerBgIndex = 0,
+				IsSubtitle = false,
+				IsAiCaption = false
 			};
 			_cutEditOverlays.Add(newItem);
 			RefreshOverlayCombo(newItem);
 		};
-		overlayBtnFlow.Controls.Add(_overlayAddTextBtn);
+		overlayBtnFlow.Controls.Add(_overlayAddTitleBtn);
 
-		_overlayAddImageBtn = MakeButton("🖼️ 贴图", 68);
-		_overlayAddImageBtn.Height = 25;
-		_overlayAddImageBtn.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
+		_overlayAddImageBtn = MakeButton("🖼️ +新贴图", 76);
+		_overlayAddImageBtn.Height = 26;
+		_overlayAddImageBtn.Font = new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold);
 		_overlayAddImageBtn.Margin = new Padding(4, 0, 0, 0);
 		_overlayAddImageBtn.Click += delegate
 		{
@@ -2925,12 +3034,13 @@ internal sealed class MainForm : Form
 					var newItem = new CutOverlayItem
 					{
 						Type = OverlayItemType.Image,
+						TrackId = "T1",
 						Name = Path.GetFileNameWithoutExtension(ofd.FileName),
 						ImagePath = ofd.FileName,
 						StartSeconds = Math.Max(0.0, _cutEditCurrentPos),
 						Duration = 6.0,
-						PositionPreset = "右下角",
-						ScalePercent = 80,
+						PositionPreset = "右上角",
+						ScalePercent = 65,
 						OpacityPercent = 100
 					};
 					_cutEditOverlays.Add(newItem);
@@ -2940,60 +3050,64 @@ internal sealed class MainForm : Form
 		};
 		overlayBtnFlow.Controls.Add(_overlayAddImageBtn);
 
-		_overlayDuplicateBtn = MakeButton("📋 复制", 68);
-		_overlayDuplicateBtn.Height = 25;
+		_overlayDuplicateBtn = MakeButton("📋 复制", 58);
+		_overlayDuplicateBtn.Height = 26;
 		_overlayDuplicateBtn.Font = new Font("Microsoft YaHei UI", 8f);
 		_overlayDuplicateBtn.Margin = new Padding(4, 0, 0, 0);
 		_overlayDuplicateBtn.Click += delegate
 		{
 			if (_selectedOverlay != null)
 			{
-				PushCutEditUndoState("复制包装对象");
-				var cloned = _selectedOverlay.Clone();
+				PushCutEditUndoState("复制标题/贴图");
+				var cloned = _selectedOverlay.Duplicate();
 				_cutEditOverlays.Add(cloned);
 				RefreshOverlayCombo(cloned);
 			}
 		};
 		overlayBtnFlow.Controls.Add(_overlayDuplicateBtn);
 
-		_overlayDeleteBtn = MakeButton("🗑️ 删除", 68);
-		_overlayDeleteBtn.Height = 25;
+		_overlayDeleteBtn = MakeButton("🗑️ 删除", 58);
+		_overlayDeleteBtn.Height = 26;
 		_overlayDeleteBtn.Font = new Font("Microsoft YaHei UI", 8f);
 		_overlayDeleteBtn.Margin = new Padding(4, 0, 0, 0);
 		_overlayDeleteBtn.Click += delegate
 		{
-			if (_cutEditOverlays.Count > 1 && _selectedOverlay != null)
-			{
-				PushCutEditUndoState("删除包装对象");
-				int idx = _cutEditOverlays.IndexOf(_selectedOverlay);
-				_cutEditOverlays.Remove(_selectedOverlay);
-				int nextIdx = Math.Min(idx, _cutEditOverlays.Count - 1);
-				RefreshOverlayCombo(_cutEditOverlays[nextIdx]);
-			}
-			else if (_cutEditOverlays.Count == 1 && _selectedOverlay != null)
-			{
-				PushCutEditUndoState("关闭包装对象");
-				_selectedOverlay.Enabled = false;
-				SyncSelectedOverlayToControls();
-				_cutEditTimelineCanvas?.Invalidate();
-				TriggerTitleLivePreview();
-				UpdateDeliverSummary();
-			}
+			DeleteSelectedOverlays();
 		};
 		overlayBtnFlow.Controls.Add(_overlayDeleteBtn);
+
+		_cutEditTitlePreviewButton = MakeButton("👁️ 预览", 62);
+		_cutEditTitlePreviewButton.Height = 26;
+		_cutEditTitlePreviewButton.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
+		_cutEditTitlePreviewButton.Margin = new Padding(4, 0, 0, 0);
+		_cutEditTitlePreviewButton.Click += delegate
+		{
+			if (_selectedOverlay != null)
+			{
+				_cutEditCurrentPos = _selectedOverlay.StartSeconds;
+				if (_cutEditTimeScrubber != null && _cutEditDuration > 0.0)
+				{
+					_cutEditTimeScrubber.Value = (int)Math.Max(0.0, Math.Min(1000.0, (_cutEditCurrentPos / _cutEditDuration) * 1000));
+				}
+				UpdateCutEditTimeLabel();
+				_cutEditTimelineCanvas?.Invalidate();
+				TriggerTitleLivePreview();
+			}
+		};
+		overlayBtnFlow.Controls.Add(_cutEditTitlePreviewButton);
 		overlayListGroup.Controls.Add(overlayBtnFlow);
 
-		// 2. Group: Current Overlay Properties
-		GroupBox overlayPropsGroup = MakeGroupBox("⚙️ 当前选中对象属性配置", 4, 94, 314, 690);
+		// 2. Group: Current Title / Image Properties
+		GroupBox overlayPropsGroup = MakeGroupBox("🎨 2. 影片标题样式 · 时段 · 位置设计", 4, 100, 384, 540);
 		overlayPropsGroup.Dock = DockStyle.Top;
 
 		_overlayItemEnabledCheckBox = new CheckBox
 		{
 			Location = new Point(14, 20),
-			Text = "启用此包装对象 (仅在设定时段内呈现)",
+			Text = "☑ 启用此标题/贴图 (在下方设定时段内呈现)",
 			AutoSize = true,
 			Checked = true,
-			Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold)
+			Font = new Font("Microsoft YaHei UI", 8.75f, FontStyle.Bold)
 		};
 		_overlayItemEnabledCheckBox.CheckedChanged += delegate
 		{
@@ -3002,11 +3116,11 @@ internal sealed class MainForm : Form
 		_cutEditTitleEnabled = _overlayItemEnabledCheckBox;
 		overlayPropsGroup.Controls.Add(_overlayItemEnabledCheckBox);
 
-		overlayPropsGroup.Controls.Add(MakeLabel("时段: 起始:", 14, 46));
+		overlayPropsGroup.Controls.Add(MakeLabel("出现秒:", 14, 46));
 		_overlayStartTimeNum = new NumericUpDown
 		{
-			Location = new Point(78, 44),
-			Width = 56,
+			Location = new Point(66, 44),
+			Width = 60,
 			Minimum = 0m,
 			Maximum = 3600m,
 			Value = 0m,
@@ -3016,11 +3130,11 @@ internal sealed class MainForm : Form
 		_cutEditTitleStartTime = _overlayStartTimeNum;
 		overlayPropsGroup.Controls.Add(_overlayStartTimeNum);
 
-		overlayPropsGroup.Controls.Add(MakeLabel("时长:", 140, 46));
+		overlayPropsGroup.Controls.Add(MakeLabel("持续秒:", 134, 46));
 		_overlayDurationNum = new NumericUpDown
 		{
-			Location = new Point(174, 44),
-			Width = 56,
+			Location = new Point(186, 44),
+			Width = 60,
 			Minimum = 0.5m,
 			Maximum = 3600m,
 			Value = 5m,
@@ -3030,16 +3144,31 @@ internal sealed class MainForm : Form
 		_cutEditTitleDuration = _overlayDurationNum;
 		overlayPropsGroup.Controls.Add(_overlayDurationNum);
 
+		Button btnPlaySeg = MakeButton("▶ 试看", 62);
+		btnPlaySeg.Location = new Point(254, 43);
+		btnPlaySeg.Height = 24;
+		btnPlaySeg.Font = new Font("Microsoft YaHei UI", 8f);
+		btnPlaySeg.Click += delegate
+		{
+			if (_selectedOverlay != null)
+			{
+				_cutEditCurrentPos = _selectedOverlay.StartSeconds;
+				SyncPlayerAtCurrentPos(forceReload: false);
+				if (!_cutEditIsPlaying) ToggleCutEditPlayPause();
+			}
+		};
+		overlayPropsGroup.Controls.Add(btnPlaySeg);
+
 		// Timing Presets
 		FlowLayoutPanel timingPresetsFlow = new FlowLayoutPanel
 		{
 			Location = new Point(14, 72),
-			Width = 286,
+			Width = 356,
 			Height = 26,
 			FlowDirection = FlowDirection.LeftToRight,
 			WrapContents = false
 		};
-		Button btnHead = MakeButton("🎬片头0s", 66);
+		Button btnHead = MakeButton("🎬片头0s", 74);
 		btnHead.Height = 22;
 		btnHead.Font = new Font("Microsoft YaHei UI", 8f);
 		btnHead.Click += delegate
@@ -3049,10 +3178,10 @@ internal sealed class MainForm : Form
 		};
 		timingPresetsFlow.Controls.Add(btnHead);
 
-		Button btnMid = MakeButton("⚡片中居中", 72);
+		Button btnMid = MakeButton("⚡片中", 68);
 		btnMid.Height = 22;
 		btnMid.Font = new Font("Microsoft YaHei UI", 8f);
-		btnMid.Margin = new Padding(3, 0, 0, 0);
+		btnMid.Margin = new Padding(4, 0, 0, 0);
 		btnMid.Click += delegate
 		{
 			double dur = Math.Max(1.0, _cutEditDuration);
@@ -3063,10 +3192,10 @@ internal sealed class MainForm : Form
 		};
 		timingPresetsFlow.Controls.Add(btnMid);
 
-		Button btnTail = MakeButton("🏁片尾", 66);
+		Button btnTail = MakeButton("🏁片尾", 68);
 		btnTail.Height = 22;
 		btnTail.Font = new Font("Microsoft YaHei UI", 8f);
-		btnTail.Margin = new Padding(3, 0, 0, 0);
+		btnTail.Margin = new Padding(4, 0, 0, 0);
 		btnTail.Click += delegate
 		{
 			double dur = Math.Max(1.0, _cutEditDuration);
@@ -3077,10 +3206,10 @@ internal sealed class MainForm : Form
 		};
 		timingPresetsFlow.Controls.Add(btnTail);
 
-		Button btnAll = MakeButton("🌐全片", 66);
+		Button btnAll = MakeButton("🌐全片常驻", 82);
 		btnAll.Height = 22;
 		btnAll.Font = new Font("Microsoft YaHei UI", 8f);
-		btnAll.Margin = new Padding(3, 0, 0, 0);
+		btnAll.Margin = new Padding(4, 0, 0, 0);
 		btnAll.Click += delegate
 		{
 			_overlayStartTimeNum.Value = 0m;
@@ -3095,14 +3224,16 @@ internal sealed class MainForm : Form
 		_overlayPositionCombo = new ComboBox
 		{
 			Location = new Point(48, 102),
-			Width = 100,
+			Width = 162,
 			DropDownStyle = ComboBoxStyle.DropDownList
 		};
 		_overlayPositionCombo.Items.AddRange(new object[]
 		{
+			"居中偏上 (标题推荐)",
+			"画面正中 (大标题)",
+			"底部字幕区 (防挡脸推荐)",
 			"居中偏下",
-			"居中偏上",
-			"画面居中",
+			"顶部字幕区 (上方呈现)",
 			"左上角",
 			"右上角",
 			"左下角",
@@ -3114,11 +3245,11 @@ internal sealed class MainForm : Form
 		_cutEditTitlePositionCombo = _overlayPositionCombo;
 		overlayPropsGroup.Controls.Add(_overlayPositionCombo);
 
-		overlayPropsGroup.Controls.Add(MakeLabel("X:", 152, 104));
+		overlayPropsGroup.Controls.Add(MakeLabel("X:", 214, 104));
 		_overlayOffsetXNum = new NumericUpDown
 		{
-			Location = new Point(168, 102),
-			Width = 48,
+			Location = new Point(230, 102),
+			Width = 54,
 			Minimum = -1920m,
 			Maximum = 1920m,
 			Value = 0m
@@ -3126,11 +3257,11 @@ internal sealed class MainForm : Form
 		_overlayOffsetXNum.ValueChanged += delegate { SyncControlsToSelectedOverlay(); };
 		overlayPropsGroup.Controls.Add(_overlayOffsetXNum);
 
-		overlayPropsGroup.Controls.Add(MakeLabel("Y:", 220, 104));
+		overlayPropsGroup.Controls.Add(MakeLabel("Y:", 288, 104));
 		_overlayOffsetYNum = new NumericUpDown
 		{
-			Location = new Point(236, 102),
-			Width = 48,
+			Location = new Point(304, 102),
+			Width = 54,
 			Minimum = -1080m,
 			Maximum = 1080m,
 			Value = 0m
@@ -3138,16 +3269,16 @@ internal sealed class MainForm : Form
 		_overlayOffsetYNum.ValueChanged += delegate { SyncControlsToSelectedOverlay(); };
 		overlayPropsGroup.Controls.Add(_overlayOffsetYNum);
 
-		// 3. Dynamic Panel: Text Overlay Properties
+		// 3. Dynamic Panel: Text Title Properties
 		_overlayTextPropsPanel = new Panel
 		{
 			Location = new Point(8, 130),
 			Width = 298,
-			Height = 460,
+			Height = 395,
 			BackColor = Color.Transparent
 		};
 
-		_overlayTextPropsPanel.Controls.Add(MakeLabel("设计模板样式 (一键套用):", 6, 4));
+		_overlayTextPropsPanel.Controls.Add(MakeLabel("标题预设模板 (一键套用配色与底板):", 6, 4));
 		_cutEditTitleStyle = new ComboBox
 		{
 			Location = new Point(6, 24),
@@ -3179,73 +3310,73 @@ internal sealed class MainForm : Form
 				int idx = _cutEditTitleStyle.SelectedIndex;
 				switch (idx)
 				{
-					case 0: // 🎬 经典电影宽银幕
+					case 0:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 2;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 0;
 						SetTitleFontSize(52);
 						break;
-					case 1: // 🔥 抖音爆款醒目大字
+					case 1:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 1;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 0;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 2;
 						SetTitleFontSize(68);
 						break;
-					case 2: // 📕 小红书流行双色风
+					case 2:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 0;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 5;
 						SetTitleFontSize(60);
 						break;
-					case 3: // 🎤 综艺搞笑爆款大描边
+					case 3:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 1;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 1;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 1;
 						SetTitleFontSize(66);
 						break;
-					case 4: // 📰 深度科普访谈胶囊
+					case 4:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 4;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 2;
 						SetTitleFontSize(44);
 						break;
-					case 5: // 📱 手机短视频竖屏金句
+					case 5:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 2;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 0;
 						SetTitleFontSize(54);
 						break;
-					case 6: // 🎞️ 港风复古胶片感
+					case 6:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 4;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 0;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 0;
 						SetTitleFontSize(50);
 						break;
-					case 7: // ⚡ 赛博电竞荧光霓虹
+					case 7:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 2;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 0;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 3;
 						SetTitleFontSize(60);
 						break;
-					case 8: // 🏷️ 纪实资讯下三分之一
+					case 8:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 3;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 2;
 						SetTitleFontSize(40);
 						break;
-					case 9: // ☕ 日系治愈极简杂志
+					case 9:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 4;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 8;
 						SetTitleFontSize(44);
 						break;
-					case 10: // 🚨 紧急高能预警红牌
+					case 10:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 0;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 6;
 						SetTitleFontSize(64);
 						break;
-					case 11: // 👑 商务演讲科技发布会
+					case 11:
 						if (_cutEditTitleTextColorCombo != null) _cutEditTitleTextColorCombo.SelectedIndex = 0;
 						if (_cutEditTitleStrokeCombo != null) _cutEditTitleStrokeCombo.SelectedIndex = 3;
 						if (_cutEditTitleBannerBgCombo != null) _cutEditTitleBannerBgCombo.SelectedIndex = 7;
@@ -3261,12 +3392,12 @@ internal sealed class MainForm : Form
 		};
 		_overlayTextPropsPanel.Controls.Add(_cutEditTitleStyle);
 
-		_overlayTextPropsPanel.Controls.Add(MakeLabel("主标题文字 (支持多行/Enter换行):", 6, 52));
+		_overlayTextPropsPanel.Controls.Add(MakeLabel("影片主标题文字 (支持多行/Enter换行):", 6, 52));
 		_cutEditMainTitle = new TextBox
 		{
 			Location = new Point(6, 70),
 			Width = 286,
-			Height = 44,
+			Height = 46,
 			Multiline = true,
 			ScrollBars = ScrollBars.Vertical,
 			Text = "CINEMATIC MOMENTS"
@@ -3274,17 +3405,17 @@ internal sealed class MainForm : Form
 		_cutEditMainTitle.TextChanged += delegate { SyncControlsToSelectedOverlay(); };
 		_overlayTextPropsPanel.Controls.Add(_cutEditMainTitle);
 
-		_overlayTextPropsPanel.Controls.Add(MakeLabel("副标题 / 说明文字:", 6, 118));
+		_overlayTextPropsPanel.Controls.Add(MakeLabel("副标题 / 标语说明 (选填):", 6, 120));
 		_cutEditSubtitle = new TextBox
 		{
-			Location = new Point(6, 136),
+			Location = new Point(6, 138),
 			Width = 286,
 			Text = "A Story of Light and Motion"
 		};
 		_cutEditSubtitle.TextChanged += delegate { SyncControlsToSelectedOverlay(); };
 		_overlayTextPropsPanel.Controls.Add(_cutEditSubtitle);
 
-		_cutEditTitleFontSizeLabel = MakeLabel("字号大小: 52 px (⚡ 醒目大字)", 6, 166);
+		_cutEditTitleFontSizeLabel = MakeLabel("标题字号: 52 px (⚡ 醒目大字)", 6, 166);
 		_cutEditTitleFontSizeLabel.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
 		_overlayTextPropsPanel.Controls.Add(_cutEditTitleFontSizeLabel);
 
@@ -3303,7 +3434,7 @@ internal sealed class MainForm : Form
 		_cutEditTitleFontSizeSlider.ValueChanged += delegate
 		{
 			int sz = _cutEditTitleFontSizeSlider.Value;
-			_cutEditTitleFontSizeLabel.Text = $"字号大小: {sz} px ({GetTitleSizeDescription(sz)})";
+			_cutEditTitleFontSizeLabel.Text = $"标题字号: {sz} px ({GetTitleSizeDescription(sz)})";
 			if (!_updatingTitleTemplate) SyncControlsToSelectedOverlay();
 		};
 		_overlayTextPropsPanel.Controls.Add(_cutEditTitleFontSizeSlider);
@@ -3408,9 +3539,20 @@ internal sealed class MainForm : Form
 		_cutEditTitleBannerBgCombo.SelectedIndexChanged += delegate { if (!_updatingTitleTemplate) SyncControlsToSelectedOverlay(); };
 		_overlayTextPropsPanel.Controls.Add(_cutEditTitleBannerBgCombo);
 
+		// Keep _cutEditWordAnimCombo instantiated for compatibility
+		_cutEditWordAnimCombo = new ComboBox { Location = new Point(66, 304), Width = 226, DropDownStyle = ComboBoxStyle.DropDownList, Visible = false };
+		_cutEditWordAnimCombo.Items.AddRange(new object[]
+		{
+			"🎬 整句标准展示 (默认)",
+			"🔥 逐词单蹦 (随音一个单词一个单词蹦出)",
+			"⌨️ 随音逐词追加 (打字机跟读动效)",
+			"🎤 逐词变色高亮 (卡拉OK跟读高亮)"
+		});
+		_cutEditWordAnimCombo.SelectedIndex = 0;
+
 		_cutEditTitleOverlayRadio = new RadioButton
 		{
-			Location = new Point(6, 306),
+			Location = new Point(6, 308),
 			Text = "动态叠印在原视频画面上",
 			AutoSize = true,
 			Checked = true
@@ -3420,13 +3562,20 @@ internal sealed class MainForm : Form
 
 		_cutEditTitleCardRadio = new RadioButton
 		{
-			Location = new Point(6, 328),
-			Text = "纯黑质感片头独立展示",
+			Location = new Point(164, 308),
+			Text = "纯黑片头独立展示",
 			AutoSize = true,
 			Checked = false
 		};
 		_cutEditTitleCardRadio.CheckedChanged += delegate { if (_cutEditTitleCardRadio.Checked) SyncControlsToSelectedOverlay(); };
 		_overlayTextPropsPanel.Controls.Add(_cutEditTitleCardRadio);
+
+		Label lblTitleGuide = MakeLabel("💡 此板块专为【影片标题与Logo贴图】设计。\n如需修改或校准 AI 识别的口播字幕句子，请直接在【🤖 AI智剪】板块内点击句子编辑。", 6, 336);
+		lblTitleGuide.Size = new Size(286, 48);
+		lblTitleGuide.ForeColor = Color.FromArgb(56, 189, 248);
+		lblTitleGuide.Font = new Font("Microsoft YaHei UI", 7.8f);
+		_overlayTextPropsPanel.Controls.Add(lblTitleGuide);
+
 		overlayPropsGroup.Controls.Add(_overlayTextPropsPanel);
 
 		// 4. Dynamic Panel: Image Overlay Properties
@@ -3434,12 +3583,12 @@ internal sealed class MainForm : Form
 		{
 			Location = new Point(8, 130),
 			Width = 298,
-			Height = 460,
+			Height = 395,
 			BackColor = Color.Transparent,
 			Visible = false
 		};
 
-		_overlayImagePropsPanel.Controls.Add(MakeLabel("贴图/二维码图片文件:", 6, 4));
+		_overlayImagePropsPanel.Controls.Add(MakeLabel("贴图/二维码/台标图片文件:", 6, 4));
 		_overlayImagePathText = new TextBox
 		{
 			Location = new Point(6, 24),
@@ -3546,86 +3695,43 @@ internal sealed class MainForm : Form
 		};
 		_overlayImagePropsPanel.Controls.Add(_overlayImageOpacitySlider);
 
-		Label imgHint = MakeLabel("💡 支持 PNG 透明通道、JPG、WebP 等。\n可将二维码、联系方式名片或Logo置于画面任意角落，并自由调节大小与呈现时段。", 6, 222);
+		Label imgHint = MakeLabel("💡 支持 PNG 透明通道、JPG、WebP 等。\n可将二维码、台标或名片置于画面任意角落，并自由调节大小与呈现时段。", 6, 222);
 		imgHint.Size = new Size(286, 60);
 		imgHint.ForeColor = MutedColor;
 		imgHint.Font = new Font("Microsoft YaHei UI", 8f);
 		_overlayImagePropsPanel.Controls.Add(imgHint);
 		overlayPropsGroup.Controls.Add(_overlayImagePropsPanel);
 
-		// Bottom Buttons in overlayPropsGroup
-		_cutEditTitlePreviewButton = MakeButton("👁️ 预览当前设计效果", 286);
-		_cutEditTitlePreviewButton.Location = new Point(14, 604);
-		_cutEditTitlePreviewButton.Height = 32;
-		_cutEditTitlePreviewButton.Tag = "accent";
-		_cutEditTitlePreviewButton.Click += delegate
-		{
-			if (_cutEditSegments.Count == 0 && (string.IsNullOrEmpty(_cutEditSourcePath) || !File.Exists(_cutEditSourcePath)))
-			{
-				MessageBox.Show(this, "请先在左侧媒体池或轨道中添加素材！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-				return;
-			}
-			if (_selectedOverlay != null)
-			{
-				_cutEditCurrentPos = _selectedOverlay.StartSeconds;
-				if (_cutEditTimeScrubber != null && _cutEditDuration > 0.0)
-				{
-					_cutEditTimeScrubber.Value = (int)((_cutEditCurrentPos / _cutEditDuration) * 1000);
-				}
-				UpdateCutEditTimeLabel();
-				_cutEditTimelineCanvas?.Invalidate();
-				TriggerTitleLivePreview();
-			}
-		};
-		overlayPropsGroup.Controls.Add(_cutEditTitlePreviewButton);
-
-		Button btnPlaySeg = MakeButton("▶ 跳至此时段并播放", 286);
-		btnPlaySeg.Location = new Point(14, 642);
-		btnPlaySeg.Height = 28;
-		btnPlaySeg.Click += delegate
-		{
-			if (_selectedOverlay != null)
-			{
-				_cutEditCurrentPos = _selectedOverlay.StartSeconds;
-				SyncPlayerAtCurrentPos(forceReload: false);
-				if (!_cutEditIsPlaying) ToggleCutEditPlayPause();
-			}
-		};
-		overlayPropsGroup.Controls.Add(btnPlaySeg);
-
 		tabTitle.Controls.Add(overlayPropsGroup);
 		tabTitle.Controls.Add(overlayListGroup);
 		overlayListGroup.SendToBack();
 		inspectorTabs.TabPages.Add(tabTitle);
 
-		InitDefaultOverlays();
-		RefreshOverlayCombo();
-
-		// Tab 2: 镜头转场 (精简移除样式特效与视听混流，升级镜头转场面板)
-		TabPage tabCut = new TabPage("⚡ 镜头转场");
+		// Tab 2: 镜头转场 (25种丝滑转场库 + 一键全轨批量加转场)
+		TabPage tabCut = new LiveScrollTabPage("⚡ 镜头转场");
 		tabCut.BackColor = SurfaceColor;
 		tabCut.AutoScroll = true;
-		GroupBox cutGroup = MakeGroupBox("片段过渡转场与镜头特效", 4, 4, 314, 380);
-		cutGroup.Dock = DockStyle.Fill;
-		cutGroup.Controls.Add(MakeLabel("转场过渡特效类型 (默认无转场):", 14, 28));
+		GroupBox cutGroup = MakeGroupBox("🎞️ 25种镜头过渡转场库与全轨批量应用", 4, 4, 314, 300);
+		cutGroup.Dock = DockStyle.Top;
+		cutGroup.Controls.Add(MakeLabel("转场过渡特效类型 (默认无转场):", 14, 26));
 
-		ComboBox transCombo = new ComboBox { Location = new Point(14, 48), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
+		ComboBox transCombo = new ComboBox { Location = new Point(14, 46), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
 		foreach (var td in TransitionDefinitions)
 		{
 			transCombo.Items.Add(td.name);
 		}
-		transCombo.SelectedIndex = 0; // Default: none
+		transCombo.SelectedIndex = 1; // Default selection in dropdown: dissolve
 		cutGroup.Controls.Add(transCombo);
 
-		cutGroup.Controls.Add(MakeLabel("转场持续时间 (秒):", 14, 84));
-		ComboBox transDurCombo = new ComboBox { Location = new Point(14, 104), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
+		cutGroup.Controls.Add(MakeLabel("转场持续时间 (秒):", 14, 80));
+		ComboBox transDurCombo = new ComboBox { Location = new Point(14, 100), Width = 286, DropDownStyle = ComboBoxStyle.DropDownList };
 		transDurCombo.Items.AddRange(new object[] { "0.3 秒 (快捷轻快)", "0.5 秒 (自然标准推荐)", "0.8 秒 (舒缓)", "1.0 秒 (平滑)", "1.5 秒 (抒情漫长)", "2.0 秒 (超长淡化)" });
 		transDurCombo.SelectedIndex = 1;
 		cutGroup.Controls.Add(transDurCombo);
 
 		Button btnApplyIn = MakeButton("⚡ 应用到当前选中片段【片头】", 286);
-		btnApplyIn.Location = new Point(14, 142);
-		btnApplyIn.Height = 32;
+		btnApplyIn.Location = new Point(14, 136);
+		btnApplyIn.Height = 30;
 		btnApplyIn.Tag = "accent";
 		btnApplyIn.Click += delegate
 		{
@@ -3635,6 +3741,7 @@ internal sealed class MainForm : Form
 				int selIdx = transCombo.SelectedIndex;
 				if (selIdx >= 0 && selIdx < TransitionDefinitions.Length)
 				{
+					PushCutEditUndoState("应用片头转场");
 					seg.TransitionInType = TransitionDefinitions[selIdx].id;
 					seg.TransitionInDuration = transDurCombo.SelectedIndex switch { 0 => 0.3, 1 => 0.5, 2 => 0.8, 3 => 1.0, 4 => 1.5, _ => 2.0 };
 					_cutEditTimelineCanvas?.Invalidate();
@@ -3650,8 +3757,8 @@ internal sealed class MainForm : Form
 		cutGroup.Controls.Add(btnApplyIn);
 
 		Button btnApplyOut = MakeButton("⚡ 应用到当前选中片段【片尾】", 286);
-		btnApplyOut.Location = new Point(14, 180);
-		btnApplyOut.Height = 32;
+		btnApplyOut.Location = new Point(14, 172);
+		btnApplyOut.Height = 30;
 		btnApplyOut.Click += delegate
 		{
 			if (_cutEditSelectedSegmentIndex >= 0 && _cutEditSelectedSegmentIndex < _cutEditSegments.Count)
@@ -3660,6 +3767,7 @@ internal sealed class MainForm : Form
 				int selIdx = transCombo.SelectedIndex;
 				if (selIdx >= 0 && selIdx < TransitionDefinitions.Length)
 				{
+					PushCutEditUndoState("应用片尾转场");
 					seg.TransitionOutType = TransitionDefinitions[selIdx].id;
 					seg.TransitionOutDuration = transDurCombo.SelectedIndex switch { 0 => 0.3, 1 => 0.5, 2 => 0.8, 3 => 1.0, 4 => 1.5, _ => 2.0 };
 					_cutEditTimelineCanvas?.Invalidate();
@@ -3674,33 +3782,1065 @@ internal sealed class MainForm : Form
 		};
 		cutGroup.Controls.Add(btnApplyOut);
 
-		Label lblTip = MakeLabel("💡 快捷技巧：\n也可直接在时间线片段上【鼠标右键】，\n在右键菜单中一键添加多种转场与音视频分离！", 14, 222);
-		lblTip.Size = new Size(286, 50);
+		Button btnApplyAllSeams = MakeButton("🔥 一键为全轨所有接缝批量应用此转场", 286);
+		btnApplyAllSeams.Location = new Point(14, 208);
+		btnApplyAllSeams.Height = 32;
+		btnApplyAllSeams.BackColor = Color.FromArgb(126, 34, 206);
+		btnApplyAllSeams.ForeColor = Color.White;
+		btnApplyAllSeams.Click += delegate
+		{
+			var vSegs = _cutEditSegments.Where(s => s.IsKept && (s.TrackId.StartsWith("V") || s.MediaType == "video" || s.MediaType == "image")).OrderBy(s => s.TimelineStartSeconds).ToList();
+			if (vSegs.Count < 2)
+			{
+				MessageBox.Show(this, "时间线上至少需要 2 个视频/画面片段才能批量应用接缝转场！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+				return;
+			}
+			int selIdx = Math.Max(0, transCombo.SelectedIndex);
+			string tid = TransitionDefinitions[selIdx].id;
+			double tdur = transDurCombo.SelectedIndex switch { 0 => 0.3, 1 => 0.5, 2 => 0.8, 3 => 1.0, 4 => 1.5, _ => 2.0 };
+			PushCutEditUndoState("全轨批量加转场");
+			for (int i = 0; i < vSegs.Count - 1; i++)
+			{
+				vSegs[i].TransitionOutType = tid;
+				vSegs[i].TransitionOutDuration = tdur;
+				vSegs[i + 1].TransitionInType = tid;
+				vSegs[i + 1].TransitionInDuration = tdur;
+			}
+			_cutEditTimelineCanvas?.Invalidate();
+			UpdateDeliverSummary();
+			MessageBox.Show(this, $"已成功为全轨 {vSegs.Count - 1} 处接缝批量应用【{TransitionDefinitions[selIdx].name}】({tdur:0.0}秒)！", "批量转场完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+		};
+		cutGroup.Controls.Add(btnApplyAllSeams);
+
+		Label lblTip = MakeLabel("💡 也可直接在时间线片段接缝上【鼠标右键】快速添加或移除转场。", 14, 250);
+		lblTip.Size = new Size(286, 36);
 		lblTip.ForeColor = Color.FromArgb(56, 189, 248);
 		cutGroup.Controls.Add(lblTip);
 
-		Button btnAddWatermark = MakeButton("🖼️ 载入台标/水印PNG徽标…", 286);
-		btnAddWatermark.Location = new Point(14, 280);
-		btnAddWatermark.Height = 32;
-		btnAddWatermark.Click += delegate
-		{
-			using (OpenFileDialog ofd = new OpenFileDialog())
-			{
-				ofd.Title = "选择透明PNG水印徽标";
-				ofd.Filter = "PNG图片 (*.png)|*.png|所有图片 (*.*)|*.*";
-				if (ofd.ShowDialog(this) == DialogResult.OK)
-				{
-					MessageBox.Show(this, $"已载入水印徽标: {Path.GetFileName(ofd.FileName)}", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-				}
-			}
-		};
-		cutGroup.Controls.Add(btnAddWatermark);
 		tabCut.Controls.Add(cutGroup);
 		inspectorTabs.TabPages.Add(tabCut);
 
+		// Tab 3: 🤖 AI智剪 (独立四大分区：1.音频降噪控制 2.画面切气口控制 3.AI识别与文案对齐 4.字幕单句手动修改与轨道样式控制)
+		TabPage tabAiSmart = new LiveScrollTabPage("🤖 AI智剪");
+		tabAiSmart.BackColor = SurfaceColor;
+		tabAiSmart.AutoScroll = true;
+
+		// --- 分区 1: 音频控制 (环境音降噪与人声提纯) ---
+		GroupBox grpAiDenoise = MakeGroupBox("🔇 1. 音频控制：人声提纯与环境音降噪 (小孩吵闹/风雨/底噪)", 4, 4, 314, 122);
+		grpAiDenoise.Controls.Add(MakeLabel("降噪模式:", 10, 22));
+		_cutEditAiDenoiseModeCombo = new ComboBox { Location = new Point(74, 20), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditAiDenoiseModeCombo.Items.AddRange(new object[]
+		{
+			"🛡️ 强力人声提纯 (滤除小孩吵闹/风雨声/环境杂音 · 推荐)",
+			"🔇 智能标准降噪 (滤除室内空调/风扇/设备底噪)",
+			"🌬️ 室外抗风噪 + 电流麦净化 (消除低频风声与电流声)",
+			"🍃 轻度自然降噪 (安静室内 · 仅滤微弱底噪保细节)",
+			"⭕ 不开启降噪 (保持原始录音)"
+		});
+		_cutEditAiDenoiseModeCombo.SelectedIndex = 0;
+		_cutEditAiDenoiseModeCombo.SelectedIndexChanged += delegate
+		{
+			if (_cutEditAiDenoiseModeCombo.SelectedIndex == 4)
+			{
+				if (_cutEditAiAutoDenoiseCheckBox != null) _cutEditAiAutoDenoiseCheckBox.Checked = false;
+				if (_cutEditDenoiseCheckBox != null) _cutEditDenoiseCheckBox.Checked = false;
+			}
+			UpdateDeliverSummary();
+		};
+		grpAiDenoise.Controls.Add(_cutEditAiDenoiseModeCombo);
+
+		_cutEditAiAutoDenoiseCheckBox = new CheckBox
+		{
+			Location = new Point(10, 48),
+			Width = 292,
+			Height = 22,
+			Text = "☑ 智剪 / 切气口 / 导出成片时自动执行人声提纯降噪",
+			Checked = true,
+			ForeColor = Color.FromArgb(52, 211, 153),
+			Font = new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold)
+		};
+		_cutEditAiAutoDenoiseCheckBox.CheckedChanged += delegate
+		{
+			if (_cutEditDenoiseCheckBox != null && _cutEditDenoiseCheckBox.Checked != _cutEditAiAutoDenoiseCheckBox.Checked)
+			{
+				_cutEditDenoiseCheckBox.Checked = _cutEditAiAutoDenoiseCheckBox.Checked;
+			}
+			if (_cutEditAiAutoDenoiseCheckBox.Checked && _cutEditAiDenoiseModeCombo != null && _cutEditAiDenoiseModeCombo.SelectedIndex == 4)
+			{
+				_cutEditAiDenoiseModeCombo.SelectedIndex = 0;
+			}
+			UpdateDeliverSummary();
+		};
+		grpAiDenoise.Controls.Add(_cutEditAiAutoDenoiseCheckBox);
+
+		_cutEditAiDenoiseNowBtn = MakeButton("🔊 立即降噪净化并试听", 204);
+		_cutEditAiDenoiseNowBtn.Location = new Point(10, 76);
+		_cutEditAiDenoiseNowBtn.Height = 32;
+		_cutEditAiDenoiseNowBtn.BackColor = Color.FromArgb(16, 185, 129);
+		_cutEditAiDenoiseNowBtn.ForeColor = Color.White;
+		_cutEditAiDenoiseNowBtn.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
+		_cutEditAiDenoiseNowBtn.Click += async delegate { await RunAiDenoiseTimelineMediaAsync(); };
+		grpAiDenoise.Controls.Add(_cutEditAiDenoiseNowBtn);
+
+		_cutEditRestoreOrigAudioBtn = MakeButton("↺ 恢复原声", 82);
+		_cutEditRestoreOrigAudioBtn.Location = new Point(220, 76);
+		_cutEditRestoreOrigAudioBtn.Height = 32;
+		_cutEditRestoreOrigAudioBtn.Enabled = false;
+		_cutEditRestoreOrigAudioBtn.Font = new Font("Microsoft YaHei UI", 8.25f);
+		_cutEditRestoreOrigAudioBtn.Click += delegate { RestoreOriginalRawAudioOnTimeline(); };
+		grpAiDenoise.Controls.Add(_cutEditRestoreOrigAudioBtn);
+
+		// --- 分区 2: 画面控制 (智能切气口与自然防吞字衔接) ---
+		GroupBox grpSilenceCut = MakeGroupBox("✂️ 2. 画面控制：智能切气口与自然衔接", 4, 130, 314, 146);
+		grpSilenceCut.Controls.Add(MakeLabel("静音阈值:", 10, 22));
+		_cutEditSilenceDbCombo = new ComboBox { Location = new Point(74, 20), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditSilenceDbCombo.Items.AddRange(new object[]
+		{
+			"-42 dB (智能人声安全推荐 · 绝不误切轻声细语)",
+			"-35 dB (紧凑剪辑 · 仅限大声快语速口播)",
+			"-48 dB (温和超保守 · 仅切除完全静音与超长停顿)"
+		});
+		_cutEditSilenceDbCombo.SelectedIndex = 0;
+		grpSilenceCut.Controls.Add(_cutEditSilenceDbCombo);
+
+		grpSilenceCut.Controls.Add(MakeLabel("最短停顿:", 10, 50));
+		_cutEditSilenceMinDurCombo = new ComboBox { Location = new Point(74, 48), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditSilenceMinDurCombo.Items.AddRange(new object[]
+		{
+			"0.40 秒 (自然流畅推荐 · 防切碎句子)",
+			"0.30 秒 (短视频快节奏口播)",
+			"0.55 秒 (舒缓自然呼吸留白)",
+			"0.80 秒 (仅切除长停顿卡壳)"
+		});
+		_cutEditSilenceMinDurCombo.SelectedIndex = 0;
+		grpSilenceCut.Controls.Add(_cutEditSilenceMinDurCombo);
+
+		grpSilenceCut.Controls.Add(MakeLabel("气口留白:", 10, 78));
+		_cutEditSilencePadCombo = new ComboBox { Location = new Point(74, 76), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditSilencePadCombo.Items.AddRange(new object[]
+		{
+			"🛡️ 宽松自然护尾音 (前120ms/后240ms · 绝不吞字推荐)",
+			"⚖️ 标准呼吸留白 (前85ms/后165ms · 均衡节奏)",
+			"⚡ 紧凑快节奏 (前55ms/后110ms · 极速口播)"
+		});
+		_cutEditSilencePadCombo.SelectedIndex = 0;
+		grpSilenceCut.Controls.Add(_cutEditSilencePadCombo);
+
+		Button btnRunSilenceCut = MakeButton("⚡ 单独执行：智能切气口并无缝闭合画面", 292);
+		btnRunSilenceCut.Location = new Point(10, 106);
+		btnRunSilenceCut.Height = 30;
+		btnRunSilenceCut.BackColor = Color.FromArgb(14, 165, 233);
+		btnRunSilenceCut.ForeColor = Color.White;
+		btnRunSilenceCut.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
+		btnRunSilenceCut.Click += async delegate { await RunAutoCutSilencePausesAsync(); };
+		grpSilenceCut.Controls.Add(btnRunSilenceCut);
+
+		// --- 分区 3: AI 语音识别与标准文案对齐 ---
+		GroupBox grpAiAlign = MakeGroupBox("🎙️ 3. AI 语音识别与标准文案对齐 (支持T2独立中文轨)", 4, 280, 314, 456);
+		grpAiAlign.Controls.Add(MakeLabel("识别语种:", 10, 22));
+		_cutEditAiLangCombo = new ComboBox { Location = new Point(74, 20), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditAiLangCombo.Items.AddRange(new object[]
+		{
+			"🌐 自动检测语种 (Auto Detect · 智能识别任何语言)",
+			"🇦🇴 非洲葡萄牙语 (Português Africano · 安哥拉/莫桑比克优化)",
+			"🇧🇷 葡萄牙语 (Português · 通用/巴西/葡国)",
+			"🇨🇳 中文普通话 (Chinese · 中文视频首选)",
+			"🇺🇸 英语 (English)",
+			"🇪🇸 西班牙语 (Español)",
+			"🇫🇷 法语 (Français)",
+			"🇩🇪 德语 (Deutsch)",
+			"🇷🇺 俄语 (Русский)",
+			"🇯🇵 日语 (日本語)"
+		});
+		_cutEditAiLangCombo.SelectedIndex = 0;
+		grpAiAlign.Controls.Add(_cutEditAiLangCombo);
+
+		grpAiAlign.Controls.Add(MakeLabel("AI 模型:", 10, 50));
+		_cutEditAiModelCombo = new ComboBox { Location = new Point(74, 48), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditAiModelCombo.Items.AddRange(new object[]
+		{
+			"🚀 Large-v3 Turbo 高精模型 (574MB · 非洲葡语强烈推荐)",
+			"💎 Large-v3 旗舰最高精度 (1.08GB · 重度口音终极模型)",
+			"⚖️ Small 标准多语种模型 (488MB · 本地已内置)",
+			"⚡ Base 极速轻量模型 (148MB · 本地已内置)"
+		});
+		_cutEditAiModelCombo.SelectedIndex = 0;
+		grpAiAlign.Controls.Add(_cutEditAiModelCombo);
+
+		grpAiAlign.Controls.Add(MakeLabel("字幕动效:", 10, 78));
+		_cutEditAiWordModeCombo = new ComboBox { Location = new Point(74, 76), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditAiWordModeCombo.Items.AddRange(new object[]
+		{
+			"🔥 逐词单蹦 (随音一个单词一个单词出 · 毫秒对口型)",
+			"⌨️ 随音逐词追加 (打字机跟读样式 · 毫秒对口型)",
+			"🎤 逐词变色高亮 (卡拉OK跟读高亮 · 毫秒对口型)",
+			"🎬 整句标准展示 (按呼吸气口智能断句)"
+		});
+		_cutEditAiWordModeCombo.SelectedIndex = 0;
+		grpAiAlign.Controls.Add(_cutEditAiWordModeCombo);
+
+		grpAiAlign.Controls.Add(MakeLabel("字幕位置:", 10, 106));
+		_cutEditAiSubPosCombo = new ComboBox { Location = new Point(74, 104), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditAiSubPosCombo.Items.AddRange(new object[]
+		{
+			"⬇ 影片底部安全区 (防挡脸推荐 · 不占居中标题位)",
+			"⬆ 影片顶部安全区 (上方呈现 · 防挡下方画面)",
+			"🎯 画面居中偏下 (经典短视频黄金位)"
+		});
+		_cutEditAiSubPosCombo.SelectedIndex = 0;
+		_cutEditAiSubPosCombo.SelectedIndexChanged += delegate
+		{
+			string p = GetDefaultAiSubtitlePositionPreset();
+			QuickSetAllSubtitlesPosition(p, p.Contains("底部") ? (int?)120 : null);
+		};
+		grpAiAlign.Controls.Add(_cutEditAiSubPosCombo);
+
+		Label lblScriptHint = MakeLabel("📋 标准文案 (选填：粘贴文稿自动去重纠错；留空则纯靠AI识别):", 10, 132);
+		lblScriptHint.Width = 294;
+		lblScriptHint.ForeColor = Color.FromArgb(56, 189, 248);
+		grpAiAlign.Controls.Add(lblScriptHint);
+
+		_cutEditStandardScriptText = new TextBox
+		{
+			Location = new Point(10, 150),
+			Width = 292,
+			Height = 64,
+			Multiline = true,
+			ScrollBars = ScrollBars.Vertical,
+			BackColor = Color.FromArgb(14, 20, 32),
+			ForeColor = Color.FromArgb(226, 232, 240),
+			Font = new Font("Microsoft YaHei UI", 9f)
+		};
+		grpAiAlign.Controls.Add(_cutEditStandardScriptText);
+
+		grpAiAlign.Controls.Add(MakeLabel("对齐模式:", 10, 220));
+		_cutEditScriptConflictModeCombo = new ComboBox { Location = new Point(74, 218), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditScriptConflictModeCombo.Items.AddRange(new object[]
+		{
+			"🗣️ 以人物原声为准 (全保留主播原话 · 仅按文案去重改错)",
+			"📘 以标准文案为准 (严格按标准文案词句替换)"
+		});
+		_cutEditScriptConflictModeCombo.SelectedIndex = 0;
+		grpAiAlign.Controls.Add(_cutEditScriptConflictModeCombo);
+
+		_cutEditAiAutoSilenceCutCheckBox = new CheckBox
+		{
+			Location = new Point(10, 246),
+			Width = 292,
+			Height = 20,
+			Text = "✂️ 智剪时同步切除静音停顿 (按上方气口留白自然衔接)",
+			Checked = false,
+			ForeColor = Color.FromArgb(56, 189, 248),
+			Font = new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold)
+		};
+		grpAiAlign.Controls.Add(_cutEditAiAutoSilenceCutCheckBox);
+
+		_cutEditAutoCutBadTakesCheckBox = new CheckBox
+		{
+			Location = new Point(10, 268),
+			Width = 292,
+			Height = 20,
+			Text = "✂️ 自动切除【口误重念/重复句】画面并闭合轨道",
+			Checked = true,
+			ForeColor = Color.FromArgb(253, 224, 71),
+			Font = new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold)
+		};
+		grpAiAlign.Controls.Add(_cutEditAutoCutBadTakesCheckBox);
+
+		_cutEditAiTranslateZhCheckBox = new CheckBox
+		{
+			Location = new Point(10, 290),
+			Width = 292,
+			Height = 20,
+			Text = "🌐 识别后附加中文 (独立新增【T2 中文字幕】轨道)",
+			Checked = false,
+			ForeColor = Color.FromArgb(192, 132, 252),
+			Font = new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold)
+		};
+		grpAiAlign.Controls.Add(_cutEditAiTranslateZhCheckBox);
+
+		_btnRunAiCaptionAlign = MakeButton("✨ 一键 AI 智剪成片 (降噪/切气口/对口型上字幕)", 292);
+		_btnRunAiCaptionAlign.Location = new Point(10, 316);
+		_btnRunAiCaptionAlign.Height = 36;
+		_btnRunAiCaptionAlign.Tag = "accent";
+		_btnRunAiCaptionAlign.Font = new Font("Microsoft YaHei UI", 8.75f, FontStyle.Bold);
+		_btnRunAiCaptionAlign.Click += async delegate { await RunAiSmartCaptionAndScriptAlignAsync(); };
+		grpAiAlign.Controls.Add(_btnRunAiCaptionAlign);
+
+		Button btnOpenQcStudio = MakeButton("🧐 打开 AI 质检工作台 (审阅切除内容与脚本对齐)", 292);
+		btnOpenQcStudio.Location = new Point(10, 356);
+		btnOpenQcStudio.Height = 32;
+		btnOpenQcStudio.BackColor = Color.FromArgb(30, 41, 59);
+		btnOpenQcStudio.ForeColor = Color.FromArgb(165, 180, 252);
+		btnOpenQcStudio.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
+		btnOpenQcStudio.Click += delegate { OpenQcStudioForm(); };
+		grpAiAlign.Controls.Add(btnOpenQcStudio);
+
+		_cutEditAiSmartStatusLabel = MakeLabel("💡 提示：点击上方按钮一键执行【降噪+切气口+逐词对口型字幕】。完成后可在下方直接微调。", 10, 392);
+		_cutEditAiSmartStatusLabel.Size = new Size(292, 54);
+		_cutEditAiSmartStatusLabel.ForeColor = Color.FromArgb(148, 163, 184);
+		grpAiAlign.Controls.Add(_cutEditAiSmartStatusLabel);
+
+		// --- 分区 4: 字幕控制与单句手动修改 (无需跳去标题页，直接在此修改错字、时段、字号、颜色与管理T1/T2轨) ---
+		GroupBox grpAiSubEditor = MakeGroupBox("✏️ 4. 字幕控制与单句手动修改 (T1外文轨 / T2中文轨)", 4, 742, 314, 386);
+		grpAiSubEditor.Controls.Add(MakeLabel("选择字幕:", 10, 22));
+		_aiSubItemCombo = new ComboBox
+		{
+			Location = new Point(74, 20),
+			Width = 228,
+			DropDownStyle = ComboBoxStyle.DropDownList,
+			Font = new Font("Microsoft YaHei UI", 8.5f)
+		};
+		_aiSubItemCombo.SelectedIndexChanged += delegate
+		{
+			if (_updatingOverlayInspector || _aiSubItemCombo.SelectedIndex < 0) return;
+			if (_aiSubItemCombo.SelectedIndex < _aiSubComboItems.Count)
+			{
+				_selectedOverlay = _aiSubComboItems[_aiSubItemCombo.SelectedIndex];
+				_selectedOverlayIds.Clear();
+				_selectedOverlayIds.Add(_selectedOverlay.Id);
+				SyncSelectedOverlayToControls();
+				_cutEditCurrentPos = _selectedOverlay.StartSeconds;
+				UpdateCutEditTimeLabel();
+				_cutEditTimelineCanvas?.Invalidate();
+				TriggerTitleLivePreview();
+			}
+		};
+		grpAiSubEditor.Controls.Add(_aiSubItemCombo);
+
+		grpAiSubEditor.Controls.Add(MakeLabel("单句文本 (直接修改识别错词，画面实时同步):", 10, 48));
+		_aiSubTextEditBox = new TextBox
+		{
+			Location = new Point(10, 68),
+			Width = 292,
+			Height = 42,
+			Multiline = true,
+			ScrollBars = ScrollBars.Vertical,
+			BackColor = Color.FromArgb(14, 20, 32),
+			ForeColor = Color.FromArgb(254, 240, 138),
+			Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Bold)
+		};
+		_aiSubTextEditBox.TextChanged += delegate
+		{
+			if (_updatingOverlayInspector || _selectedOverlay == null) return;
+			_selectedOverlay.TextContent = _aiSubTextEditBox.Text;
+			if (_cutEditMainTitle != null)
+			{
+				_updatingOverlayInspector = true;
+				_cutEditMainTitle.Text = _aiSubTextEditBox.Text;
+				_updatingOverlayInspector = false;
+			}
+			UpdateSelectedOverlayComboText();
+			_cutEditTimelineCanvas?.Invalidate();
+			TriggerTitleLivePreview();
+		};
+		grpAiSubEditor.Controls.Add(_aiSubTextEditBox);
+
+		grpAiSubEditor.Controls.Add(MakeLabel("起始(s):", 10, 116));
+		_aiSubStartNum = new NumericUpDown
+		{
+			Location = new Point(58, 114),
+			Width = 56,
+			Minimum = 0m,
+			Maximum = 3600m,
+			DecimalPlaces = 1,
+			Increment = 0.1m
+		};
+		_aiSubStartNum.ValueChanged += delegate
+		{
+			if (_updatingOverlayInspector || _selectedOverlay == null) return;
+			_selectedOverlay.StartSeconds = (double)_aiSubStartNum.Value;
+			UpdateSelectedOverlayComboText();
+			_cutEditTimelineCanvas?.Invalidate();
+			TriggerTitleLivePreview();
+		};
+		grpAiSubEditor.Controls.Add(_aiSubStartNum);
+
+		grpAiSubEditor.Controls.Add(MakeLabel("时长(s):", 118, 116));
+		_aiSubDurNum = new NumericUpDown
+		{
+			Location = new Point(166, 114),
+			Width = 52,
+			Minimum = 0.2m,
+			Maximum = 600m,
+			DecimalPlaces = 1,
+			Increment = 0.1m,
+			Value = 2.0m
+		};
+		_aiSubDurNum.ValueChanged += delegate
+		{
+			if (_updatingOverlayInspector || _selectedOverlay == null) return;
+			_selectedOverlay.Duration = (double)_aiSubDurNum.Value;
+			UpdateSelectedOverlayComboText();
+			_cutEditTimelineCanvas?.Invalidate();
+			TriggerTitleLivePreview();
+		};
+		grpAiSubEditor.Controls.Add(_aiSubDurNum);
+
+		Button btnAiSubPlay = MakeButton("▶试听", 40);
+		btnAiSubPlay.Location = new Point(222, 113);
+		btnAiSubPlay.Height = 24;
+		btnAiSubPlay.Font = new Font("Microsoft YaHei UI", 7.8f);
+		btnAiSubPlay.Click += delegate
+		{
+			if (_selectedOverlay != null)
+			{
+				_cutEditCurrentPos = _selectedOverlay.StartSeconds;
+				SyncPlayerAtCurrentPos(forceReload: false);
+				if (!_cutEditIsPlaying) ToggleCutEditPlayPause();
+			}
+		};
+		grpAiSubEditor.Controls.Add(btnAiSubPlay);
+
+		Button btnAiSubDel = MakeButton("🗑删句", 40);
+		btnAiSubDel.Location = new Point(264, 113);
+		btnAiSubDel.Height = 24;
+		btnAiSubDel.Font = new Font("Microsoft YaHei UI", 7.8f);
+		btnAiSubDel.Click += delegate { DeleteSelectedOverlays(); };
+		grpAiSubEditor.Controls.Add(btnAiSubDel);
+
+		_aiSubFontSizeLabel = MakeLabel("字幕字号: 42 px", 10, 145);
+		_aiSubFontSizeLabel.Font = new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold);
+		grpAiSubEditor.Controls.Add(_aiSubFontSizeLabel);
+
+		_aiSubFontSizeSlider = new TrackBar
+		{
+			Location = new Point(108, 142),
+			Width = 194,
+			Height = 28,
+			Minimum = 18,
+			Maximum = 96,
+			Value = 42,
+			TickStyle = TickStyle.None
+		};
+		_aiSubFontSizeSlider.ValueChanged += delegate
+		{
+			int sz = _aiSubFontSizeSlider.Value;
+			_aiSubFontSizeLabel.Text = $"字幕字号: {sz} px";
+			if (_updatingOverlayInspector || _selectedOverlay == null) return;
+			_selectedOverlay.FontSize = sz;
+			if (_aiSubSyncTrackCheckBox?.Checked == true)
+			{
+				string trk = _selectedOverlay.TrackId ?? "T1";
+				foreach (var o in _cutEditOverlays.Where(x => x.IsSubtitleRole && (x.TrackId ?? "T1") == trk))
+					o.FontSize = sz;
+			}
+			TriggerTitleLivePreview();
+		};
+		grpAiSubEditor.Controls.Add(_aiSubFontSizeSlider);
+
+		grpAiSubEditor.Controls.Add(MakeLabel("字体:", 10, 178));
+		_aiSubFontCombo = new ComboBox { Location = new Point(46, 176), Width = 174, DropDownStyle = ComboBoxStyle.DropDownList };
+		foreach (var item in SubtitleFontPresets) _aiSubFontCombo.Items.Add(item);
+		_aiSubFontCombo.SelectedIndex = 0;
+		_aiSubFontCombo.SelectedIndexChanged += delegate
+		{
+			if (_updatingOverlayInspector || _selectedOverlay == null) return;
+			if (_aiSubFontCombo.SelectedItem is FontComboItem fci)
+			{
+				_selectedOverlay.FontFamily = fci.FamilyName;
+				if (_aiSubSyncTrackCheckBox?.Checked == true)
+				{
+					string trk = _selectedOverlay.TrackId ?? "T1";
+					foreach (var o in _cutEditOverlays.Where(x => x.IsSubtitleRole && (x.TrackId ?? "T1") == trk))
+						o.FontFamily = fci.FamilyName;
+				}
+				TriggerTitleLivePreview();
+			}
+		};
+		grpAiSubEditor.Controls.Add(_aiSubFontCombo);
+
+		_aiSubFontPickBtn = MakeButton("🔤选字体", 78);
+		_aiSubFontPickBtn.Location = new Point(224, 175);
+		_aiSubFontPickBtn.Height = 25;
+		_aiSubFontPickBtn.Font = new Font("Microsoft YaHei UI", 7.8f);
+		ToolTip ttFont = new ToolTip();
+		ttFont.SetToolTip(_aiSubFontPickBtn, "从系统选择任意已安装的字体");
+		_aiSubFontPickBtn.Click += delegate
+		{
+			using (FontDialog fd = new FontDialog())
+			{
+				try
+				{
+					string currentFont = string.IsNullOrWhiteSpace(_selectedOverlay?.FontFamily) ? "Microsoft YaHei UI" : _selectedOverlay.FontFamily;
+					float currentSz = _selectedOverlay?.FontSize > 0 ? (float)_selectedOverlay.FontSize : 42f;
+					fd.Font = new Font(currentFont, currentSz);
+				}
+				catch { }
+				fd.ShowColor = false;
+				fd.ShowEffects = false;
+				if (fd.ShowDialog(this) == DialogResult.OK && fd.Font != null)
+				{
+					string chosenFamily = fd.Font.FontFamily.Name;
+					if (_selectedOverlay != null)
+					{
+						_selectedOverlay.FontFamily = chosenFamily;
+						FontComboItem found = null;
+						foreach (var obj in _aiSubFontCombo.Items)
+						{
+							if (obj is FontComboItem item && string.Equals(item.FamilyName, chosenFamily, StringComparison.OrdinalIgnoreCase))
+							{
+								found = item;
+								break;
+							}
+						}
+						if (found == null)
+						{
+							found = new FontComboItem($"{chosenFamily} (自定义)", chosenFamily);
+							_aiSubFontCombo.Items.Add(found);
+						}
+						_aiSubFontCombo.SelectedItem = found;
+
+						if (_aiSubSyncTrackCheckBox?.Checked == true)
+						{
+							string trk = _selectedOverlay.TrackId ?? "T1";
+							foreach (var o in _cutEditOverlays.Where(x => x.IsSubtitleRole && (x.TrackId ?? "T1") == trk))
+								o.FontFamily = chosenFamily;
+						}
+						TriggerTitleLivePreview();
+					}
+				}
+			}
+		};
+		grpAiSubEditor.Controls.Add(_aiSubFontPickBtn);
+
+		grpAiSubEditor.Controls.Add(MakeLabel("字色:", 10, 210));
+		_aiSubColorCombo = new ComboBox { Location = new Point(46, 208), Width = 72, DropDownStyle = ComboBoxStyle.DropDownList };
+		_aiSubColorCombo.Items.AddRange(new object[] { "纯白高光", "醒目亮黄", "赛博电光青", "炽热醒目红", "尊贵暖金", "荧光草绿", "活力炫橙", "珊瑚粉红" });
+		_aiSubColorCombo.SelectedIndex = 1;
+		_aiSubColorCombo.SelectedIndexChanged += delegate
+		{
+			if (_updatingOverlayInspector || _selectedOverlay == null) return;
+			_selectedOverlay.TextColorIndex = _aiSubColorCombo.SelectedIndex;
+			_selectedOverlay.CustomTextColorHex = null;
+			if (_aiSubCustomColorBtn != null) _aiSubCustomColorBtn.BackColor = Color.FromArgb(45, 55, 72);
+			if (_aiSubSyncTrackCheckBox?.Checked == true)
+			{
+				string trk = _selectedOverlay.TrackId ?? "T1";
+				foreach (var o in _cutEditOverlays.Where(x => x.IsSubtitleRole && (x.TrackId ?? "T1") == trk))
+				{
+					o.TextColorIndex = _aiSubColorCombo.SelectedIndex;
+					o.CustomTextColorHex = null;
+				}
+			}
+			TriggerTitleLivePreview();
+		};
+		grpAiSubEditor.Controls.Add(_aiSubColorCombo);
+
+		_aiSubCustomColorBtn = new Button
+		{
+			Location = new Point(122, 207),
+			Width = 30,
+			Height = 25,
+			Text = "🎨",
+			FlatStyle = FlatStyle.Flat,
+			BackColor = Color.FromArgb(45, 55, 72),
+			ForeColor = Color.White,
+			Cursor = Cursors.Hand
+		};
+		_aiSubCustomColorBtn.FlatAppearance.BorderColor = Color.FromArgb(100, 116, 139);
+		ToolTip ttColor = new ToolTip();
+		ttColor.SetToolTip(_aiSubCustomColorBtn, "左键自定义字色(拾色器)，右键恢复预设色");
+		_aiSubCustomColorBtn.MouseDown += (s, e) =>
+		{
+			if (e.Button == MouseButtons.Right)
+			{
+				if (_selectedOverlay != null)
+				{
+					_selectedOverlay.CustomTextColorHex = null;
+					_aiSubCustomColorBtn.BackColor = Color.FromArgb(45, 55, 72);
+					if (_aiSubSyncTrackCheckBox?.Checked == true)
+					{
+						string trk = _selectedOverlay.TrackId ?? "T1";
+						foreach (var o in _cutEditOverlays.Where(x => x.IsSubtitleRole && (x.TrackId ?? "T1") == trk))
+							o.CustomTextColorHex = null;
+					}
+					TriggerTitleLivePreview();
+				}
+				return;
+			}
+			if (e.Button == MouseButtons.Left)
+			{
+				using (ColorDialog cd = new ColorDialog())
+				{
+					cd.FullOpen = true;
+					if (!string.IsNullOrEmpty(_selectedOverlay?.CustomTextColorHex))
+					{
+						try { cd.Color = ColorTranslator.FromHtml(_selectedOverlay.CustomTextColorHex); } catch { }
+					}
+					if (cd.ShowDialog(this) == DialogResult.OK)
+					{
+						string hex = ColorTranslator.ToHtml(cd.Color);
+						if (_selectedOverlay != null)
+						{
+							_selectedOverlay.CustomTextColorHex = hex;
+							_aiSubCustomColorBtn.BackColor = cd.Color;
+							if (_aiSubSyncTrackCheckBox?.Checked == true)
+							{
+								string trk = _selectedOverlay.TrackId ?? "T1";
+								foreach (var o in _cutEditOverlays.Where(x => x.IsSubtitleRole && (x.TrackId ?? "T1") == trk))
+									o.CustomTextColorHex = hex;
+							}
+							TriggerTitleLivePreview();
+						}
+					}
+				}
+			}
+		};
+		grpAiSubEditor.Controls.Add(_aiSubCustomColorBtn);
+
+		grpAiSubEditor.Controls.Add(MakeLabel("描边:", 158, 210));
+		_aiSubStrokeCombo = new ComboBox { Location = new Point(194, 208), Width = 72, DropDownStyle = ComboBoxStyle.DropDownList };
+		_aiSubStrokeCombo.Items.AddRange(new object[] { "粗黑8px", "超粗12px", "标准5px", "细边2px", "无描边" });
+		_aiSubStrokeCombo.SelectedIndex = 0;
+		_aiSubStrokeCombo.SelectedIndexChanged += delegate
+		{
+			if (_updatingOverlayInspector || _selectedOverlay == null) return;
+			_selectedOverlay.StrokeIndex = _aiSubStrokeCombo.SelectedIndex;
+			if (_aiSubSyncTrackCheckBox?.Checked == true)
+			{
+				string trk = _selectedOverlay.TrackId ?? "T1";
+				foreach (var o in _cutEditOverlays.Where(x => x.IsSubtitleRole && (x.TrackId ?? "T1") == trk))
+					o.StrokeIndex = _aiSubStrokeCombo.SelectedIndex;
+			}
+			TriggerTitleLivePreview();
+		};
+		grpAiSubEditor.Controls.Add(_aiSubStrokeCombo);
+
+		_aiSubCustomStrokeColorBtn = new Button
+		{
+			Location = new Point(270, 207),
+			Width = 30,
+			Height = 25,
+			Text = "🎨",
+			FlatStyle = FlatStyle.Flat,
+			BackColor = Color.FromArgb(45, 55, 72),
+			ForeColor = Color.White,
+			Cursor = Cursors.Hand
+		};
+		_aiSubCustomStrokeColorBtn.FlatAppearance.BorderColor = Color.FromArgb(100, 116, 139);
+		ToolTip ttStroke = new ToolTip();
+		ttStroke.SetToolTip(_aiSubCustomStrokeColorBtn, "左键自定义描边色(拾色器)，右键恢复黑底描边");
+		_aiSubCustomStrokeColorBtn.MouseDown += (s, e) =>
+		{
+			if (e.Button == MouseButtons.Right)
+			{
+				if (_selectedOverlay != null)
+				{
+					_selectedOverlay.CustomStrokeColorHex = null;
+					_aiSubCustomStrokeColorBtn.BackColor = Color.FromArgb(45, 55, 72);
+					if (_aiSubSyncTrackCheckBox?.Checked == true)
+					{
+						string trk = _selectedOverlay.TrackId ?? "T1";
+						foreach (var o in _cutEditOverlays.Where(x => x.IsSubtitleRole && (x.TrackId ?? "T1") == trk))
+							o.CustomStrokeColorHex = null;
+					}
+					TriggerTitleLivePreview();
+				}
+				return;
+			}
+			if (e.Button == MouseButtons.Left)
+			{
+				using (ColorDialog cd = new ColorDialog())
+				{
+					cd.FullOpen = true;
+					if (!string.IsNullOrEmpty(_selectedOverlay?.CustomStrokeColorHex))
+					{
+						try { cd.Color = ColorTranslator.FromHtml(_selectedOverlay.CustomStrokeColorHex); } catch { }
+					}
+					if (cd.ShowDialog(this) == DialogResult.OK)
+					{
+						string hex = ColorTranslator.ToHtml(cd.Color);
+						if (_selectedOverlay != null)
+						{
+							_selectedOverlay.CustomStrokeColorHex = hex;
+							_aiSubCustomStrokeColorBtn.BackColor = cd.Color;
+							if (_aiSubSyncTrackCheckBox?.Checked == true)
+							{
+								string trk = _selectedOverlay.TrackId ?? "T1";
+								foreach (var o in _cutEditOverlays.Where(x => x.IsSubtitleRole && (x.TrackId ?? "T1") == trk))
+									o.CustomStrokeColorHex = hex;
+							}
+							TriggerTitleLivePreview();
+						}
+					}
+				}
+			}
+		};
+		grpAiSubEditor.Controls.Add(_aiSubCustomStrokeColorBtn);
+
+		grpAiSubEditor.Controls.Add(MakeLabel("底板:", 10, 242));
+		_aiSubBannerCombo = new ComboBox { Location = new Point(46, 240), Width = 254, DropDownStyle = ComboBoxStyle.DropDownList };
+		_aiSubBannerCombo.Items.AddRange(new object[]
+		{
+			"🎬 电影暗影底栏", "🔥 亮黄爆款底牌", "💎 半透黑金胶囊", "⚡ 赛博霓虹外框",
+			"⬛ 纯黑全屏底板", "📕 小红书磨砂条", "🚨 高能预警红牌", "🌊 科技深蓝渐变", "🚫 无底板 (纯字+描边推荐)"
+		});
+		_aiSubBannerCombo.SelectedIndex = 8;
+		_aiSubBannerCombo.SelectedIndexChanged += delegate
+		{
+			if (_updatingOverlayInspector || _selectedOverlay == null) return;
+			_selectedOverlay.BannerBgIndex = _aiSubBannerCombo.SelectedIndex;
+			if (_aiSubSyncTrackCheckBox?.Checked == true)
+			{
+				string trk = _selectedOverlay.TrackId ?? "T1";
+				foreach (var o in _cutEditOverlays.Where(x => x.IsSubtitleRole && (x.TrackId ?? "T1") == trk))
+					o.BannerBgIndex = _aiSubBannerCombo.SelectedIndex;
+			}
+			TriggerTitleLivePreview();
+		};
+		grpAiSubEditor.Controls.Add(_aiSubBannerCombo);
+
+		_aiSubSyncTrackCheckBox = new CheckBox
+		{
+			Location = new Point(10, 274),
+			Width = 292,
+			Height = 22,
+			Text = "🔗 调整字号/字体/颜色/底板时自动同步本轨字幕 (T1/T2独立)",
+			Checked = true,
+			ForeColor = Color.FromArgb(56, 189, 248),
+			Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold)
+		};
+		_syncAllSubtitlesCheckBox = _aiSubSyncTrackCheckBox;
+		grpAiSubEditor.Controls.Add(_aiSubSyncTrackCheckBox);
+
+		FlowLayoutPanel subTrackManageFlow = new FlowLayoutPanel
+		{
+			Location = new Point(8, 304),
+			Width = 298,
+			Height = 30,
+			FlowDirection = FlowDirection.LeftToRight,
+			WrapContents = false
+		};
+
+		_overlayAddTextBtn = MakeButton("💬+新句", 66);
+		_overlayAddTextBtn.Height = 26;
+		_overlayAddTextBtn.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
+		_overlayAddTextBtn.Click += delegate
+		{
+			PushCutEditUndoState("添加字幕单句");
+			var newItem = new CutOverlayItem
+			{
+				Type = OverlayItemType.Text,
+				TrackId = "T1",
+				Name = $"字幕 #{_cutEditOverlays.Count(x => x.IsSubtitleRole) + 1}",
+				StartSeconds = Math.Max(0.0, _cutEditCurrentPos),
+				Duration = 2.5,
+				TextContent = "在此输入单句字幕内容",
+				SubtitleContent = "",
+				PositionPreset = GetDefaultAiSubtitlePositionPreset(),
+				OffsetY = 120,
+				FontSize = 42,
+				TextColorIndex = 1,
+				StrokeIndex = 0,
+				BannerBgIndex = 8,
+				IsSubtitle = true
+			};
+			_cutEditOverlays.Add(newItem);
+			RefreshOverlayCombo(newItem);
+		};
+		subTrackManageFlow.Controls.Add(_overlayAddTextBtn);
+
+		Button btnBatchApplyWordAnim = MakeButton("🔥同步动效", 76);
+		btnBatchApplyWordAnim.Height = 26;
+		btnBatchApplyWordAnim.Margin = new Padding(3, 0, 0, 0);
+		btnBatchApplyWordAnim.Font = new Font("Microsoft YaHei UI", 8f);
+		btnBatchApplyWordAnim.Click += delegate
+		{
+			int targetAnim = _cutEditAiWordModeCombo.SelectedIndex switch { 0 => 1, 1 => 2, 2 => 3, _ => 0 };
+			PushCutEditUndoState("切换全轨逐词动效");
+			var targets = _cutEditOverlays.Where(x => x.IsSubtitleRole).ToList();
+			foreach (var o in targets) o.WordAnimMode = targetAnim;
+			SyncSelectedOverlayToControls();
+			TriggerTitleLivePreview();
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = $"✅ 已将 {targets.Count} 句字幕动效切换为：{GetWordAnimBadge(targetAnim)}";
+		};
+		subTrackManageFlow.Controls.Add(btnBatchApplyWordAnim);
+
+		Button btnClearT1Subs = MakeButton("🧹清空T1外文", 78);
+		btnClearT1Subs.Height = 26;
+		btnClearT1Subs.Margin = new Padding(3, 0, 0, 0);
+		btnClearT1Subs.Font = new Font("Microsoft YaHei UI", 7.8f);
+		btnClearT1Subs.Click += delegate
+		{
+			PushCutEditUndoState("清空T1外文字幕");
+			_cutEditOverlays.RemoveAll(o => o.IsSubtitleRole && (o.TrackId ?? "T1") == "T1");
+			InitDefaultOverlays();
+			RefreshOverlayCombo();
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "✅ 已清空【T1 外文字幕】轨（T2中文轨与标题已保留）。";
+		};
+		subTrackManageFlow.Controls.Add(btnClearT1Subs);
+
+		Button btnClearT2Subs = MakeButton("🧹清空T2中文", 78);
+		btnClearT2Subs.Height = 26;
+		btnClearT2Subs.Margin = new Padding(3, 0, 0, 0);
+		btnClearT2Subs.Font = new Font("Microsoft YaHei UI", 7.8f);
+		btnClearT2Subs.Click += delegate
+		{
+			PushCutEditUndoState("清空T2中文字幕");
+			_cutEditOverlays.RemoveAll(o => (o.TrackId ?? "T1") == "T2");
+			InitDefaultOverlays();
+			RefreshOverlayCombo();
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "✅ 已独立清空【T2 中文字幕】轨（T1外文字幕已保留）。";
+		};
+		subTrackManageFlow.Controls.Add(btnClearT2Subs);
+		grpAiSubEditor.Controls.Add(subTrackManageFlow);
+
+		FlowLayoutPanel subQuickPosFlow = new FlowLayoutPanel
+		{
+			Location = new Point(8, 342),
+			Width = 298,
+			Height = 30,
+			FlowDirection = FlowDirection.LeftToRight,
+			WrapContents = false
+		};
+		_overlaySelectAllSubtitlesBtn = MakeButton("☑️ 全选字幕", 84);
+		_overlaySelectAllSubtitlesBtn.Height = 24;
+		_overlaySelectAllSubtitlesBtn.Font = new Font("Microsoft YaHei UI", 8f);
+		_overlaySelectAllSubtitlesBtn.Click += delegate { SelectAllSubtitlesOnTimeline(); };
+		subQuickPosFlow.Controls.Add(_overlaySelectAllSubtitlesBtn);
+
+		_overlayApplyToAllSubtitlesBtn = MakeButton("✨ 当前样式应用到全部字幕", 148);
+		_overlayApplyToAllSubtitlesBtn.Height = 24;
+		_overlayApplyToAllSubtitlesBtn.Margin = new Padding(4, 0, 0, 0);
+		_overlayApplyToAllSubtitlesBtn.Tag = "accent";
+		_overlayApplyToAllSubtitlesBtn.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
+		_overlayApplyToAllSubtitlesBtn.Click += delegate { ApplyCurrentStyleToAllSubtitles(); };
+		subQuickPosFlow.Controls.Add(_overlayApplyToAllSubtitlesBtn);
+		grpAiSubEditor.Controls.Add(subQuickPosFlow);
+
+		tabAiSmart.Controls.Add(grpAiSubEditor);
+		tabAiSmart.Controls.Add(grpAiAlign);
+		tabAiSmart.Controls.Add(grpSilenceCut);
+		tabAiSmart.Controls.Add(grpAiDenoise);
+		inspectorTabs.TabPages.Add(tabAiSmart);
+
+		InitDefaultOverlays();
+		RefreshOverlayCombo();
+
+		// Tab 4: 🎨 调色配音 (独立清晰的画面调色特效 + 音频闪避变声 + 文案转配音成片)
+		TabPage tabVoiceFx = new LiveScrollTabPage("🎨 调色配音");
+		tabVoiceFx.BackColor = SurfaceColor;
+		tabVoiceFx.AutoScroll = true;
+
+		GroupBox grpCapCutFx = MakeGroupBox("🎨 1. 画面调色 · 视觉特效 · 绿幕抠像 · 趣味变声", 4, 4, 314, 272);
+		_cutEditDenoiseCheckBox = new CheckBox
+		{
+			Location = new Point(10, 22),
+			AutoSize = true,
+			Text = "🎙️ 导出时自动人声净化降噪 (与AI智剪联动)",
+			Checked = true,
+			ForeColor = Color.FromArgb(226, 232, 240)
+		};
+		_cutEditDenoiseCheckBox.CheckedChanged += delegate
+		{
+			if (_cutEditAiAutoDenoiseCheckBox != null && _cutEditAiAutoDenoiseCheckBox.Checked != _cutEditDenoiseCheckBox.Checked)
+			{
+				_cutEditAiAutoDenoiseCheckBox.Checked = _cutEditDenoiseCheckBox.Checked;
+			}
+			UpdateDeliverSummary();
+		};
+		grpCapCutFx.Controls.Add(_cutEditDenoiseCheckBox);
+
+		_cutEditLoudnormCheckBox = new CheckBox
+		{
+			Location = new Point(10, 46),
+			AutoSize = true,
+			Text = "🎚️ 自动音量平衡 (EBU R128 广播级稳音)",
+			Checked = false,
+			ForeColor = Color.FromArgb(226, 232, 240)
+		};
+		_cutEditLoudnormCheckBox.CheckedChanged += delegate { UpdateDeliverSummary(); };
+		grpCapCutFx.Controls.Add(_cutEditLoudnormCheckBox);
+
+		_cutEditBgmDuckingCheckBox = new CheckBox
+		{
+			Location = new Point(10, 70),
+			AutoSize = true,
+			Text = "🔉 BGM智能闪避 (有人说话时自动压低配乐)",
+			Checked = false,
+			ForeColor = Color.FromArgb(52, 211, 153)
+		};
+		_cutEditBgmDuckingCheckBox.CheckedChanged += delegate { UpdateDeliverSummary(); };
+		grpCapCutFx.Controls.Add(_cutEditBgmDuckingCheckBox);
+
+		grpCapCutFx.Controls.Add(MakeLabel("趣味变声:", 10, 100));
+		_cutEditVoiceMorphCombo = new ComboBox { Location = new Point(74, 98), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditVoiceMorphCombo.Items.AddRange(new object[]
+		{
+			"🗣️ 保持原声 (默认不改变音色)",
+			"🧔 磁性深沉男声 (Deep Baritone)",
+			"👩 清亮活力女声 (Bright Voice)",
+			"🐿️ 趣味花栗鼠 (Chipmunk)",
+			"🤖 赛博机械战警 (Cyber Robot)",
+			"📻 复古电台扩音器 (Vintage Radio)"
+		});
+		_cutEditVoiceMorphCombo.SelectedIndex = 0;
+		_cutEditVoiceMorphCombo.SelectedIndexChanged += delegate { UpdateDeliverSummary(); };
+		grpCapCutFx.Controls.Add(_cutEditVoiceMorphCombo);
+
+		grpCapCutFx.Controls.Add(MakeLabel("画面特效:", 10, 132));
+		_cutEditVisualEffectCombo = new ComboBox { Location = new Point(74, 130), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditVisualEffectCombo.Items.AddRange(new object[]
+		{
+			"🎬 无视觉动效 (默认原画)",
+			"🔍 缓慢呼吸推镜 (Ken Burns 动感防呆板)",
+			"💥 开场震动冲击 (Impact Shake 吸睛)",
+			"⚡ 抖音风 RGB 故障色差 (Glitch Shift)",
+			"🌟 电影柔光暗角 (Dreamy Vignette)",
+			"🎞️ 复古胶片颗粒 (Vintage Film Grain)",
+			"💎 超清画质锐化增强 (Ultra Sharp)"
+		});
+		_cutEditVisualEffectCombo.SelectedIndex = 0;
+		_cutEditVisualEffectCombo.SelectedIndexChanged += delegate { UpdateDeliverSummary(); };
+		grpCapCutFx.Controls.Add(_cutEditVisualEffectCombo);
+
+		grpCapCutFx.Controls.Add(MakeLabel("电影调色:", 10, 164));
+		_cutEditColorGradeCombo = new ComboBox { Location = new Point(74, 162), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditColorGradeCombo.Items.AddRange(new object[]
+		{
+			"🎨 原片直出色彩 (默认)",
+			"🌆 赛博青橙大片 (Teal & Orange)",
+			"☀️ 复古胶片暖调 (Warm Vintage)",
+			"❄️ 莫兰迪高级冷灰 (Cinematic Cold)",
+			"🌿 鲜明高饱和风景 (Vivid Nature)",
+			"🖤 经典纪实黑白 (Noir B&W)"
+		});
+		_cutEditColorGradeCombo.SelectedIndex = 0;
+		_cutEditColorGradeCombo.SelectedIndexChanged += delegate { UpdateDeliverSummary(); };
+		grpCapCutFx.Controls.Add(_cutEditColorGradeCombo);
+
+		grpCapCutFx.Controls.Add(MakeLabel("背景抠像:", 10, 196));
+		_cutEditChromaKeyCombo = new ComboBox { Location = new Point(74, 194), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditChromaKeyCombo.Items.AddRange(new object[]
+		{
+			"🚫 不开启背景抠像 (默认)",
+			"🟩 智能绿幕抠像 (Green Screen Key)",
+			"🟦 智能蓝幕抠像 (Blue Screen Key)",
+			"⬛ 纯黑背景透明抠除 (Luma Black Key)",
+			"⬜ 纯白背景透明抠除 (Luma White Key)"
+		});
+		_cutEditChromaKeyCombo.SelectedIndex = 0;
+		_cutEditChromaKeyCombo.SelectedIndexChanged += delegate { UpdateDeliverSummary(); };
+		grpCapCutFx.Controls.Add(_cutEditChromaKeyCombo);
+
+		Button btnResetFx = MakeButton("↺ 重置所有视听特效为默认", 292);
+		btnResetFx.Location = new Point(10, 230);
+		btnResetFx.Height = 28;
+		btnResetFx.Click += delegate
+		{
+			_cutEditDenoiseCheckBox.Checked = false;
+			_cutEditLoudnormCheckBox.Checked = false;
+			_cutEditBgmDuckingCheckBox.Checked = false;
+			_cutEditVoiceMorphCombo.SelectedIndex = 0;
+			_cutEditVisualEffectCombo.SelectedIndex = 0;
+			_cutEditColorGradeCombo.SelectedIndex = 0;
+			_cutEditChromaKeyCombo.SelectedIndex = 0;
+			UpdateDeliverSummary();
+		};
+		grpCapCutFx.Controls.Add(btnResetFx);
+
+		GroupBox grpTtsMontage = MakeGroupBox("🌄 2. 纯文案转配音 + 风景视频素材一键成片", 4, 282, 314, 340);
+		Label lblTtsPrompt = MakeLabel("📝 输入/粘贴成片文案 (支持中/英/葡/西/法/德等任意语种):", 10, 22);
+		lblTtsPrompt.Width = 292;
+		lblTtsPrompt.ForeColor = Color.FromArgb(56, 189, 248);
+		grpTtsMontage.Controls.Add(lblTtsPrompt);
+
+		_cutEditTtsScriptText = new TextBox
+		{
+			Location = new Point(10, 42),
+			Width = 292,
+			Height = 108,
+			Multiline = true,
+			ScrollBars = ScrollBars.Vertical,
+			BackColor = Color.FromArgb(14, 20, 32),
+			ForeColor = Color.FromArgb(226, 232, 240),
+			Font = new Font("Microsoft YaHei UI", 9f),
+			Text = "Sometimes the most productive thing you can do is relax. Take a deep breath, trust the journey, and let the beauty of nature heal your mind."
+		};
+		grpTtsMontage.Controls.Add(_cutEditTtsScriptText);
+
+		grpTtsMontage.Controls.Add(MakeLabel("海外音色:", 10, 158));
+		_cutEditTtsVoiceCombo = new ComboBox { Location = new Point(74, 156), Width = 228, DropDownStyle = ComboBoxStyle.DropDownList };
+		_cutEditTtsVoiceCombo.Items.AddRange(new object[]
+		{
+			"🌐 智能自适应语种主播 (Google/Microsoft 海外引擎)",
+			"🇺🇸 美式英语金牌解说 (US English Neural)",
+			"🇬🇧 英式英语磁性播音 (UK English Neural)",
+			"🇧🇷 巴西葡语活力解说 (Portuguese Neural)",
+			"🇪🇸 西班牙语自然解说 (Spanish Neural)",
+			"🇨🇳 华语自然播音人声 (Mandarin Neural)",
+			"💻 Windows 离线 SAPI 本地人声 (100% 断网可用)"
+		});
+		_cutEditTtsVoiceCombo.SelectedIndex = 0;
+		grpTtsMontage.Controls.Add(_cutEditTtsVoiceCombo);
+
+		_cutEditTtsRateLabel = MakeLabel("配音语速: 标准 (0)", 10, 188);
+		grpTtsMontage.Controls.Add(_cutEditTtsRateLabel);
+		_cutEditTtsRateTrackBar = new TrackBar
+		{
+			Location = new Point(120, 184),
+			Width = 182,
+			Height = 26,
+			Minimum = -5,
+			Maximum = 5,
+			Value = 0,
+			TickStyle = TickStyle.None
+		};
+		_cutEditTtsRateTrackBar.ValueChanged += delegate
+		{
+			_cutEditTtsRateLabel.Text = $"配音语速: {(_cutEditTtsRateTrackBar.Value == 0 ? "标准(0)" : (_cutEditTtsRateTrackBar.Value > 0 ? "+" + _cutEditTtsRateTrackBar.Value : _cutEditTtsRateTrackBar.Value.ToString()))}";
+		};
+		grpTtsMontage.Controls.Add(_cutEditTtsRateTrackBar);
+
+		grpTtsMontage.Controls.Add(MakeLabel("风景素材目录 (留空则自动用左侧媒体池视频):", 10, 216));
+		_cutEditSceneryFolderText = new TextBox
+		{
+			Location = new Point(10, 236),
+			Width = 222,
+			ReadOnly = false,
+			BackColor = Color.FromArgb(14, 20, 32),
+			ForeColor = Color.FromArgb(226, 232, 240)
+		};
+		grpTtsMontage.Controls.Add(_cutEditSceneryFolderText);
+
+		Button btnBrowseScenery = MakeButton("浏览…", 64);
+		btnBrowseScenery.Location = new Point(238, 234);
+		btnBrowseScenery.Height = 26;
+		btnBrowseScenery.Click += delegate
+		{
+			using (FolderBrowserDialog fbd = new FolderBrowserDialog())
+			{
+				fbd.Description = "选择存放风景/空镜视频素材的文件夹";
+				if (fbd.ShowDialog(this) == DialogResult.OK)
+				{
+					_cutEditSceneryFolderText.Text = fbd.SelectedPath;
+				}
+			}
+		};
+		grpTtsMontage.Controls.Add(btnBrowseScenery);
+
+		Button btnRunTtsMontage = MakeButton("🎬 一键转音频 + 铺满风景素材 + 逐词字幕", 292);
+		btnRunTtsMontage.Location = new Point(10, 270);
+		btnRunTtsMontage.Height = 34;
+		btnRunTtsMontage.Tag = "accent";
+		btnRunTtsMontage.Font = new Font("Microsoft YaHei UI", 8.75f, FontStyle.Bold);
+		btnRunTtsMontage.Click += async delegate { await RunScriptToVoiceAndSceneryMontageAsync(); };
+		grpTtsMontage.Controls.Add(btnRunTtsMontage);
+
+		Label lblTtsSubTip = MakeLabel("✨ 自动按配音时长裁剪拼接风景画面、加转场与逐词字幕", 10, 310);
+		lblTtsSubTip.Size = new Size(294, 22);
+		lblTtsSubTip.ForeColor = MutedColor;
+		lblTtsSubTip.Font = new Font("Microsoft YaHei UI", 7.8f);
+		grpTtsMontage.Controls.Add(lblTtsSubTip);
+
+		tabVoiceFx.Controls.Add(grpTtsMontage);
+		tabVoiceFx.Controls.Add(grpCapCutFx);
+		inspectorTabs.TabPages.Add(tabVoiceFx);
+
 		titlePanel.Controls.Add(inspectorTabs);
 
-		// Center: Main Viewer (Hardware-accelerated WPF Player + Dual Preview + Fig 3 Transport & Subtitle Sliders)
+		// Center: Main Viewer (Hardware-accelerated WPF Player + Dual Preview)
 		Panel centerViewer = new Panel
 		{
 			Dock = DockStyle.Fill,
@@ -3708,40 +4848,30 @@ internal sealed class MainForm : Form
 			Padding = new Padding(4, 4, 4, 4)
 		};
 
-		// 0. Top: Monitor Header Bar (工作预览区标题栏与弹出独立窗按钮)
+		// 0. Top: Monitor Header Bar (Clean & deduplicated)
 		Panel previewHeaderBar = new Panel
 		{
 			Dock = DockStyle.Top,
-			Height = 36,
+			Height = 32,
 			BackColor = Color.FromArgb(18, 24, 34),
-			Padding = new Padding(10, 4, 10, 4)
+			Padding = new Padding(10, 2, 10, 2)
 		};
 
 		Label previewHeaderTitle = new Label
 		{
-			Text = "🖥️ 工作预览区 · 实时预审与字幕设计",
-			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
+			Text = "🖥️ 实时合成监视器",
+			Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
 			ForeColor = Color.FromArgb(56, 189, 248),
 			AutoSize = true,
-			Location = new Point(10, 8)
+			Location = new Point(10, 6)
 		};
 		previewHeaderBar.Controls.Add(previewHeaderTitle);
 
-		Label previewHeaderTip = new Label
-		{
-			Text = "双击画面：弹出独立预览窗口 | 实时音画与字幕对齐预审",
-			Font = new Font("Microsoft YaHei UI", 8.5f),
-			ForeColor = Color.FromArgb(148, 163, 184),
-			AutoSize = true,
-			Location = new Point(270, 9)
-		};
-		previewHeaderBar.Controls.Add(previewHeaderTip);
-
-		_cutEditPopoutPreviewHeaderBtn = MakeButton("🗗 弹出独立预览窗", 145);
-		_cutEditPopoutPreviewHeaderBtn.Tag = "accent";
-		_cutEditPopoutPreviewHeaderBtn.Height = 28;
+		_cutEditPopoutPreviewHeaderBtn = MakeButton("🗗 独立窗", 76);
+		_cutEditPopoutPreviewHeaderBtn.Height = 24;
+		_cutEditPopoutPreviewHeaderBtn.Font = new Font("Microsoft YaHei UI", 8f);
 		_cutEditPopoutPreviewHeaderBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-		_cutEditPopoutPreviewHeaderBtn.Location = new Point(centerViewer.ClientSize.Width - 155, 4);
+		_cutEditPopoutPreviewHeaderBtn.Location = new Point(centerViewer.ClientSize.Width - 86, 4);
 		_cutEditPopoutPreviewHeaderBtn.Click += delegate { OpenCutEditPopoutPreview(); };
 		previewHeaderBar.Controls.Add(_cutEditPopoutPreviewHeaderBtn);
 		previewHeaderBar.Resize += delegate
@@ -3760,7 +4890,7 @@ internal sealed class MainForm : Form
 
 		Label subPosLbl = new Label
 		{
-			Text = "字幕上下位置: 低",
+			Text = "字幕距底高度: 低",
 			Font = new Font("Microsoft YaHei UI", 8.5f),
 			ForeColor = Color.FromArgb(203, 213, 225),
 			AutoSize = true,
@@ -3770,8 +4900,8 @@ internal sealed class MainForm : Form
 
 		_cutEditSubtitlePosTrackBar = new TrackBar
 		{
-			Location = new Point(122, 4),
-			Width = 160,
+			Location = new Point(116, 4),
+			Width = 145,
 			Height = 26,
 			Minimum = 20,
 			Maximum = 800,
@@ -3787,22 +4917,22 @@ internal sealed class MainForm : Form
 
 		_cutEditSubtitlePosLabel = new Label
 		{
-			Text = $"高  距离底: {_cutEditSubtitleBottomOffset} px",
+			Text = $"高  距底: {_cutEditSubtitleBottomOffset} px",
 			Font = new Font("Microsoft YaHei UI", 8.5f),
 			ForeColor = Color.FromArgb(56, 189, 248),
 			AutoSize = true,
-			Location = new Point(288, 9)
+			Location = new Point(265, 9)
 		};
 		subtitlePosBar.Controls.Add(_cutEditSubtitlePosLabel);
 
 		_cutEditRealtimePreviewCheckBox = new CheckBox
 		{
-			Text = "☑ 实时显示效果 (音画同步/视效位置)",
+			Text = "☑ 实时显示字幕/标题",
 			Font = new Font("Microsoft YaHei UI", 8.5f),
 			ForeColor = Color.FromArgb(226, 232, 240),
 			AutoSize = true,
 			Checked = true,
-			Location = new Point(415, 8)
+			Location = new Point(380, 8)
 		};
 		_cutEditRealtimePreviewCheckBox.CheckedChanged += delegate
 		{
@@ -3810,18 +4940,36 @@ internal sealed class MainForm : Form
 		};
 		subtitlePosBar.Controls.Add(_cutEditRealtimePreviewCheckBox);
 
-		Button resetSubPosBtn = MakeButton("↺ 还原位置", 82);
+		Button quickSubBottomBtn = MakeButton("⬇ 全居底", 68);
+		quickSubBottomBtn.Height = 26;
+		quickSubBottomBtn.Location = new Point(540, 4);
+		quickSubBottomBtn.Click += delegate
+		{
+			QuickSetAllSubtitlesPosition("底部字幕区", 120);
+		};
+		subtitlePosBar.Controls.Add(quickSubBottomBtn);
+
+		Button quickSubTopBtn = MakeButton("⬆ 全居顶", 68);
+		quickSubTopBtn.Height = 26;
+		quickSubTopBtn.Location = new Point(612, 4);
+		quickSubTopBtn.Click += delegate
+		{
+			QuickSetAllSubtitlesPosition("顶部字幕区");
+		};
+		subtitlePosBar.Controls.Add(quickSubTopBtn);
+
+		Button resetSubPosBtn = MakeButton("↺ 还原距底", 76);
 		resetSubPosBtn.Height = 26;
-		resetSubPosBtn.Location = new Point(660, 4);
+		resetSubPosBtn.Location = new Point(684, 4);
 		resetSubPosBtn.Click += delegate
 		{
-			SetCutEditSubtitleBottomOffset(407);
+			SetCutEditSubtitleBottomOffset(120);
 		};
 		subtitlePosBar.Controls.Add(resetSubPosBtn);
 
-		Button refreshPreviewBtn = MakeButton("👁 刷新预审", 82);
+		Button refreshPreviewBtn = MakeButton("👁 刷新", 64);
 		refreshPreviewBtn.Height = 26;
-		refreshPreviewBtn.Location = new Point(748, 4);
+		refreshPreviewBtn.Location = new Point(764, 4);
 		refreshPreviewBtn.Click += delegate
 		{
 			UpdateCutEditPreviewFrame(_cutEditCurrentPos, true);
@@ -3909,7 +5057,7 @@ internal sealed class MainForm : Form
 		{
 			Text = "🔁 循环",
 			AutoSize = true,
-			Checked = true,
+			Checked = false,
 			Location = new Point(4, 10),
 			ForeColor = Color.FromArgb(200, 210, 225),
 			Font = new Font("Microsoft YaHei UI", 8.5f)
@@ -4073,9 +5221,9 @@ internal sealed class MainForm : Form
 		{
 			Dock = DockStyle.Fill,
 			TextAlign = ContentAlignment.MiddleCenter,
-			Text = "🎬 专业多轨剪辑工作台\n\n请在左侧【素材媒体池】中拖拽或双击载入视频\n支持空格键播放/暂停、I / O 设置出入点、B 剃刀切割片段",
+			Text = "🎬 专业多轨 AI 智剪工作台 V9.0 (海外 Whisper + Neural TTS 引擎)\n\n• 右侧【🤖 AI智剪】：随音频逐词单蹦花字、标准文案容错对齐(口误切除/少说防串行) & 一键切气口\n• 右侧【🎙️ 配音视效】：纯文案转音频+自动铺满风景视频成片、人声降噪、趣味变声、电影调色与绿幕抠像\n• 左侧【素材媒体池】可拖拽或双击载入视频，支持空格键播放、I / O 出入点、B 剃刀切割",
 			ForeColor = Color.FromArgb(120, 136, 160),
-			Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Regular),
+			Font = new Font("Microsoft YaHei UI", 10.5f, FontStyle.Regular),
 			BackColor = Color.FromArgb(12, 16, 24)
 		};
 
@@ -4094,12 +5242,139 @@ internal sealed class MainForm : Form
 		transportBar.SendToBack();
 		scrubberPanel.SendToBack();
 
+		Splitter leftSplitter = new Splitter
+		{
+			Dock = DockStyle.Left,
+			Width = 6,
+			MinSize = 210,
+			MinExtra = 260,
+			BackColor = Color.FromArgb(26, 34, 48),
+			Cursor = Cursors.SizeWE
+		};
+		leftSplitter.MouseEnter += delegate { leftSplitter.BackColor = Color.FromArgb(56, 189, 248); };
+		leftSplitter.MouseLeave += delegate { leftSplitter.BackColor = Color.FromArgb(26, 34, 48); };
+		leftSplitter.Paint += delegate(object s, PaintEventArgs pe)
+		{
+			int cy = leftSplitter.Height / 2;
+			using (Brush b = new SolidBrush(Color.FromArgb(148, 163, 184)))
+			{
+				for (int dy = -12; dy <= 12; dy += 6)
+					pe.Graphics.FillRectangle(b, 2, cy + dy, 2, 3);
+			}
+		};
+
+		Splitter rightSplitter = new Splitter
+		{
+			Dock = DockStyle.Right,
+			Width = 6,
+			MinSize = 330,
+			MinExtra = 260,
+			BackColor = Color.FromArgb(26, 34, 48),
+			Cursor = Cursors.SizeWE
+		};
+		rightSplitter.MouseEnter += delegate { rightSplitter.BackColor = Color.FromArgb(56, 189, 248); };
+		rightSplitter.MouseLeave += delegate { rightSplitter.BackColor = Color.FromArgb(26, 34, 48); };
+		rightSplitter.Paint += delegate(object s, PaintEventArgs pe)
+		{
+			int cy = rightSplitter.Height / 2;
+			using (Brush b = new SolidBrush(Color.FromArgb(148, 163, 184)))
+			{
+				for (int dy = -12; dy <= 12; dy += 6)
+					pe.Graphics.FillRectangle(b, 2, cy + dy, 2, 3);
+			}
+		};
+
+		void AdjustRightInspectorLayout()
+		{
+			if (_isAdjustingInspectorLayout || titlePanel.Width < 300) return;
+			int curW = titlePanel.Width;
+			int curTab = inspectorTabs.SelectedIndex;
+			if (Math.Abs(curW - _lastInspectorLayoutWidth) < 4 && curTab == _lastInspectorLayoutTabIdx)
+			{
+				return;
+			}
+			_isAdjustingInspectorLayout = true;
+			try
+			{
+				_lastInspectorLayoutWidth = curW;
+				_lastInspectorLayoutTabIdx = curTab;
+				int tabCount = Math.Max(1, inspectorTabs.TabCount);
+				int tabW = Math.Max(74, (inspectorTabs.ClientSize.Width - 12) / tabCount);
+				if (Math.Abs(inspectorTabs.ItemSize.Width - tabW) > 2)
+				{
+					inspectorTabs.ItemSize = new Size(tabW, 28);
+				}
+				TabPage tp = inspectorTabs.SelectedTab;
+				if (tp != null)
+				{
+					tp.SuspendLayout();
+					try
+					{
+						int pageInnerW = Math.Max(304, tp.ClientSize.Width - 10);
+						foreach (Control grp in tp.Controls)
+						{
+							if (grp is GroupBox gb && gb.Dock != DockStyle.Top)
+							{
+								gb.Width = pageInnerW;
+							}
+							int gInnerW = Math.Max(296, grp.ClientSize.Width);
+							foreach (Control child in grp.Controls)
+							{
+								if (child is Panel subP && subP.Location.X <= 12)
+								{
+									subP.Width = Math.Max(290, gInnerW - subP.Location.X * 2);
+									int pInnerW = subP.ClientSize.Width;
+									foreach (Control sc in subP.Controls)
+									{
+										if ((sc is ComboBox || sc is TextBox || sc is TrackBar) && sc.Location.X <= 80 && sc.Width >= 190)
+										{
+											sc.Width = Math.Max(200, pInnerW - sc.Location.X - 8);
+										}
+									}
+								}
+								else if (child is ComboBox cb && cb.Location.X <= 90 && cb.Width >= 190)
+								{
+									cb.Width = Math.Max(200, gInnerW - cb.Location.X - 12);
+								}
+								else if (child is TextBox tb && tb.Location.X <= 85 && tb.Width >= 210)
+								{
+									tb.Width = Math.Max(210, gInnerW - tb.Location.X - 12);
+								}
+								else if (child is CheckBox chk && chk.Location.X <= 16 && !chk.AutoSize && chk.Width >= 240)
+								{
+									chk.Width = Math.Max(250, gInnerW - chk.Location.X - 10);
+								}
+								else if (child is Button btn && btn.Location.X <= 16 && btn.Width >= 240)
+								{
+									btn.Width = Math.Max(250, gInnerW - btn.Location.X - 12);
+								}
+							}
+						}
+					}
+					finally
+					{
+						tp.ResumeLayout(false);
+					}
+				}
+			}
+			finally
+			{
+				_isAdjustingInspectorLayout = false;
+			}
+		}
+
+		titlePanel.Resize += delegate { AdjustRightInspectorLayout(); };
+		inspectorTabs.SelectedIndexChanged += delegate { AdjustRightInspectorLayout(); };
+
 		splitMain.Panel1.Controls.Add(centerViewer);
+		splitMain.Panel1.Controls.Add(leftSplitter);
+		splitMain.Panel1.Controls.Add(rightSplitter);
 		splitMain.Panel1.Controls.Add(mediaPoolPanel);
 		splitMain.Panel1.Controls.Add(titlePanel);
+		AdjustRightInspectorLayout();
 
-		// Play Timer setup - High Precision Master Clock Architecture
-		_cutEditPlayTimer = new System.Windows.Forms.Timer { Interval = 33 };
+		// Play Timer setup - High Precision Master Clock Architecture (25ms / 40fps for tight lip-sync)
+		_cutEditPlayTimer = new System.Windows.Forms.Timer { Interval = 25 };
 		_cutEditPlayTimer.Tick += delegate
 		{
 			if (!_cutEditIsPlaying || _cutEditIsDraggingScrubber || _cutEditDuration <= 0.0)
@@ -4136,9 +5411,18 @@ internal sealed class MainForm : Form
 			{
 				double inSourceSec = activeSeg.StartSeconds + Math.Max(0.0, _cutEditCurrentPos - activeSeg.TimelineStartSeconds);
 				TimeSpan targetPos = TimeSpan.FromSeconds(Math.Max(0.0, inSourceSec));
-				if (Math.Abs((_cutEditMediaElement.Position - targetPos).TotalSeconds) > 1.2)
+				double mediaSec = _cutEditMediaElement.Position.TotalSeconds;
+				double diffSec = Math.Abs(mediaSec - targetPos.TotalSeconds);
+				if (diffSec > 0.16)
 				{
 					_cutEditMediaElement.Position = targetPos;
+				}
+				else if (mediaSec >= activeSeg.StartSeconds + 0.01 && mediaSec <= activeSeg.EndSeconds + 0.02 && diffSec > 0.015)
+				{
+					// Re-anchor master clock to hardware audio/video decoder clock to eliminate 100-290ms lip-sync drift
+					_cutEditCurrentPos = activeSeg.TimelineStartSeconds + (mediaSec - activeSeg.StartSeconds);
+					_cutEditPlaybackStartPos = _cutEditCurrentPos;
+					_cutEditPlaybackSw.Restart();
 				}
 				if (_cutEditIsPlaying && _cutEditElementHost != null && _cutEditElementHost.Visible)
 				{
@@ -4199,29 +5483,39 @@ internal sealed class MainForm : Form
 			ShowAlways = true
 		};
 
+		// Set hover tooltips for Media Pool compact buttons & header buttons
+		if (_cutEditMediaPoolAddButton != null) _cutEditToolTip.SetToolTip(_cutEditMediaPoolAddButton, "导入视频 / 音频BGM / 图片素材到媒体池 (支持多选或直接拖入文件)");
+		if (_cutEditMediaPoolAppendEndBtn != null) _cutEditToolTip.SetToolTip(_cutEditMediaPoolAppendEndBtn, "将选中的媒体池素材追加到时间轴末尾 (也可直接双击素材)");
+		if (_cutEditMediaPoolInsertPlayheadBtn != null) _cutEditToolTip.SetToolTip(_cutEditMediaPoolInsertPlayheadBtn, "将选中的媒体池素材插入到当前播放头指针位置");
+		if (_cutEditMediaPoolRemoveButton != null) _cutEditToolTip.SetToolTip(_cutEditMediaPoolRemoveButton, "从媒体池移除当前选中的素材");
+		if (_cutEditMediaPoolClearButton != null) _cutEditToolTip.SetToolTip(_cutEditMediaPoolClearButton, "清空媒体池中的所有素材");
+		if (_cutEditMediaPoolViewListBtn != null) _cutEditToolTip.SetToolTip(_cutEditMediaPoolViewListBtn, "切换为【详细列表视图】(拖拽边缘时列宽与字体等比例缩放)");
+		if (_cutEditMediaPoolViewThumbBtn != null) _cutEditToolTip.SetToolTip(_cutEditMediaPoolViewThumbBtn, "切换为【缩略图网格视图】(拖拽边缘时缩略图等比例放大缩小)");
+		if (_cutEditPopoutPreviewHeaderBtn != null) _cutEditToolTip.SetToolTip(_cutEditPopoutPreviewHeaderBtn, "弹出独立大屏预览与剪辑窗 (支持多显示器副屏监看)");
+
 		Control MakeDivider() => new Panel { Width = 1, Height = 18, BackColor = Color.FromArgb(71, 85, 105), Margin = new Padding(3, 6, 3, 0) };
 
-		// Group 1: Editing & trimming tools
-		_cutEditToolSelectBtn = MakeTimelineIconButton("↖", "选择工具 (快捷键: V)\n用于在轨道上选择和拖动素材片段", 32);
+		// Group 1: Editing & trimming tools (Compact icon buttons with hover tooltips)
+		_cutEditToolSelectBtn = MakeTimelineIconButton("↖", "选择与移动工具 (快捷键: V)\n在轨道上点选、框选和拖动素材片段或字幕块", 30);
 		_cutEditToolSelectBtn.BackColor = Color.FromArgb(14, 165, 233);
 		_cutEditToolSelectBtn.ForeColor = Color.White;
 		_cutEditToolSelectBtn.Click += delegate { SetTimelineToolMode(TimelineToolMode.Select); };
 		tlToolsLeft.Controls.Add(_cutEditToolSelectBtn);
 
-		_cutEditToolRazorBtn = MakeTimelineIconButton("✂", "剃刀切片工具 (快捷键: C)\n在鼠标点击位置快速分割切断素材", 32);
+		_cutEditToolRazorBtn = MakeTimelineIconButton("✂", "剃刀切片工具 (快捷键: C)\n在鼠标点击处精准分割切断视频/音频/字幕片段", 30);
 		_cutEditToolRazorBtn.Click += delegate { SetTimelineToolMode(TimelineToolMode.Razor); };
 		tlToolsLeft.Controls.Add(_cutEditToolRazorBtn);
 
-		_cutEditSplitButton = MakeTimelineIconButton("✁", "当前位置切片 (快捷键: B)\n在当前播放头指针处截断选中片段", 32);
+		_cutEditSplitButton = MakeTimelineIconButton("✁", "指针处分割 (快捷键: B)\n在当前播放头红线位置直接切开选中片段", 30);
 		_cutEditSplitButton.Click += delegate { SplitCutEditCurrentPosition(); };
 		tlToolsLeft.Controls.Add(_cutEditSplitButton);
 
-		_cutEditRippleDeleteBtn = MakeTimelineIconButton("🌊", "波纹删除 (快捷键: Shift+Del)\n删除所选片段并自动将后方所有素材向前吸附闭合间隙", 32);
+		_cutEditRippleDeleteBtn = MakeTimelineIconButton("🌊", "波纹删除并闭合 (快捷键: Shift+Del)\n删除选中片段并将后方所有素材自动向前无缝闭合", 30);
 		_cutEditRippleDeleteBtn.ForeColor = Color.FromArgb(251, 146, 60);
 		_cutEditRippleDeleteBtn.Click += delegate { DeleteSelectedCutSegment(isRipple: true); };
 		tlToolsLeft.Controls.Add(_cutEditRippleDeleteBtn);
 
-		_cutEditDeleteBtn = MakeTimelineIconButton("🗑️", "常规删除 (快捷键: Delete)\n删除选中的素材片段（保留原位空白间隙）", 32);
+		_cutEditDeleteBtn = MakeTimelineIconButton("🗑", "常规删除 (快捷键: Delete)\n删除选中的素材片段或字幕（保留原时间点位置）", 30);
 		_cutEditDeleteBtn.ForeColor = Color.FromArgb(248, 113, 113);
 		_cutEditDeleteBtn.Click += delegate { DeleteSelectedCutSegment(isRipple: false); };
 		tlToolsLeft.Controls.Add(_cutEditDeleteBtn);
@@ -4229,26 +5523,26 @@ internal sealed class MainForm : Form
 		tlToolsLeft.Controls.Add(MakeDivider());
 
 		// Group 2: Snapping, Linking & Gap closing
-		_cutEditSnapBtn = MakeTimelineIconButton("🧲", "自动磁吸对齐 (快捷键: S)\n当前状态: 已开启\n开启后移动片段或播放头时会自动吸附到素材边缘", 32);
+		_cutEditSnapBtn = MakeTimelineIconButton("🧲", "自动磁吸对齐 (快捷键: S)\n开启后移动片段或指针时自动吸附到相邻片段边缘", 30);
 		_cutEditSnapBtn.BackColor = Color.FromArgb(6, 182, 212);
 		_cutEditSnapBtn.ForeColor = Color.Black;
 		_cutEditSnapBtn.Click += delegate { ToggleSnapping(); };
 		tlToolsLeft.Controls.Add(_cutEditSnapBtn);
 
-		_cutEditLinkBtn = MakeTimelineIconButton("🔗", "视音频联动选择 (快捷键: L)\n当前状态: 已开启\n开启后选中视频片段会自动联动选中对应音频", 32);
+		_cutEditLinkBtn = MakeTimelineIconButton("🔗", "视音频联动选择 (快捷键: L)\n开启后选中视频片段会自动同步选中对应原声音频", 30);
 		_cutEditLinkBtn.BackColor = Color.FromArgb(59, 130, 246);
 		_cutEditLinkBtn.ForeColor = Color.White;
 		_cutEditLinkBtn.Click += delegate { ToggleLinkedSelection(); };
 		tlToolsLeft.Controls.Add(_cutEditLinkBtn);
 
-		_cutEditCloseGapsBtn = MakeTimelineIconButton("⏩", "闭合所有间隙\n自动扫描轨道并将所有素材向前拼接消除空隙", 32);
+		_cutEditCloseGapsBtn = MakeTimelineIconButton("⏩", "一键闭合所有轨道空隙\n自动扫描并将散落的片段向前拼接消除黑屏间隙", 30);
 		_cutEditCloseGapsBtn.Click += delegate { CloseAllTimelineGaps(); };
 		tlToolsLeft.Controls.Add(_cutEditCloseGapsBtn);
 
 		tlToolsLeft.Controls.Add(MakeDivider());
 
-		// Group 3: Tracks & Segment State
-		_cutEditAddTrackBtn = MakeTimelineIconButton("➕", "添加新轨道\n点击弹出菜单新建视频轨道、音频轨道或字幕轨道", 32);
+		// Group 3: Tracks & Segment State (Deduplicated & compact)
+		_cutEditAddTrackBtn = MakeTimelineIconButton("➕", "添加新轨道\n点击新建视频轨道、音频轨道或字幕轨道", 30);
 		_cutEditAddTrackBtn.Click += delegate
 		{
 			ContextMenuStrip cms = new ContextMenuStrip();
@@ -4259,44 +5553,53 @@ internal sealed class MainForm : Form
 		};
 		tlToolsLeft.Controls.Add(_cutEditAddTrackBtn);
 
-		_cutEditToggleSegmentButton = MakeTimelineIconButton("🚫", "剔除 / 保留切换\n将选中片段切换为禁用（不参与导出）或启用", 32);
+		_cutEditToggleSegmentButton = MakeTimelineIconButton("🚫", "禁用 / 启用选中片段\n将当前选中片段切换为跳过（不参与导出）或保留", 30);
 		_cutEditToggleSegmentButton.Click += delegate { ToggleSelectedSegmentKept(); };
 		tlToolsLeft.Controls.Add(_cutEditToggleSegmentButton);
 
-		_cutEditResetSegmentsButton = MakeTimelineIconButton("↺", "恢复全部片段\n重置所有片段的剔除与裁剪为初始完整状态", 32);
+		_cutEditResetSegmentsButton = MakeTimelineIconButton("↺", "恢复全部片段为完整原片\n重置所有切片与剔除操作", 30);
 		_cutEditResetSegmentsButton.Click += delegate { ResetCutEditSegments(); };
 		tlToolsLeft.Controls.Add(_cutEditResetSegmentsButton);
 
-		_cutEditClearAllBtn = MakeTimelineIconButton("🧨", "清空所有轨道\n清空时间轴上的所有剪辑素材与轨道工程", 32);
+		_cutEditClearTrackMenuBtn = MakeTimelineIconButton("🧹▾", "清空指定轨道或全部轨道 (支持 Ctrl+Z 撤销)\n可独立清空 T1外文字幕 / T2中文字幕 / V1 / V2 / A1 / A2", 42);
+		_cutEditClearTrackMenuBtn.ForeColor = Color.FromArgb(251, 191, 36);
+		_cutEditClearTrackMenuBtn.Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold);
+		_cutEditClearTrackMenuBtn.Click += delegate
+		{
+			ShowClearTrackContextMenu(_cutEditClearTrackMenuBtn, new Point(0, _cutEditClearTrackMenuBtn.Height));
+		};
+		tlToolsLeft.Controls.Add(_cutEditClearTrackMenuBtn);
+
+		_cutEditClearAllBtn = MakeTimelineIconButton("🧨", "一键清空全部轨道内容 (支持 Ctrl+Z 撤销)", 30);
 		_cutEditClearAllBtn.ForeColor = Color.FromArgb(248, 113, 113);
-		_cutEditClearAllBtn.Click += delegate { ClearCutEditorProject(suppressPrompt: false); };
+		_cutEditClearAllBtn.Click += delegate { ClearCutEditorProject(suppressPrompt: true); };
 		tlToolsLeft.Controls.Add(_cutEditClearAllBtn);
 
 		tlToolsLeft.Controls.Add(MakeDivider());
 
 		// Group 4: Undo, Redo, Save
-		_cutEditUndoButton = MakeTimelineIconButton("↶", "撤销操作 (快捷键: Ctrl+Z)", 32);
+		_cutEditUndoButton = MakeTimelineIconButton("↶", "撤销上一步操作 (快捷键: Ctrl+Z)", 30);
 		_cutEditUndoButton.Enabled = false;
 		_cutEditUndoButton.Click += delegate { UndoCutEditAction(); };
 		tlToolsLeft.Controls.Add(_cutEditUndoButton);
 
-		_cutEditRedoButton = MakeTimelineIconButton("↷", "重做操作 (快捷键: Ctrl+Y)", 32);
+		_cutEditRedoButton = MakeTimelineIconButton("↷", "重做操作 (快捷键: Ctrl+Y)", 30);
 		_cutEditRedoButton.Enabled = false;
 		_cutEditRedoButton.Click += delegate { RedoCutEditAction(); };
 		tlToolsLeft.Controls.Add(_cutEditRedoButton);
 
-		_cutEditSaveProjectButton = MakeTimelineIconButton("💾", "保存工程 (快捷键: Ctrl+S)", 32);
+		_cutEditSaveProjectButton = MakeTimelineIconButton("💾", "保存剪辑工程 (快捷键: Ctrl+S)", 30);
 		_cutEditSaveProjectButton.Click += delegate { SaveCutEditProject(); };
 		tlToolsLeft.Controls.Add(_cutEditSaveProjectButton);
 
 		tlToolsLeft.Controls.Add(MakeDivider());
 
 		// Group 5: Mark In / Mark Out
-		_cutEditSetInButton = MakeTimelineIconButton("[", "设置入点 (快捷键: I)\n以当前播放头位置标记工程导出或剪辑入点", 30);
+		_cutEditSetInButton = MakeTimelineIconButton("[", "标记入点 (快捷键: I)\n以当前播放头位置设置剪辑入点", 28);
 		_cutEditSetInButton.Click += delegate { SetCutEditInPoint(); };
 		tlToolsLeft.Controls.Add(_cutEditSetInButton);
 
-		_cutEditSetOutButton = MakeTimelineIconButton("]", "设置出点 (快捷键: O)\n以当前播放头位置标记工程导出或剪辑出点", 30);
+		_cutEditSetOutButton = MakeTimelineIconButton("]", "标记出点 (快捷键: O)\n以当前播放头位置设置剪辑出点", 28);
 		_cutEditSetOutButton.Click += delegate { SetCutEditOutPoint(); };
 		tlToolsLeft.Controls.Add(_cutEditSetOutButton);
 
@@ -4304,7 +5607,7 @@ internal sealed class MainForm : Form
 		{
 			AutoSize = true,
 			TextAlign = ContentAlignment.MiddleLeft,
-			Text = "预计时长: 00:00.0",
+			Text = "时长: 00:00.0",
 			ForeColor = MutedColor,
 			Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Regular),
 			Margin = new Padding(6, 7, 4, 0)
@@ -4327,7 +5630,7 @@ internal sealed class MainForm : Form
 		_cutEditSpeedCombo = new ComboBox { Width = 64, Height = 26, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(2, 2, 2, 0) };
 		_cutEditSpeedCombo.Items.AddRange(new object[] { "1.00x", "0.50x", "0.75x", "1.25x", "1.50x", "2.00x" });
 		_cutEditSpeedCombo.SelectedIndex = 0;
-		_cutEditToolTip.SetToolTip(_cutEditSpeedCombo, "选择时间轴整体播放速度");
+		_cutEditToolTip.SetToolTip(_cutEditSpeedCombo, "选择时间轴整体播放与导出倍速");
 		tlToolsRight.Controls.Add(_cutEditSpeedCombo);
 
 		_cutEditKeepOriginalAudioCheckBox = new CheckBox { Text = "原声", AutoSize = true, Checked = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(4, 5, 2, 0) };
@@ -4337,17 +5640,17 @@ internal sealed class MainForm : Form
 			if (_cutEditMediaElement != null) _cutEditMediaElement.IsMuted = _cutEditAudioMuted;
 			_cutEditTimelineCanvas?.Invalidate();
 		};
-		_cutEditToolTip.SetToolTip(_cutEditKeepOriginalAudioCheckBox, "勾选保留原视频音频，取消则全局静音原声");
+		_cutEditToolTip.SetToolTip(_cutEditKeepOriginalAudioCheckBox, "勾选保留原视频声音，取消则全局静音原声");
 		tlToolsRight.Controls.Add(_cutEditKeepOriginalAudioCheckBox);
 
-		_cutEditBgmVolumeLabel = new Label { Text = $"🎵 配乐: {_cutEditBgmVolume}%", AutoSize = true, ForeColor = Color.FromArgb(192, 132, 252), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(4, 6, 0, 0) };
+		_cutEditBgmVolumeLabel = new Label { Text = $"🎵 {_cutEditBgmVolume}%", AutoSize = true, ForeColor = Color.FromArgb(192, 132, 252), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(4, 6, 0, 0) };
 		tlToolsRight.Controls.Add(_cutEditBgmVolumeLabel);
 
-		_cutEditBgmVolumeTrackBar = new TrackBar { Width = 64, Height = 24, Minimum = 0, Maximum = 100, Value = _cutEditBgmVolume, TickStyle = TickStyle.None, Margin = new Padding(1, 4, 4, 0) };
+		_cutEditBgmVolumeTrackBar = new TrackBar { Width = 56, Height = 24, Minimum = 0, Maximum = 100, Value = _cutEditBgmVolume, TickStyle = TickStyle.None, Margin = new Padding(1, 4, 4, 0) };
 		_cutEditBgmVolumeTrackBar.ValueChanged += delegate
 		{
 			_cutEditBgmVolume = _cutEditBgmVolumeTrackBar.Value;
-			_cutEditBgmVolumeLabel.Text = $"🎵 配乐: {_cutEditBgmVolume}%";
+			_cutEditBgmVolumeLabel.Text = $"🎵 {_cutEditBgmVolume}%";
 			_cutEditTimelineCanvas?.Invalidate();
 		};
 		_cutEditToolTip.SetToolTip(_cutEditBgmVolumeTrackBar, "调节背景配乐音量大小 (0% - 100%)");
@@ -4357,27 +5660,27 @@ internal sealed class MainForm : Form
 
 		// Zoom controls (轨道长短 / 缩放拉杆)
 		_cutEditZoomLabel = new Label { Text = "🔍 100%", AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Microsoft YaHei UI", 8.5f), Margin = new Padding(4, 6, 1, 0), Cursor = Cursors.Hand };
-		_cutEditToolTip.SetToolTip(_cutEditZoomLabel, "时间轴缩放比例 (双击或右键重置为100%)\n支持快捷键: Ctrl + 滚轮 或 Alt + 滚轮");
+		_cutEditToolTip.SetToolTip(_cutEditZoomLabel, "时间轴水平缩放比例 (双击或右键重置为100%)\n放大超出屏幕后可通过轨道底部的横向滑块左右拖动");
 		_cutEditZoomLabel.MouseDoubleClick += delegate { SetCutEditZoom(100); };
 		_cutEditZoomLabel.MouseDown += (s, e) => { if (e.Button == MouseButtons.Right) SetCutEditZoom(100); };
 		tlToolsRight.Controls.Add(_cutEditZoomLabel);
 
 		_cutEditZoomOutBtn = MakeMiniStepButton("➖");
 		_cutEditZoomOutBtn.Click += delegate { SetCutEditZoom((int)Math.Round(_cutEditTimelineZoom * 100) - 15); };
-		_cutEditToolTip.SetToolTip(_cutEditZoomOutBtn, "缩小时间轴 (长短缩短)");
+		_cutEditToolTip.SetToolTip(_cutEditZoomOutBtn, "缩小时间轴 (缩短轨道总长度)");
 		tlToolsRight.Controls.Add(_cutEditZoomOutBtn);
 
-		_cutEditZoomSlider = new TrackBar { Width = 72, Height = 24, Minimum = 20, Maximum = 600, Value = 100, TickStyle = TickStyle.None, Margin = new Padding(0, 4, 0, 0) };
+		_cutEditZoomSlider = new TrackBar { Width = 68, Height = 24, Minimum = 20, Maximum = 600, Value = 100, TickStyle = TickStyle.None, Margin = new Padding(0, 4, 0, 0) };
 		_cutEditZoomSlider.ValueChanged += delegate
 		{
 			SetCutEditZoom(_cutEditZoomSlider.Value);
 		};
-		_cutEditToolTip.SetToolTip(_cutEditZoomSlider, "轨道时间长短拉杆 (20% - 600%)\n快捷键: Ctrl + 滚轮 或 Alt + 滚轮");
+		_cutEditToolTip.SetToolTip(_cutEditZoomSlider, "轨道时间轴缩放拉杆 (20% - 600%)\n快捷键: Ctrl + 鼠标滚轮");
 		tlToolsRight.Controls.Add(_cutEditZoomSlider);
 
 		_cutEditZoomInBtn = MakeMiniStepButton("➕");
 		_cutEditZoomInBtn.Click += delegate { SetCutEditZoom((int)Math.Round(_cutEditTimelineZoom * 100) + 15); };
-		_cutEditToolTip.SetToolTip(_cutEditZoomInBtn, "放大时间轴 (长短拉长)");
+		_cutEditToolTip.SetToolTip(_cutEditZoomInBtn, "放大时间轴 (拉长轨道精细剪辑)");
 		tlToolsRight.Controls.Add(_cutEditZoomInBtn);
 
 		tlToolsRight.Controls.Add(new Panel { Width = 1, Height = 18, BackColor = Color.FromArgb(71, 85, 105), Margin = new Padding(4, 6, 4, 0) });
@@ -4394,12 +5697,12 @@ internal sealed class MainForm : Form
 		_cutEditToolTip.SetToolTip(_cutEditHeightDownBtn, "轨道变窄/变矮");
 		tlToolsRight.Controls.Add(_cutEditHeightDownBtn);
 
-		_cutEditTrackHeightSlider = new TrackBar { Width = 68, Height = 24, Minimum = 24, Maximum = 110, Value = _cutEditBaseTrackHeight, TickStyle = TickStyle.None, Margin = new Padding(0, 4, 0, 0) };
+		_cutEditTrackHeightSlider = new TrackBar { Width = 62, Height = 24, Minimum = 24, Maximum = 110, Value = _cutEditBaseTrackHeight, TickStyle = TickStyle.None, Margin = new Padding(0, 4, 0, 0) };
 		_cutEditTrackHeightSlider.ValueChanged += delegate
 		{
 			SetCutEditTrackHeight(_cutEditTrackHeightSlider.Value);
 		};
-		_cutEditToolTip.SetToolTip(_cutEditTrackHeightSlider, "轨道宽窄拉杆 (24px - 110px)\n快捷键: Shift + 滚轮");
+		_cutEditToolTip.SetToolTip(_cutEditTrackHeightSlider, "轨道高度拉杆 (24px - 110px)\n快捷键: Shift + 滚轮");
 		tlToolsRight.Controls.Add(_cutEditTrackHeightSlider);
 
 		_cutEditHeightUpBtn = MakeMiniStepButton("➕");
@@ -4407,15 +5710,15 @@ internal sealed class MainForm : Form
 		_cutEditToolTip.SetToolTip(_cutEditHeightUpBtn, "轨道加宽/加高");
 		tlToolsRight.Controls.Add(_cutEditHeightUpBtn);
 
-		_cutEditFitWindowBtn = MakeButton("⛶ 适合", 64);
-		_cutEditFitWindowBtn.Height = 28;
-		_cutEditFitWindowBtn.Margin = new Padding(4, 1, 0, 0);
+		_cutEditFitWindowBtn = MakeButton("⛶", 30);
+		_cutEditFitWindowBtn.Height = 26;
+		_cutEditFitWindowBtn.Margin = new Padding(4, 2, 0, 0);
 		_cutEditFitWindowBtn.Click += delegate
 		{
 			_cutEditScrollX = 0;
 			SetCutEditZoom(100);
 		};
-		_cutEditToolTip.SetToolTip(_cutEditFitWindowBtn, "适合窗口: 一键将时间轴重置为100%并对齐开头");
+		_cutEditToolTip.SetToolTip(_cutEditFitWindowBtn, "适合窗口: 一键将时间轴缩放重置为100%并回到片头");
 		tlToolsRight.Controls.Add(_cutEditFitWindowBtn);
 
 		// CRITICAL: DockStyle.Right MUST be added FIRST so it always stays docked on the right side!
@@ -4423,7 +5726,27 @@ internal sealed class MainForm : Form
 		timelineTools.Controls.Add(tlToolsLeft);
 		bottomTimelineHost.Controls.Add(timelineTools);
 
-		// Multi-Track Timeline Canvas (DockStyle.Fill - fully occupying bottom panel)
+		// Bottom Horizontal ScrollBar for Timeline (Issue #5: allows smooth horizontal scrolling when timeline is zoomed in)
+		_cutEditTimelineHScrollBar = new HScrollBar
+		{
+			Dock = DockStyle.Bottom,
+			Height = 18,
+			Minimum = 0,
+			Maximum = 100,
+			LargeChange = 100,
+			SmallChange = 30,
+			Value = 0,
+			Enabled = false
+		};
+		_cutEditTimelineHScrollBar.Scroll += delegate(object s, ScrollEventArgs e)
+		{
+			_cutEditScrollX = Math.Max(0, e.NewValue);
+			_cutEditTimelineCanvas?.Invalidate();
+		};
+		_cutEditToolTip.SetToolTip(_cutEditTimelineHScrollBar, "轨道底部水平滑块：当放大拉长时间轴超出屏幕时，按住左键左右拖动即可平滑浏览全轨");
+		bottomTimelineHost.Controls.Add(_cutEditTimelineHScrollBar);
+
+		// Multi-Track Timeline Canvas (DockStyle.Fill - occupying bottom panel above HScrollBar)
 		_cutEditTimelineCanvas = new PictureBox
 		{
 			Dock = DockStyle.Fill,
@@ -4478,8 +5801,8 @@ internal sealed class MainForm : Form
 		};
 		bottomTimelineHost.Controls.Add(_cutEditTimelineCanvas);
 		_cutEditTimelineCanvas.BringToFront();
-		
-splitMain.Panel2.Controls.Add(bottomTimelineHost);
+
+		splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		tabPage.Controls.Add(splitMain);
 		tabPage.Controls.Add(topBar);
 		topBar.SendToBack();
@@ -4499,6 +5822,37 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		return tabPage;
 	}
 
+	/// <summary>
+	/// Custom TabPage that processes WM_VSCROLL SB_THUMBTRACK in real time so dragging the right-edge
+	/// scrollbar thumb with the left mouse button scrolls and repaints the content immediately without waiting for mouse release.
+	/// </summary>
+	private sealed class LiveScrollTabPage : TabPage
+	{
+		public LiveScrollTabPage(string text) : base(text)
+		{
+			DoubleBuffered = true;
+		}
+
+		protected override void WndProc(ref Message m)
+		{
+			const int WM_VSCROLL = 0x0115;
+			const int SB_THUMBTRACK = 5;
+			if (m.Msg == WM_VSCROLL)
+			{
+				int scrollCode = (int)(m.WParam.ToInt64() & 0xFFFF);
+				if (scrollCode == SB_THUMBTRACK)
+				{
+					int trackPos = (int)((m.WParam.ToInt64() >> 16) & 0xFFFF);
+					base.WndProc(ref m);
+					AutoScrollPosition = new Point(-AutoScrollPosition.X, trackPos);
+					Refresh();
+					return;
+				}
+			}
+			base.WndProc(ref m);
+		}
+	}
+
 	private TabPage BuildDownloadTab()
 	{
 		TabPage tabPage = new TabPage("视频下载");
@@ -4514,6 +5868,16 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		tabPage.BackColor = CanvasColor;
 		_transcribePanel = new VideoBatchMerger.Transcriber.TranscribePanel(this);
 		tabPage.Controls.Add(_transcribePanel);
+		return tabPage;
+	}
+
+	private TabPage BuildScriptBatchTab()
+	{
+		TabPage tabPage = new TabPage("文案成片");
+		tabPage.BackColor = CanvasColor;
+		_scriptBatchPanel = new VideoBatchMerger.ScriptBatch.ScriptBatchStudioPanel(this);
+		_scriptBatchPanel.Dock = DockStyle.Fill;
+		tabPage.Controls.Add(_scriptBatchPanel);
 		return tabPage;
 	}
 
@@ -4762,10 +6126,18 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		Panel startPanel = new Panel
 		{
 			Dock = DockStyle.Top,
-			Height = 60,
-			Padding = new Padding(0, 10, 0, 0)
+			Height = 106,
+			Padding = new Padding(0, 6, 0, 0)
 		};
-		_deliverStartButton = MakePrimaryButton("🚀 开始渲染并交付成片", 16, 8, 440);
+		Button deliverQcBtn = MakeButton("🧐 AI 成品质检与脚本复核 (可选)", 440);
+		deliverQcBtn.Height = 36;
+		deliverQcBtn.Location = new Point(16, 6);
+		deliverQcBtn.BackColor = Color.FromArgb(37, 42, 65);
+		deliverQcBtn.ForeColor = Color.FromArgb(165, 180, 252);
+		deliverQcBtn.Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
+		deliverQcBtn.Click += delegate { OpenQcStudioForm(); };
+
+		_deliverStartButton = MakePrimaryButton("🚀 开始渲染并交付成片", 16, 48, 440);
 		_deliverStartButton.Height = 44;
 		_deliverStartButton.Font = new Font("Microsoft YaHei UI", 10.5f, FontStyle.Bold);
 		_deliverStartButton.Click += delegate
@@ -4774,12 +6146,14 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		};
 		void CenterDeliverButton()
 		{
-			if (startPanel.ClientSize.Width > 0 && _deliverStartButton != null)
+			if (startPanel.ClientSize.Width > 0)
 			{
-				_deliverStartButton.Left = Math.Max(16, (startPanel.ClientSize.Width - _deliverStartButton.Width) / 2);
+				if (deliverQcBtn != null) deliverQcBtn.Left = Math.Max(16, (startPanel.ClientSize.Width - deliverQcBtn.Width) / 2);
+				if (_deliverStartButton != null) _deliverStartButton.Left = Math.Max(16, (startPanel.ClientSize.Width - _deliverStartButton.Width) / 2);
 			}
 		}
 		startPanel.Resize += delegate { CenterDeliverButton(); };
+		startPanel.Controls.Add(deliverQcBtn);
 		startPanel.Controls.Add(_deliverStartButton);
 		CenterDeliverButton();
 		leftScroll.Controls.Add(startPanel);
@@ -5203,8 +6577,27 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_cutEditTracks.Add(new TimelineTrack { Id = "V2", Name = "V2 画面", Type = TrackType.Video, Height = _cutEditBaseTrackHeight });
 		_cutEditTracks.Add(new TimelineTrack { Id = "V1", Name = "V1 画面", Type = TrackType.Video, Height = _cutEditBaseTrackHeight });
 		_cutEditTracks.Add(new TimelineTrack { Id = "T1", Name = "T1 字幕", Type = TrackType.Subtitle, Height = Math.Max(22, _cutEditBaseTrackHeight - 8) });
+		if (_cutEditOverlays.Any(o => (o.TrackId ?? "T1") == "T2"))
+		{
+			_cutEditTracks.Add(new TimelineTrack { Id = "T2", Name = "T2 中文", Type = TrackType.Subtitle, Height = Math.Max(22, _cutEditBaseTrackHeight - 8) });
+		}
 		_cutEditTracks.Add(new TimelineTrack { Id = "A1", Name = "A1 原声", Type = TrackType.Audio, Height = _cutEditBaseTrackHeight });
 		_cutEditTracks.Add(new TimelineTrack { Id = "A2", Name = "A2 配乐", Type = TrackType.Audio, Height = Math.Max(24, _cutEditBaseTrackHeight - 4) });
+	}
+
+	private void EnsureT2SubtitleTrackExists()
+	{
+		if (_cutEditTracks.Any(t => t.Id == "T2")) return;
+		int t1Idx = _cutEditTracks.FindIndex(t => t.Id == "T1");
+		int insertIdx = (t1Idx >= 0) ? (t1Idx + 1) : _cutEditTracks.Count;
+		int h = Math.Max(22, _cutEditBaseTrackHeight - 8);
+		_cutEditTracks.Insert(insertIdx, new TimelineTrack
+		{
+			Id = "T2",
+			Name = "T2 中文",
+			Type = TrackType.Subtitle,
+			Height = h
+		});
 	}
 
 	internal void AddCutEditTrack(TrackType type)
@@ -5272,6 +6665,30 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		int visibleW = Math.Max(10, canvasWidth - headerW - padR);
 		int maxScroll = Math.Max(0, trackW - visibleW);
 		_cutEditScrollX = Math.Max(0, Math.Min(maxScroll, _cutEditScrollX));
+		SyncTimelineHScrollBar(trackW, visibleW, maxScroll);
+	}
+
+	private void SyncTimelineHScrollBar(int trackW, int visibleW, int maxScroll)
+	{
+		if (_cutEditTimelineHScrollBar == null || _cutEditTimelineHScrollBar.IsDisposed) return;
+		if (maxScroll <= 0 || _cutEditDuration <= 0.0)
+		{
+			_cutEditTimelineHScrollBar.Enabled = false;
+			_cutEditTimelineHScrollBar.Minimum = 0;
+			_cutEditTimelineHScrollBar.Maximum = 100;
+			_cutEditTimelineHScrollBar.LargeChange = 100;
+			_cutEditTimelineHScrollBar.Value = 0;
+		}
+		else
+		{
+			int large = Math.Max(20, visibleW);
+			_cutEditTimelineHScrollBar.Minimum = 0;
+			_cutEditTimelineHScrollBar.LargeChange = large;
+			_cutEditTimelineHScrollBar.SmallChange = Math.Max(10, visibleW / 8);
+			_cutEditTimelineHScrollBar.Maximum = maxScroll + large - 1;
+			_cutEditTimelineHScrollBar.Value = Math.Max(0, Math.Min(maxScroll, _cutEditScrollX));
+			_cutEditTimelineHScrollBar.Enabled = true;
+		}
 	}
 
 	private double SnapTimeToNearestBoundary(double targetTime, int canvasWidth, out bool didSnap, string excludeSegmentId = null)
@@ -5489,6 +6906,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			int visibleW = Math.Max(10, w - headerW - padR);
 			int maxScroll = Math.Max(0, newTrackW - visibleW);
 			_cutEditScrollX = Math.Max(0, Math.Min(maxScroll, newScrollX));
+			SyncTimelineHScrollBar(newTrackW, visibleW, maxScroll);
 			_cutEditTimelineCanvas.Invalidate();
 		}
 		else
@@ -5501,6 +6919,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			int maxScroll = Math.Max(0, trackW - visibleW);
 			int delta = (int)(e.Delta * 0.8);
 			_cutEditScrollX = Math.Max(0, Math.Min(maxScroll, _cutEditScrollX - delta));
+			SyncTimelineHScrollBar(trackW, visibleW, maxScroll);
 			_cutEditTimelineCanvas.Invalidate();
 		}
 	}
@@ -5679,13 +7098,18 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				if (e.Y >= curY && e.Y < curY + trk.Height)
 				{
 					_cutEditSelectedTrackId = trk.Id;
-					if (e.X >= 42 && e.X <= 64)
+					if (e.Button == MouseButtons.Right)
+					{
+						ShowClearTrackContextMenu(_cutEditTimelineCanvas, e.Location, trk.Id);
+						return;
+					}
+					if (e.X >= 34 && e.X <= 52)
 					{
 						trk.IsLocked = !trk.IsLocked;
 						_cutEditTimelineCanvas?.Invalidate();
 						return;
 					}
-					else if (e.X >= 66 && e.X <= 88)
+					else if (e.X >= 53 && e.X <= 71)
 					{
 						if (trk.Type == TrackType.Audio)
 						{
@@ -5700,8 +7124,14 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 						else
 						{
 							trk.IsVisible = !trk.IsVisible;
+							TriggerTitleLivePreview();
 						}
 						_cutEditTimelineCanvas?.Invalidate();
+						return;
+					}
+					else if (e.X >= 72 && e.X <= 91)
+					{
+						ClearSingleCutEditTrack(trk.Id);
 						return;
 					}
 					_cutEditTimelineCanvas?.Invalidate();
@@ -5724,6 +7154,30 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 		if (e.Button == MouseButtons.Right)
 		{
+			CutOverlayItem rightHitOverlay = null;
+			foreach (var kvp in _cachedOverlayRects)
+			{
+				if (kvp.Value.Contains(e.Location))
+				{
+					rightHitOverlay = _cutEditOverlays.FirstOrDefault(o => o.Id == kvp.Key);
+					break;
+				}
+			}
+			var rightTrk = GetTrackAtY(e.Y);
+			if (rightHitOverlay != null || (rightTrk != null && rightTrk.Type == TrackType.Subtitle))
+			{
+				if (rightHitOverlay != null)
+				{
+					_cutEditSelectedSegmentIndex = -1;
+					_cutEditSelectedTrackId = rightHitOverlay.TrackId ?? "T1";
+					bool keepMulti = _selectedOverlayIds.Count > 1 && _selectedOverlayIds.Contains(rightHitOverlay.Id);
+					SelectOverlayItem(rightHitOverlay, keepMultiSelection: keepMulti);
+					_cutEditTimelineCanvas?.Invalidate();
+				}
+				ShowOverlayTimelineContextMenu(e.Location, rightHitOverlay);
+				return;
+			}
+
 			if (FindSeamAtPoint(e.Location, out CutSegment seamA, out CutSegment seamB, out Rectangle seamR))
 			{
 				ShowSeamTransitionContextMenu(e.Location, seamA, seamB);
@@ -5797,7 +7251,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				return;
 			}
 
-			// Check if clicked any overlay item on T1 track
+			// Check if clicked any overlay item on T1 / T2 subtitle & title tracks
 			CutOverlayItem hitItem = null;
 			Rectangle hitRect = Rectangle.Empty;
 			int hitEdgeOl = 0;
@@ -5814,8 +7268,39 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			if (hitItem != null)
 			{
 				_cutEditSelectedSegmentIndex = -1;
-				_cutEditSelectedTrackId = "T1";
-				SelectOverlayItem(hitItem);
+				_cutEditSelectedTrackId = hitItem.TrackId ?? "T1";
+				bool ctrlHeld = Control.ModifierKeys.HasFlag(Keys.Control);
+				bool shiftHeld = Control.ModifierKeys.HasFlag(Keys.Shift);
+				if (shiftHeld && _selectedOverlay != null && _cutEditOverlays.Contains(_selectedOverlay))
+				{
+					int idxA = _cutEditOverlays.IndexOf(_selectedOverlay);
+					int idxB = _cutEditOverlays.IndexOf(hitItem);
+					int minI = Math.Min(idxA, idxB);
+					int maxI = Math.Max(idxA, idxB);
+					for (int i = minI; i <= maxI; i++)
+					{
+						_selectedOverlayIds.Add(_cutEditOverlays[i].Id);
+					}
+					SelectOverlayItem(hitItem, keepMultiSelection: true);
+				}
+				else if (ctrlHeld)
+				{
+					if (_selectedOverlayIds.Contains(hitItem.Id) && _selectedOverlayIds.Count > 1)
+					{
+						_selectedOverlayIds.Remove(hitItem.Id);
+						var fallback = _cutEditOverlays.FirstOrDefault(o => _selectedOverlayIds.Contains(o.Id)) ?? hitItem;
+						SelectOverlayItem(fallback, keepMultiSelection: true);
+					}
+					else
+					{
+						SelectOverlayItem(hitItem, keepMultiSelection: true);
+					}
+				}
+				else
+				{
+					bool preserveGroup = _selectedOverlayIds.Count > 1 && _selectedOverlayIds.Contains(hitItem.Id);
+					SelectOverlayItem(hitItem, keepMultiSelection: preserveGroup);
+				}
 				_isDraggingOverlay = true;
 				_draggedOverlayItem = hitItem;
 				_overlayDragStartMouse = e.X;
@@ -5827,9 +7312,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				else hitEdgeOl = 0;
 				_overlayDragEdge = hitEdgeOl;
 
-				if (_cutEditInspectorTabs != null && _cutEditInspectorTabs.TabPages.Count > 0)
+				// Route subtitles to 🤖 AI智剪 (Tab 2) and film titles/images to 🏷️ 影片标题 (Tab 0)
+				if (_cutEditInspectorTabs != null && _cutEditInspectorTabs.TabPages.Count >= 3)
 				{
-					_cutEditInspectorTabs.SelectedIndex = 0;
+					_cutEditInspectorTabs.SelectedIndex = hitItem.IsSubtitleRole ? 2 : 0;
 				}
 				SeekCutEditVideo(hitItem.StartSeconds);
 				UpdateCutEditWpfOverlay(hitItem.StartSeconds, forcePreviewSelected: true);
@@ -5886,15 +7372,6 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				if (trk != null)
 				{
 					_cutEditSelectedTrackId = trk.Id;
-					if (trk.Id == "T1")
-					{
-						if (_cutEditInspectorTabs != null && _cutEditInspectorTabs.TabPages.Count > 0)
-						{
-							_cutEditInspectorTabs.SelectedIndex = 0;
-						}
-						_cutEditMainTitle?.Focus();
-						_cutEditMainTitle?.SelectAll();
-					}
 				}
 				_timelineDragMode = TimelineDragMode.ScrubPlayhead;
 				HandleTimelineSeek(e);
@@ -5992,7 +7469,6 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				double dt = (double)(e.X - _overlayDragStartMouse) / trackW * dur;
 				if (_overlayDragEdge == 0)
 				{
-					double maxStart = Math.Max(0.0, dur - _overlayDragOrigDur);
 					double newStart = Math.Max(0.0, Math.Min(dur - 0.2, _overlayDragOrigStart + dt));
 					_draggedOverlayItem.StartSeconds = Math.Round(newStart, 1);
 				}
@@ -6009,11 +7485,19 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					_draggedOverlayItem.Duration = Math.Round(newDur, 1);
 				}
 
-				SyncSelectedOverlayToControls();
+				_updatingOverlayInspector = true;
+				try
+				{
+					if (_overlayStartTimeNum != null)
+						_overlayStartTimeNum.Value = (decimal)Math.Max(0.0, Math.Min(3600.0, _draggedOverlayItem.StartSeconds));
+					if (_overlayDurationNum != null)
+						_overlayDurationNum.Value = (decimal)Math.Max(0.5, Math.Min(3600.0, _draggedOverlayItem.Duration));
+				}
+				finally
+				{
+					_updatingOverlayInspector = false;
+				}
 				_cutEditTimelineCanvas?.Invalidate();
-				SeekCutEditVideo(_draggedOverlayItem.StartSeconds);
-				UpdateCutEditWpfOverlay(_draggedOverlayItem.StartSeconds, forcePreviewSelected: true);
-				UpdateDeliverSummary();
 				return;
 			}
 
@@ -6154,10 +7638,15 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 		if (_isDraggingOverlay)
 		{
+			var finishedItem = _draggedOverlayItem;
 			_isDraggingOverlay = false;
 			_draggedOverlayItem = null;
 			_cutEditTimelineCanvas.Cursor = (_cutEditCurrentTool == TimelineToolMode.Razor) ? Cursors.Cross : Cursors.Default;
-			UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: true);
+			SyncSelectedOverlayToControls();
+			if (finishedItem != null)
+			{
+				SeekCutEditVideo(finishedItem.StartSeconds);
+			}
 			UpdateDeliverSummary();
 			_cutEditTimelineCanvas?.Invalidate();
 			return;
@@ -6495,6 +7984,20 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			cms.Items.Add(moveTrackMenu);
 		}
 
+		cms.Items.Add(new ToolStripSeparator());
+		string curTrackId = seg.TrackId ?? "V1";
+		var miClearCurTrack = cms.Items.Add($"🧹 仅清空当前【{curTrackId}】轨道全部片段 (Ctrl+Z可撤销)", null, delegate
+		{
+			ClearSingleCutEditTrack(curTrackId);
+		});
+		miClearCurTrack.ForeColor = Color.FromArgb(234, 88, 12);
+
+		var miClearAllTracks = cms.Items.Add("🧨 一键清空所有轨道 (V1+V2+T1+A1+A2)", null, delegate
+		{
+			ClearCutEditorProject(suppressPrompt: true);
+		});
+		miClearAllTracks.ForeColor = Color.FromArgb(220, 38, 38);
+
 		cms.Show(_cutEditTimelineCanvas, canvasPt);
 	}
 
@@ -6805,6 +8308,21 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			CloseAllTimelineGaps();
 		});
+
+		if (trk != null)
+		{
+			cms.Items.Add(new ToolStripSeparator());
+			var miClearTrk = cms.Items.Add($"🧹 一键清空当前【{trk.Id}】轨道", null, delegate
+			{
+				ClearSingleCutEditTrack(trk.Id);
+			});
+			miClearTrk.ForeColor = Color.FromArgb(251, 146, 60);
+		}
+		var miClearAll = cms.Items.Add("🧨 一键清空所有轨道", null, delegate
+		{
+			ClearCutEditorProject(suppressPrompt: false);
+		});
+		miClearAll.ForeColor = Color.FromArgb(248, 113, 113);
 
 		cms.Items.Add(new ToolStripSeparator());
 
@@ -7131,7 +8649,9 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		using (Font segFont = new Font("Microsoft YaHei UI", 8f, FontStyle.Regular))
 		using (StringFormat sfCenter = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter })
 		{
-			foreach (var trk in _cutEditTracks)
+		_cachedOverlayRects.Clear();
+		_cachedT1Rect = Rectangle.Empty;
+		foreach (var trk in _cutEditTracks)
 			{
 				int th = trk.Height;
 				Rectangle headerRect = new Rectangle(0, curY, headerW, th);
@@ -7415,32 +8935,43 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					}
 				}
 
-				// Subtitle & Overlay Track T1
-				if (trk.Id == "T1")
+				// Subtitle & Overlay Tracks (T1 = 原文字幕与标题贴片轨, T2 = 独立中文字幕轨)
+				if (trk.Type == TrackType.Subtitle)
 				{
-					_cachedOverlayRects.Clear();
-					_cachedT1Rect = Rectangle.Empty;
-
+					int drawnOnTrack = 0;
 					if (_cutEditDuration > 0.0 && _cutEditOverlays.Count > 0)
 					{
 						for (int oi = 0; oi < _cutEditOverlays.Count; oi++)
 						{
 							var olItem = _cutEditOverlays[oi];
 							if (!olItem.Enabled) continue;
+							string itemTrk = string.IsNullOrEmpty(olItem.TrackId) ? "T1" : olItem.TrackId;
+							if (!string.Equals(itemTrk, trk.Id, StringComparison.OrdinalIgnoreCase)) continue;
 
+							drawnOnTrack++;
 							double tStart = Math.Max(0.0, Math.Min(dur - 0.2, olItem.StartSeconds));
-							double tDur = Math.Max(0.5, olItem.Duration);
+							double tDur = Math.Max(0.25, olItem.Duration);
 							int tx1 = TimeToScreenX(tStart, bounds.Width);
 							int tx2 = TimeToScreenX(tStart + tDur, bounds.Width);
-							int tw = Math.Max(16, tx2 - tx1);
+							int tw = Math.Max(14, tx2 - tx1);
 							Rectangle olRect = new Rectangle(tx1, curY + 2, tw, th - 4);
 							_cachedOverlayRects[olItem.Id] = olRect;
 							if (_selectedOverlay == olItem) _cachedT1Rect = olRect;
+							if (tx1 + tw < headerW || tx1 > bounds.Width) continue;
 
-							bool isThisSel = (_selectedOverlay == olItem);
-							Color cGrad1 = (olItem.Type == OverlayItemType.Image) ? Color.FromArgb(168, 85, 247) : Color.FromArgb(14, 165, 233);
-							Color cGrad2 = (olItem.Type == OverlayItemType.Image) ? Color.FromArgb(126, 34, 206) : Color.FromArgb(2, 132, 199);
-							Color cBorder = isThisSel ? Color.FromArgb(234, 179, 8) : ((olItem.Type == OverlayItemType.Image) ? Color.FromArgb(216, 180, 254) : Color.FromArgb(125, 211, 252));
+							bool isThisSel = (_selectedOverlay == olItem) || _selectedOverlayIds.Contains(olItem.Id);
+							bool isTitleObj = (olItem.Type == OverlayItemType.Text && !olItem.IsSubtitleRole);
+							bool isT2Zh = string.Equals(itemTrk, "T2", StringComparison.OrdinalIgnoreCase);
+
+							Color cGrad1 = (olItem.Type == OverlayItemType.Image)
+								? Color.FromArgb(168, 85, 247)
+								: (isTitleObj ? Color.FromArgb(245, 158, 11) : (isT2Zh ? Color.FromArgb(16, 185, 129) : Color.FromArgb(14, 165, 233)));
+							Color cGrad2 = (olItem.Type == OverlayItemType.Image)
+								? Color.FromArgb(126, 34, 206)
+								: (isTitleObj ? Color.FromArgb(180, 83, 9) : (isT2Zh ? Color.FromArgb(5, 150, 105) : Color.FromArgb(2, 132, 199)));
+							Color cBorder = isThisSel
+								? Color.FromArgb(250, 204, 21)
+								: ((olItem.Type == OverlayItemType.Image) ? Color.FromArgb(216, 180, 254) : (isTitleObj ? Color.FromArgb(253, 224, 71) : (isT2Zh ? Color.FromArgb(110, 231, 183) : Color.FromArgb(125, 211, 252))));
 
 							using (LinearGradientBrush lgb = new LinearGradientBrush(olRect, cGrad1, cGrad2, LinearGradientMode.Vertical))
 							{
@@ -7462,6 +8993,21 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 							{
 								g.DrawString(label, segFont, bTxt, olRect, sfCenter);
 							}
+						}
+					}
+
+					if (drawnOnTrack == 0 && trk.Id == "T2" && _cutEditDuration > 0.0)
+					{
+						int t2X = TimeToScreenX(0.0, bounds.Width);
+						int t2W = Math.Max(120, TimeToScreenX(_cutEditDuration, bounds.Width) - t2X);
+						Rectangle t2Rect = new Rectangle(t2X, curY + 2, t2W, th - 4);
+						using (Pen p = new Pen(Color.FromArgb(60, 16, 185, 129), 1f) { DashStyle = DashStyle.Dash })
+						{
+							g.DrawRectangle(p, t2Rect);
+						}
+						using (Brush bT2 = new SolidBrush(Color.FromArgb(110, 231, 183)))
+						{
+							g.DrawString("🌐 T2 中文字幕独立轨 (勾选【识别后附加中文】自动在此轨生成独立中文字幕)", segFont, bT2, t2Rect, sfCenter);
 						}
 					}
 				}
@@ -7523,7 +9069,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				}
 
 				// Draw Track Badge (Pill)
-				Rectangle badgeRect = new Rectangle(4, curY + (th - 22) / 2, 38, 22);
+				Rectangle badgeRect = new Rectangle(3, curY + (th - 22) / 2, 30, 22);
 				using (GraphicsPath bp = CreateRoundedRectanglePath(badgeRect, 4))
 				using (Brush bBrush = new SolidBrush(trk.GetBadgeColor()))
 				using (Brush wBrush = new SolidBrush(Color.White))
@@ -7532,8 +9078,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					g.DrawString(trk.Id, badgeFont, wBrush, badgeRect, sfCenter);
 				}
 
-				// Draw Lock Button icon
-				Rectangle lockRect = new Rectangle(44, curY + (th - 20) / 2, 20, 20);
+				// Draw Lock Button icon (X: 34..52)
+				Rectangle lockRect = new Rectangle(34, curY + (th - 20) / 2, 18, 20);
 				string lockIcon = trk.IsLocked ? "🔒" : "🔓";
 				Color lockColor = trk.IsLocked ? Color.FromArgb(245, 158, 11) : Color.FromArgb(100, 116, 139);
 				if (trk.IsLocked)
@@ -7548,8 +9094,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					g.DrawString(lockIcon, iconFont, lkBrush, lockRect, sfCenter);
 				}
 
-				// Draw Mute / Eye icon
-				Rectangle muteRect = new Rectangle(68, curY + (th - 20) / 2, 20, 20);
+				// Draw Mute / Eye icon (X: 53..71)
+				Rectangle muteRect = new Rectangle(53, curY + (th - 20) / 2, 18, 20);
 				string actIcon = (trk.Type == TrackType.Audio)
 					? (trk.IsMuted ? "🔇" : "🔊")
 					: (trk.IsVisible ? "👁" : "🚫");
@@ -7559,6 +9105,17 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				using (Brush actBrush = new SolidBrush(actColor))
 				{
 					g.DrawString(actIcon, iconFont, actBrush, muteRect, sfCenter);
+				}
+
+				// Draw Single-Track Clear icon (X: 72..90)
+				Rectangle clearRect = new Rectangle(72, curY + (th - 20) / 2, 18, 20);
+				bool hasItemsOnTrack = (trk.Type == TrackType.Subtitle)
+					? _cutEditOverlays.Any(o => string.Equals(string.IsNullOrEmpty(o.TrackId) ? "T1" : o.TrackId, trk.Id, StringComparison.OrdinalIgnoreCase) && (o.Enabled || o.IsAiCaption || o.Name != "片头标题包装"))
+					: _cutEditSegments.Any(s => s.TrackId == trk.Id && s.IsKept);
+				Color clearColor = hasItemsOnTrack ? Color.FromArgb(248, 113, 113) : Color.FromArgb(71, 85, 105);
+				using (Brush clrBrush = new SolidBrush(clearColor))
+				{
+					g.DrawString("🗑", iconFont, clrBrush, clearRect, sfCenter);
 				}
 
 				curY += th + 2;
@@ -7650,21 +9207,45 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 	}
 
-	private double GetMediaDuration(string path)
+	private (double Duration, int Width, int Height, bool HasAudio, bool HasVideo) GetCachedMediaInfo(string path)
 	{
-		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return 0.0;
+		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return (0.0, 0, 0, false, false);
+		lock (_mediaProbeCache)
+		{
+			if (_mediaProbeCache.TryGetValue(path, out var cached))
+			{
+				return cached;
+			}
+		}
 		try
 		{
-			if (IsImage(path)) return 5.0;
+			if (IsImage(path))
+			{
+				using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+				using (var img = Image.FromStream(fs))
+				{
+					var res = (5.0, img.Width, img.Height, false, true);
+					lock (_mediaProbeCache) { _mediaProbeCache[path] = res; }
+					return res;
+				}
+			}
 			string ffmpeg = FindFfmpeg();
-			if (!string.IsNullOrEmpty(ffmpeg))
+			if (!string.IsNullOrEmpty(ffmpeg) && File.Exists(ffmpeg))
 			{
 				var info = Probe(ffmpeg, path);
-				return info.DurationSeconds;
+				var res = (info.DurationSeconds, info.Width, info.Height, info.HasAudio, info.HasVideo);
+				lock (_mediaProbeCache) { _mediaProbeCache[path] = res; }
+				return res;
 			}
 		}
 		catch { }
-		return 0.0;
+		return (0.0, 0, 0, false, false);
+	}
+
+	private double GetMediaDuration(string path)
+	{
+		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return 0.0;
+		return GetCachedMediaInfo(path).Duration;
 	}
 
 	private void RequestRealAudioWaveform(string mediaPath, Color waveColor)
@@ -7752,6 +9333,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		if (_cutEditMediaPoolList != null)
 		{
 			_cutEditMediaPoolList.View = isThumbView ? View.LargeIcon : View.Details;
+			ScaleMediaPoolContentProportionally();
 			RefreshMediaPoolList();
 			if (isThumbView)
 			{
@@ -7759,6 +9341,54 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				{
 					GenerateMediaPoolThumbnailAsync(p);
 				}
+			}
+			_cutEditMediaPoolList.Invalidate();
+		}
+	}
+
+	private void ScaleMediaPoolContentProportionally()
+	{
+		if (_cutEditMediaPoolList == null || _cutEditMediaPoolList.IsDisposed) return;
+		int listW = Math.Max(200, _cutEditMediaPoolList.ClientSize.Width);
+		float ratio = Math.Max(0.85f, Math.Min(2.2f, listW / 314f));
+		float targetFontPt = Math.Max(8.5f, Math.Min(13.5f, (float)Math.Round(9.0f * Math.Pow(ratio, 0.65), 1)));
+		if (Math.Abs(_cutEditMediaPoolList.Font.SizeInPoints - targetFontPt) >= 0.35f)
+		{
+			_cutEditMediaPoolList.Font = new Font("Microsoft YaHei UI", targetFontPt, FontStyle.Regular);
+		}
+
+		if (_cutEditMediaPoolList.View == View.Details && _cutEditMediaPoolList.Columns.Count >= 3)
+		{
+			int usableW = Math.Max(180, listW - 6);
+			int c1 = Math.Max(56, (int)(usableW * 0.22f));
+			int c2 = Math.Max(68, (int)(usableW * 0.26f));
+			int c0 = Math.Max(90, usableW - c1 - c2);
+			_cutEditMediaPoolList.Columns[0].Width = c0;
+			_cutEditMediaPoolList.Columns[1].Width = c1;
+			_cutEditMediaPoolList.Columns[2].Width = c2;
+		}
+		else if (_cutEditMediaPoolList.View == View.LargeIcon && _cutEditMediaPoolImageList != null)
+		{
+			// Scale thumbnail cell size proportionally with panel width
+			int targetCols = listW >= 520 ? 3 : 2;
+			int cellW = Math.Max(96, Math.Min(220, (listW - 24) / targetCols - 8));
+			int cellH = Math.Max(76, Math.Min(172, (int)Math.Round(cellW * 0.78)));
+			if (Math.Abs(_cutEditMediaPoolImageList.ImageSize.Width - cellW) >= 6 ||
+			    Math.Abs(_cutEditMediaPoolImageList.ImageSize.Height - cellH) >= 6)
+			{
+				_cutEditMediaPoolImageList.Images.Clear();
+				_cutEditMediaPoolImageList.ImageSize = new Size(cellW, cellH);
+				lock (_cutEditMediaPoolThumbCache)
+				{
+					foreach (var kv in _cutEditMediaPoolThumbCache)
+					{
+						if (kv.Value != null)
+						{
+							_cutEditMediaPoolImageList.Images.Add(kv.Key, kv.Value);
+						}
+					}
+				}
+				RefreshMediaPoolList();
 			}
 			_cutEditMediaPoolList.Invalidate();
 		}
@@ -7830,7 +9460,9 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			try
 			{
-				Bitmap thumbBmp = new Bitmap(96, 64);
+				const int tw = 240;
+				const int th = 160;
+				Bitmap thumbBmp = new Bitmap(tw, th);
 				if (IsImage(path))
 				{
 					using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
@@ -7839,10 +9471,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					{
 						g.Clear(Color.FromArgb(12, 16, 24));
 						g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-						float scale = Math.Min(96f / src.Width, 64f / src.Height);
+						float scale = Math.Min((float)tw / src.Width, (float)th / src.Height);
 						int dw = (int)(src.Width * scale);
 						int dh = (int)(src.Height * scale);
-						g.DrawImage(src, (96 - dw) / 2, (64 - dh) / 2, dw, dh);
+						g.DrawImage(src, (tw - dw) / 2, (th - dh) / 2, dw, dh);
 					}
 				}
 				else
@@ -7851,7 +9483,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					if (!string.IsNullOrEmpty(ffmpeg))
 					{
 						string tempJpg = Path.Combine(Path.GetTempPath(), $"thumb_{Guid.NewGuid():N}.jpg");
-						string args = "-y -ss 00:00:01 -i " + QuoteArg(path) + " -vframes 1 -vf " + QuoteArg("scale=96:64:force_original_aspect_ratio=decrease,pad=96:64:(ow-iw)/2:(oh-ih)/2:black") + " -update 1 " + QuoteArg(tempJpg);
+						string args = "-y -ss 00:00:01 -i " + QuoteArg(path) + " -vframes 1 -vf " + QuoteArg($"scale={tw}:{th}:force_original_aspect_ratio=decrease,pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2:black") + " -update 1 " + QuoteArg(tempJpg);
 						ProcessStartInfo psi = new ProcessStartInfo(ffmpeg, args) { CreateNoWindow = true, UseShellExecute = false };
 						using (var proc = Process.Start(psi)) proc.WaitForExit(4000);
 						if (File.Exists(tempJpg))
@@ -7860,7 +9492,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 							using (var loaded = new Bitmap(fs))
 							using (Graphics g = Graphics.FromImage(thumbBmp))
 							{
-								g.DrawImage(loaded, 0, 0, 96, 64);
+								g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+								g.DrawImage(loaded, 0, 0, tw, th);
 							}
 							TryDelete(tempJpg);
 						}
@@ -7903,7 +9536,6 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		if (_cutEditMediaPoolList == null) return;
 		_cutEditMediaPoolList.BeginUpdate();
 		_cutEditMediaPoolList.Items.Clear();
-		string ffmpeg = FindFfmpeg();
 
 		foreach (var path in _cutEditMediaPool)
 		{
@@ -7914,24 +9546,21 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			{
 				if (IsImage(path))
 				{
+					var info = GetCachedMediaInfo(path);
 					durStr = "5.0s";
-					using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-					using (var img = Image.FromStream(fs))
-					{
-						resStr = $"{img.Width}x{img.Height}";
-					}
+					resStr = (info.Width > 0 && info.Height > 0) ? $"{info.Width}x{info.Height}" : "图片";
 				}
-				else if (!string.IsNullOrEmpty(ffmpeg) && File.Exists(ffmpeg))
+				else
 				{
-					var info = Probe(ffmpeg, path);
+					var info = GetCachedMediaInfo(path);
 					if (info.HasVideo)
 					{
-						durStr = FormatDuration(info.DurationSeconds);
+						durStr = FormatDuration(info.Duration);
 						resStr = $"{info.Width}x{info.Height}";
 					}
 					else if (info.HasAudio)
 					{
-						durStr = FormatDuration(info.DurationSeconds);
+						durStr = FormatDuration(info.Duration);
 						resStr = "音频(BGM)";
 					}
 				}
@@ -8589,14 +10218,74 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 	}
 
+	private string BuildWpfOverlayStateKey(double timeSec, bool forcePreviewSelected)
+	{
+		StringBuilder sb = new StringBuilder(128);
+		sb.Append(_cutEditSubtitleBottomOffset).Append('|');
+		if (forcePreviewSelected && _selectedOverlay != null)
+		{
+			if (_selectedOverlay.Enabled && IsOverlayTrackVisible(_selectedOverlay))
+			{
+				AppendOverlayItemStateKey(sb, _selectedOverlay, timeSec);
+			}
+		}
+		else
+		{
+			for (int i = 0; i < _cutEditOverlays.Count; i++)
+			{
+				var item = _cutEditOverlays[i];
+				if (!item.Enabled || !IsOverlayTrackVisible(item)) continue;
+				if (timeSec < item.StartSeconds || timeSec > (item.StartSeconds + item.Duration)) continue;
+				AppendOverlayItemStateKey(sb, item, timeSec);
+			}
+		}
+		return sb.ToString();
+	}
+
+	private bool IsOverlayTrackVisible(CutOverlayItem item)
+	{
+		if (item == null) return false;
+		string tid = string.IsNullOrEmpty(item.TrackId) ? "T1" : item.TrackId;
+		var trk = _cutEditTracks.FirstOrDefault(t => string.Equals(t.Id, tid, StringComparison.OrdinalIgnoreCase));
+		return trk == null || trk.IsVisible;
+	}
+
+	private static void AppendOverlayItemStateKey(StringBuilder sb, CutOverlayItem item, double timeSec)
+	{
+		sb.Append(item.Id).Append(':')
+		  .Append((int)item.Type).Append(':')
+		  .Append(item.TrackId).Append(':')
+		  .Append(item.PositionPreset).Append(':')
+		  .Append(item.FontFamily).Append(':')
+		  .Append(item.OffsetX).Append(',').Append(item.OffsetY).Append(':')
+		  .Append(item.FontSize).Append(':')
+		  .Append(item.TextColorIndex).Append(',').Append(item.CustomTextColorHex ?? "").Append(',')
+		  .Append(item.StrokeIndex).Append(',').Append(item.CustomStrokeColorHex ?? "").Append(',')
+		  .Append(item.BannerBgIndex).Append(':')
+		  .Append(item.WordAnimMode).Append(':')
+		  .Append(item.ScalePercent).Append(',').Append(item.OpacityPercent).Append(':')
+		  .Append(item.TextContent).Append('^').Append(item.SubtitleContent).Append('^').Append(item.ImagePath);
+		if (item.Type == OverlayItemType.Text && item.WordAnimMode > 0)
+		{
+			double rel = Math.Max(0.0, timeSec - item.StartSeconds);
+			int step = (int)(rel * 16.0); // 16Hz quantization for word pop/highlight
+			sb.Append('@').Append(step);
+		}
+		sb.Append(';');
+	}
+
 	private void UpdateCutEditWpfOverlay(double timeSec, bool forcePreviewSelected = false)
 	{
+		if (!_cutEditIsPlaying && (_cutEditElementHost == null || !_cutEditElementHost.Visible))
+		{
+			return;
+		}
 		UpdateWpfTransitionOverlay(_cutEditWpfTransitionBorder, timeSec);
 		if (_cutEditWpfOverlayImage == null) return;
 		try
 		{
 			bool hasActive = false;
-			if (forcePreviewSelected && _selectedOverlay != null && _selectedOverlay.Enabled)
+			if (forcePreviewSelected && _selectedOverlay != null && _selectedOverlay.Enabled && IsOverlayTrackVisible(_selectedOverlay))
 			{
 				hasActive = true;
 			}
@@ -8604,7 +10293,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			{
 				foreach (var o in _cutEditOverlays)
 				{
-					if (o.Enabled && timeSec >= o.StartSeconds && timeSec <= o.StartSeconds + o.Duration)
+					if (o.Enabled && IsOverlayTrackVisible(o) && timeSec >= o.StartSeconds && timeSec <= o.StartSeconds + o.Duration)
 					{
 						hasActive = true;
 						break;
@@ -8614,6 +10303,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 			if (!hasActive)
 			{
+				_lastCutEditWpfOverlayStateKey = string.Empty;
 				if (_cutEditWpfOverlayImage.Source != null)
 				{
 					_cutEditWpfOverlayImage.Dispatcher.BeginInvoke(new Action(() =>
@@ -8624,8 +10314,18 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				return;
 			}
 
-			int w = _cutEditWidth > 0 ? _cutEditWidth : 1920;
-			int h = _cutEditHeight > 0 ? _cutEditHeight : 1080;
+			string stateKey = BuildWpfOverlayStateKey(timeSec, forcePreviewSelected);
+			if (string.Equals(stateKey, _lastCutEditWpfOverlayStateKey, StringComparison.Ordinal))
+			{
+				return;
+			}
+			_lastCutEditWpfOverlayStateKey = stateKey;
+
+			int srcW = _cutEditWidth > 0 ? _cutEditWidth : 1920;
+			int srcH = _cutEditHeight > 0 ? _cutEditHeight : 1080;
+			double scale = Math.Min(1.0, 1280.0 / Math.Max(srcW, srcH));
+			int w = Math.Max(320, (int)Math.Round(srcW * scale));
+			int h = Math.Max(180, (int)Math.Round(srcH * scale));
 			using (Bitmap bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb))
 			{
 				using (Graphics g = Graphics.FromImage(bmp))
@@ -8637,10 +10337,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 					if (forcePreviewSelected && _selectedOverlay != null)
 					{
-						if (_selectedOverlay.Enabled)
+						if (_selectedOverlay.Enabled && IsOverlayTrackVisible(_selectedOverlay))
 						{
 							if (_selectedOverlay.Type == OverlayItemType.Text)
-								RenderSingleTextOverlay(g, _selectedOverlay, w, h);
+								RenderSingleTextOverlay(g, _selectedOverlay, w, h, timeSec);
 							else if (_selectedOverlay.Type == OverlayItemType.Image)
 								RenderSingleImageOverlay(g, _selectedOverlay, w, h);
 						}
@@ -8649,11 +10349,11 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					{
 						foreach (var item in _cutEditOverlays)
 						{
-							if (!item.Enabled) continue;
+							if (!item.Enabled || !IsOverlayTrackVisible(item)) continue;
 							if (timeSec < item.StartSeconds || timeSec > (item.StartSeconds + item.Duration)) continue;
 
 							if (item.Type == OverlayItemType.Text)
-								RenderSingleTextOverlay(g, item, w, h);
+								RenderSingleTextOverlay(g, item, w, h, timeSec);
 							else if (item.Type == OverlayItemType.Image)
 								RenderSingleImageOverlay(g, item, w, h);
 						}
@@ -8680,7 +10380,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			bool hasActive = false;
 			foreach (var o in _cutEditOverlays)
 			{
-				if (o.Enabled && timeSec >= o.StartSeconds && timeSec <= o.StartSeconds + o.Duration)
+				if (o.Enabled && IsOverlayTrackVisible(o) && timeSec >= o.StartSeconds && timeSec <= o.StartSeconds + o.Duration)
 				{
 					hasActive = true;
 					break;
@@ -8689,6 +10389,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 			if (!hasActive)
 			{
+				_lastDeliverWpfOverlayStateKey = string.Empty;
 				if (_deliverWpfOverlayImage.Source != null)
 				{
 					_deliverWpfOverlayImage.Dispatcher.BeginInvoke(new Action(() =>
@@ -8699,8 +10400,18 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				return;
 			}
 
-			int w = _cutEditWidth > 0 ? _cutEditWidth : 1920;
-			int h = _cutEditHeight > 0 ? _cutEditHeight : 1080;
+			string stateKey = BuildWpfOverlayStateKey(timeSec, false);
+			if (string.Equals(stateKey, _lastDeliverWpfOverlayStateKey, StringComparison.Ordinal))
+			{
+				return;
+			}
+			_lastDeliverWpfOverlayStateKey = stateKey;
+
+			int srcW = _cutEditWidth > 0 ? _cutEditWidth : 1920;
+			int srcH = _cutEditHeight > 0 ? _cutEditHeight : 1080;
+			double scale = Math.Min(1.0, 1280.0 / Math.Max(srcW, srcH));
+			int w = Math.Max(320, (int)Math.Round(srcW * scale));
+			int h = Math.Max(180, (int)Math.Round(srcH * scale));
 			using (Bitmap bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb))
 			{
 				using (Graphics g = Graphics.FromImage(bmp))
@@ -8712,11 +10423,11 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 					foreach (var item in _cutEditOverlays)
 					{
-						if (!item.Enabled) continue;
+						if (!item.Enabled || !IsOverlayTrackVisible(item)) continue;
 						if (timeSec < item.StartSeconds || timeSec > (item.StartSeconds + item.Duration)) continue;
 
 						if (item.Type == OverlayItemType.Text)
-							RenderSingleTextOverlay(g, item, w, h);
+							RenderSingleTextOverlay(g, item, w, h, timeSec);
 						else if (item.Type == OverlayItemType.Image)
 							RenderSingleImageOverlay(g, item, w, h);
 					}
@@ -8766,12 +10477,14 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	internal void ClearCutEditorProject(bool suppressPrompt = false)
 	{
-		if (!suppressPrompt && _cutEditSegments.Count > 0)
+		bool hasContent = _cutEditSegments.Count > 0 || _cutEditOverlays.Any(o => o.Enabled || o.IsAiCaption || o.Name != "片头标题包装");
+		if (!suppressPrompt && hasContent)
 		{
-			if (MessageBox.Show(this, "确定要清空剪辑工作台的所有轨道和内容吗？\n当前未保存的剪辑进度将被重置。", "清空剪辑轨道", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+			if (MessageBox.Show(this, "确定要一键清空所有轨道（V1 / V2 / A1 / A2 / T1 / T2）的全部内容吗？\n\n（清空后若误操作，可随时按 Ctrl+Z 撤销恢复）", "清空所有轨道", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
 			{
 				return;
 			}
+			PushCutEditUndoState("一键清空所有轨道");
 		}
 
 		try
@@ -8788,11 +10501,15 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 			_cutEditSegments.Clear();
 			_cutEditOverlays.Clear();
-			_cutEditUndoStack.Clear();
-			_cutEditRedoStack.Clear();
-			_cutEditWaveformCache.Clear();
-			_cutEditSourcePath = null;
-			_cutEditCurrentProjectPath = null;
+			if (suppressPrompt)
+			{
+				_cutEditUndoStack.Clear();
+				_cutEditRedoStack.Clear();
+				_cutEditWaveformCache.Clear();
+				_cutEditSourcePath = null;
+				_cutEditOriginalRawSourcePath = null;
+				_cutEditCurrentProjectPath = null;
+			}
 			_cutEditDuration = 0.0;
 			_cutEditCurrentPos = 0.0;
 			_lastActiveSegment = null;
@@ -8818,6 +10535,107 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			_cutEditTimelineCanvas?.Invalidate();
 		}
 		catch { }
+	}
+
+	internal void ClearSingleCutEditTrack(string trackId)
+	{
+		if (string.IsNullOrEmpty(trackId)) return;
+		var trk = _cutEditTracks.FirstOrDefault(t => t.Id == trackId);
+		if (trk != null && trk.IsLocked)
+		{
+			MessageBox.Show(this, $"轨道【{trackId}】当前处于 🔒 锁定保护状态！\n请先点击轨道头部的锁图标解锁后再清空。", "轨道已锁定", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			return;
+		}
+
+		if (trackId == "T1" || trackId == "T2")
+		{
+			var itemsOnSubTrack = _cutEditOverlays.Where(o => string.Equals(string.IsNullOrEmpty(o.TrackId) ? "T1" : o.TrackId, trackId, StringComparison.OrdinalIgnoreCase)).ToList();
+			bool hasSubOrTitle = itemsOnSubTrack.Any(o => o.Enabled || o.IsAiCaption || o.Name != "片头标题包装");
+			if (!hasSubOrTitle)
+			{
+				if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = $"ℹ️ {trackId} 字幕轨当前已是空状态。";
+				return;
+			}
+			PushCutEditUndoState($"一键清空 {trackId} 字幕轨");
+			_cutEditOverlays.RemoveAll(o => string.Equals(string.IsNullOrEmpty(o.TrackId) ? "T1" : o.TrackId, trackId, StringComparison.OrdinalIgnoreCase));
+			if (trackId == "T1")
+			{
+				InitDefaultOverlays();
+			}
+			RefreshOverlayCombo();
+			TriggerTitleLivePreview();
+			UpdateDeliverSummary();
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = $"🧹 已一键清空【{trackId} 字幕轨】（另一字幕轨保留不受影响，可按 Ctrl+Z 撤销）。";
+			return;
+		}
+
+		var segsOnTrack = _cutEditSegments.Where(s => s.TrackId == trackId).ToList();
+		if (segsOnTrack.Count == 0)
+		{
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = $"ℹ️ 轨道【{trackId}】当前没有片段。";
+			return;
+		}
+
+		PushCutEditUndoState($"一键清空 {trackId} 轨道");
+		_cutEditSegments.RemoveAll(s => s.TrackId == trackId);
+		_cutEditSelectedSegmentIndex = _cutEditSegments.Count > 0 ? 0 : -1;
+
+		RecalculateTimelineTotalDuration();
+		RefreshCutEditSegmentList();
+		if (_cutEditSegments.Count == 0)
+		{
+			if (_cutEditIsPlaying) ToggleCutEditPlayPause();
+			if (_cutEditEmptyPlaceholder != null) _cutEditEmptyPlaceholder.Visible = true;
+			if (_cutEditPreviewBox != null) _cutEditPreviewBox.Image = null;
+		}
+		else
+		{
+			SyncPlayerAtCurrentPos(forceReload: true);
+		}
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateDeliverSummary();
+		if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = $"🧹 已一键清空【{trackId}】轨道共 {segsOnTrack.Count} 个片段（可按 Ctrl+Z 撤销）。";
+	}
+
+	private void ShowClearTrackContextMenu(Control anchor, Point pt, string highlightTrackId = null)
+	{
+		if (anchor == null) return;
+		ContextMenuStrip cms = new ContextMenuStrip();
+
+		if (!string.IsNullOrEmpty(highlightTrackId))
+		{
+			var miCur = cms.Items.Add($"🧹 立即清空当前【{highlightTrackId}】轨道", null, delegate
+			{
+				ClearSingleCutEditTrack(highlightTrackId);
+			});
+			miCur.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+			miCur.ForeColor = Color.FromArgb(234, 88, 12);
+			cms.Items.Add(new ToolStripSeparator());
+		}
+
+		int v1Count = _cutEditSegments.Count(s => s.TrackId == "V1" && s.IsKept);
+		int v2Count = _cutEditSegments.Count(s => s.TrackId == "V2" && s.IsKept);
+		int a1Count = _cutEditSegments.Count(s => s.TrackId == "A1" && s.IsKept);
+		int a2Count = _cutEditSegments.Count(s => s.TrackId == "A2" && s.IsKept);
+		int t1Count = _cutEditOverlays.Count(o => string.Equals(string.IsNullOrEmpty(o.TrackId) ? "T1" : o.TrackId, "T1", StringComparison.OrdinalIgnoreCase) && (o.Enabled || o.IsAiCaption || o.Name != "片头标题包装"));
+		int t2Count = _cutEditOverlays.Count(o => string.Equals(o.TrackId, "T2", StringComparison.OrdinalIgnoreCase) && o.Enabled);
+
+		cms.Items.Add($"🎬 清空 V1 主视频轨 ({v1Count} 段)", null, delegate { ClearSingleCutEditTrack("V1"); });
+		cms.Items.Add($"🖼️ 清空 V2 画中画/贴片轨 ({v2Count} 段)", null, delegate { ClearSingleCutEditTrack("V2"); });
+		cms.Items.Add($"🔊 清空 A1 原声音频轨 ({a1Count} 段)", null, delegate { ClearSingleCutEditTrack("A1"); });
+		cms.Items.Add($"🎵 清空 A2 背景音乐 BGM 轨 ({a2Count} 段)", null, delegate { ClearSingleCutEditTrack("A2"); });
+		cms.Items.Add($"💬 清空 T1 外文字幕与标题包装轨 ({t1Count} 项)", null, delegate { ClearSingleCutEditTrack("T1"); });
+		cms.Items.Add($"🌐 清空 T2 中文字幕独立轨 ({t2Count} 项)", null, delegate { ClearSingleCutEditTrack("T2"); });
+
+		cms.Items.Add(new ToolStripSeparator());
+		var miAll = cms.Items.Add("🧨 一键清空所有轨道 (V1+V2+A1+A2+T1+T2)", null, delegate
+		{
+			ClearCutEditorProject(suppressPrompt: false);
+		});
+		miAll.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+		miAll.ForeColor = Color.FromArgb(220, 38, 38);
+
+		cms.Show(anchor, pt);
 	}
 
 	private void UpdateCutEditTimeLabel()
@@ -9100,7 +10918,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				}
 				double inSourceSec = activeSeg.StartSeconds + Math.Max(0.0, _cutEditCurrentPos - activeSeg.TimelineStartSeconds);
 				TimeSpan targetPos = TimeSpan.FromSeconds(Math.Max(0, inSourceSec));
-				if (Math.Abs((_cutEditMediaElement.Position - targetPos).TotalSeconds) > 0.35 || forceReload || needNewSource)
+				if (Math.Abs((_cutEditMediaElement.Position - targetPos).TotalSeconds) > 0.08 || forceReload || needNewSource)
 				{
 					_cutEditMediaElement.Position = targetPos;
 				}
@@ -9256,9 +11074,13 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			_cutEditPopoutForm.SyncSubtitleOffset(_cutEditSubtitleBottomOffset);
 		}
-		if (_cutEditRealtimePreviewCheckBox?.Checked == true)
+		if (_cutEditIsPlaying)
 		{
-			UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
+			UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: false);
+		}
+		else
+		{
+			ScheduleCutEditLivePreviewUpdate(forcePreviewSelected: true);
 		}
 	}
 
@@ -9604,7 +11426,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				if (seq != _cutEditPreviewSeq) return;
 				tempJpg = Path.Combine(Path.GetTempPath(), "CutEdit_Preview_" + Guid.NewGuid().ToString("N") + ".jpg");
 				string tStr = Math.Max(0.0, inSourceSec).ToString("0.00", CultureInfo.InvariantCulture);
-				string args = $"-hide_banner -y -ss {tStr} -noaccurate_seek -i {QuoteArg(activeSeg.SourcePath)} -frames:v 1 -q:v 2 {QuoteArg(tempJpg)}";
+				string args = $"-hide_banner -y -ss {tStr} -noaccurate_seek -i {QuoteArg(activeSeg.SourcePath)} -vf \"scale='min(1280,iw)':-2\" -frames:v 1 -q:v 3 {QuoteArg(tempJpg)}";
 
 				ProcessStartInfo psi = NewProcessInfo(ffmpeg, args);
 				using (Process proc = new Process())
@@ -9804,16 +11626,39 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		return result;
 	}
 
+	private void ScheduleCutEditLivePreviewUpdate(bool forcePreviewSelected = true)
+	{
+		_pendingForcePreviewSelected = forcePreviewSelected;
+		if (_cutEditPreviewDebounceTimer == null)
+		{
+			_cutEditPreviewDebounceTimer = new System.Windows.Forms.Timer { Interval = 24 };
+			_cutEditPreviewDebounceTimer.Tick += delegate
+			{
+				_cutEditPreviewDebounceTimer.Stop();
+				if (_cutEditIsPlaying)
+				{
+					UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: _pendingForcePreviewSelected);
+				}
+				else
+				{
+					if (_cutEditElementHost != null) _cutEditElementHost.Visible = false;
+					if (_cutEditPreviewBox != null)
+					{
+						_cutEditPreviewBox.Visible = true;
+						_cutEditPreviewBox.BringToFront();
+					}
+					UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: _pendingForcePreviewSelected);
+				}
+			};
+		}
+		_cutEditPreviewDebounceTimer.Stop();
+		_cutEditPreviewDebounceTimer.Start();
+	}
+
 	private void TriggerTitleLivePreview()
 	{
-		if (_cutEditElementHost != null) _cutEditElementHost.Visible = false;
-		if (_cutEditPreviewBox != null)
-		{
-			_cutEditPreviewBox.Visible = true;
-			_cutEditPreviewBox.BringToFront();
-		}
-		UpdateCutEditPreviewFrame(_cutEditCurrentPos, withTitlePreview: true);
 		_cutEditTimelineCanvas?.Invalidate();
+		ScheduleCutEditLivePreviewUpdate(forcePreviewSelected: true);
 	}
 
 	private void SetTitleFontSize(int sizePx)
@@ -9839,19 +11684,23 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			{
 				Name = "片头标题包装",
 				Type = OverlayItemType.Text,
+				Enabled = false,
 				StartSeconds = 0.0,
-				Duration = 5.0,
+				Duration = 3.5,
 				TextContent = "CINEMATIC MOMENTS",
 				SubtitleContent = "A Story of Light and Motion",
-				PositionPreset = "居中偏下",
+				PositionPreset = "居中偏上",
 				FontSize = 52,
 				TextColorIndex = 0,
 				StrokeIndex = 0,
 				BannerBgIndex = 0,
-				IsTitleCard = false
+				IsTitleCard = false,
+				IsSubtitle = false
 			};
 			_cutEditOverlays.Add(defItem);
 			_selectedOverlay = defItem;
+			_selectedOverlayIds.Clear();
+			_selectedOverlayIds.Add(defItem.Id);
 		}
 	}
 
@@ -9867,6 +11716,32 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				var item = _cutEditOverlays[i];
 				_overlayItemCombo.Items.Add($"#{i + 1} {item.GetDisplayName()}");
 			}
+
+			if (_aiSubItemCombo != null)
+			{
+				_aiSubItemCombo.Items.Clear();
+				_aiSubComboItems.Clear();
+				var subCandidates = _cutEditOverlays
+					.Where(o => o.IsSubtitleRole || o.IsAiCaption || string.Equals(o.TrackId, "T2", StringComparison.OrdinalIgnoreCase))
+					.OrderBy(o => o.StartSeconds)
+					.ThenBy(o => o.TrackId)
+					.ToList();
+				if (subCandidates.Count == 0)
+				{
+					subCandidates = _cutEditOverlays.Where(o => o.Type == OverlayItemType.Text).ToList();
+				}
+				for (int i = 0; i < subCandidates.Count; i++)
+				{
+					var sc = subCandidates[i];
+					_aiSubComboItems.Add(sc);
+					string trkBadge = string.Equals(sc.TrackId, "T2", StringComparison.OrdinalIgnoreCase) ? "🌐T2中文" : "💬T1外文";
+					string confTag = sc.LowConfidence ? "⚠️" : "";
+					string previewTxt = string.IsNullOrWhiteSpace(sc.TextContent) ? sc.Name : sc.TextContent.Replace("\r", " ").Replace("\n", " ");
+					if (previewTxt.Length > 22) previewTxt = previewTxt.Substring(0, 22) + "...";
+					_aiSubItemCombo.Items.Add($"{confTag}[{trkBadge}] #{i + 1} ({FormatDuration(sc.StartSeconds)}) {previewTxt}");
+				}
+			}
+
 			if (selectItem != null && _cutEditOverlays.Contains(selectItem))
 			{
 				_selectedOverlay = selectItem;
@@ -9878,10 +11753,26 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 			if (_selectedOverlay != null)
 			{
+				if (_selectedOverlayIds.Count == 0)
+				{
+					_selectedOverlayIds.Add(_selectedOverlay.Id);
+				}
 				int idx = _cutEditOverlays.IndexOf(_selectedOverlay);
 				if (idx >= 0 && idx < _overlayItemCombo.Items.Count)
 				{
 					_overlayItemCombo.SelectedIndex = idx;
+				}
+				if (_aiSubItemCombo != null)
+				{
+					int subIdx = _aiSubComboItems.IndexOf(_selectedOverlay);
+					if (subIdx >= 0 && subIdx < _aiSubItemCombo.Items.Count)
+					{
+						_aiSubItemCombo.SelectedIndex = subIdx;
+					}
+					else if (_aiSubItemCombo.Items.Count > 0 && _aiSubItemCombo.SelectedIndex < 0)
+					{
+						_aiSubItemCombo.SelectedIndex = 0;
+					}
 				}
 			}
 		}
@@ -9893,6 +11784,39 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		_cutEditTimelineCanvas?.Invalidate();
 		TriggerTitleLivePreview();
 		UpdateDeliverSummary();
+	}
+
+	private void UpdateSelectedOverlayComboText()
+	{
+		if (_selectedOverlay == null) return;
+		_updatingOverlayInspector = true;
+		try
+		{
+			if (_overlayItemCombo != null)
+			{
+				int idx = _cutEditOverlays.IndexOf(_selectedOverlay);
+				if (idx >= 0 && idx < _overlayItemCombo.Items.Count)
+				{
+					_overlayItemCombo.Items[idx] = $"#{idx + 1} {_selectedOverlay.GetDisplayName()}";
+				}
+			}
+			if (_aiSubItemCombo != null)
+			{
+				int subIdx = _aiSubComboItems.IndexOf(_selectedOverlay);
+				if (subIdx >= 0 && subIdx < _aiSubItemCombo.Items.Count)
+				{
+					string trkBadge = string.Equals(_selectedOverlay.TrackId, "T2", StringComparison.OrdinalIgnoreCase) ? "🌐T2中文" : "💬T1外文";
+					string confTag = _selectedOverlay.LowConfidence ? "⚠️" : "";
+					string previewTxt = string.IsNullOrWhiteSpace(_selectedOverlay.TextContent) ? _selectedOverlay.Name : _selectedOverlay.TextContent.Replace("\r", " ").Replace("\n", " ");
+					if (previewTxt.Length > 22) previewTxt = previewTxt.Substring(0, 22) + "...";
+					_aiSubItemCombo.Items[subIdx] = $"{confTag}[{trkBadge}] #{subIdx + 1} ({FormatDuration(_selectedOverlay.StartSeconds)}) {previewTxt}";
+				}
+			}
+		}
+		finally
+		{
+			_updatingOverlayInspector = false;
+		}
 	}
 
 	private void SyncSelectedOverlayToControls()
@@ -9917,7 +11841,20 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 			if (_overlayPositionCombo != null)
 			{
-				int pIdx = _overlayPositionCombo.FindString(_selectedOverlay.PositionPreset);
+				string preset = _selectedOverlay.PositionPreset ?? (_selectedOverlay.IsSubtitleRole ? "底部字幕区" : "居中偏上");
+				int pIdx = _overlayPositionCombo.FindString(preset);
+				if (pIdx < 0)
+				{
+					for (int i = 0; i < _overlayPositionCombo.Items.Count; i++)
+					{
+						string it = _overlayPositionCombo.Items[i]?.ToString() ?? "";
+						if (it.Contains(preset) || (preset.Contains("底部") && it.Contains("底部")) || (preset.Contains("顶部") && it.Contains("顶部")) || (preset.Contains("偏下") && it.Contains("偏下")) || (preset.Contains("偏上") && it.Contains("偏上")) || (preset.Contains("居中") && it.Contains("正中")))
+						{
+							pIdx = i;
+							break;
+						}
+					}
+				}
 				_overlayPositionCombo.SelectedIndex = (pIdx >= 0) ? pIdx : 0;
 			}
 			if (_overlayOffsetXNum != null) _overlayOffsetXNum.Value = Math.Max(-1920, Math.Min(1920, _selectedOverlay.OffsetX));
@@ -9937,8 +11874,87 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					_cutEditTitleStrokeCombo.SelectedIndex = _selectedOverlay.StrokeIndex;
 				if (_cutEditTitleBannerBgCombo != null && _selectedOverlay.BannerBgIndex < _cutEditTitleBannerBgCombo.Items.Count)
 					_cutEditTitleBannerBgCombo.SelectedIndex = _selectedOverlay.BannerBgIndex;
+				if (_cutEditWordAnimCombo != null && _selectedOverlay.WordAnimMode >= 0 && _selectedOverlay.WordAnimMode < _cutEditWordAnimCombo.Items.Count)
+					_cutEditWordAnimCombo.SelectedIndex = _selectedOverlay.WordAnimMode;
 				if (_cutEditTitleCardRadio != null) _cutEditTitleCardRadio.Checked = _selectedOverlay.IsTitleCard;
 				if (_cutEditTitleOverlayRadio != null) _cutEditTitleOverlayRadio.Checked = !_selectedOverlay.IsTitleCard;
+
+				// Sync Tab 3 (🤖 AI智剪) direct subtitle editor controls
+				if (_aiSubItemCombo != null)
+				{
+					int subIdx = _aiSubComboItems.IndexOf(_selectedOverlay);
+					if (subIdx >= 0 && subIdx < _aiSubItemCombo.Items.Count)
+					{
+						_aiSubItemCombo.SelectedIndex = subIdx;
+					}
+				}
+				if (_aiSubTextEditBox != null) _aiSubTextEditBox.Text = _selectedOverlay.TextContent;
+				if (_aiSubStartNum != null) _aiSubStartNum.Value = (decimal)Math.Max(0.0, Math.Min(3600.0, _selectedOverlay.StartSeconds));
+				if (_aiSubDurNum != null) _aiSubDurNum.Value = (decimal)Math.Max(0.2, Math.Min(600.0, _selectedOverlay.Duration));
+				if (_aiSubFontSizeSlider != null)
+				{
+					int clampedSz = Math.Max(_aiSubFontSizeSlider.Minimum, Math.Min(_aiSubFontSizeSlider.Maximum, _selectedOverlay.FontSize));
+					_aiSubFontSizeSlider.Value = clampedSz;
+					if (_aiSubFontSizeLabel != null) _aiSubFontSizeLabel.Text = $"字幕字号: {clampedSz} px";
+				}
+				if (_aiSubFontCombo != null)
+				{
+					string fam = _selectedOverlay.FontFamily;
+					if (string.IsNullOrWhiteSpace(fam))
+					{
+						_aiSubFontCombo.SelectedIndex = 0;
+					}
+					else
+					{
+						FontComboItem match = null;
+						foreach (var obj in _aiSubFontCombo.Items)
+						{
+							if (obj is FontComboItem fci && string.Equals(fci.FamilyName, fam, StringComparison.OrdinalIgnoreCase))
+							{
+								match = fci;
+								break;
+							}
+						}
+						if (match == null)
+						{
+							match = new FontComboItem($"{fam} (自定义)", fam);
+							_aiSubFontCombo.Items.Add(match);
+						}
+						_aiSubFontCombo.SelectedItem = match;
+					}
+				}
+				if (_aiSubCustomColorBtn != null)
+				{
+					if (!string.IsNullOrEmpty(_selectedOverlay.CustomTextColorHex))
+					{
+						try { _aiSubCustomColorBtn.BackColor = ColorTranslator.FromHtml(_selectedOverlay.CustomTextColorHex); }
+						catch { _aiSubCustomColorBtn.BackColor = Color.FromArgb(45, 55, 72); }
+					}
+					else
+					{
+						_aiSubCustomColorBtn.BackColor = Color.FromArgb(45, 55, 72);
+					}
+				}
+				if (_aiSubCustomStrokeColorBtn != null)
+				{
+					if (!string.IsNullOrEmpty(_selectedOverlay.CustomStrokeColorHex))
+					{
+						try { _aiSubCustomStrokeColorBtn.BackColor = ColorTranslator.FromHtml(_selectedOverlay.CustomStrokeColorHex); }
+						catch { _aiSubCustomStrokeColorBtn.BackColor = Color.FromArgb(45, 55, 72); }
+					}
+					else
+					{
+						_aiSubCustomStrokeColorBtn.BackColor = Color.FromArgb(45, 55, 72);
+					}
+				}
+				if (_aiSubColorCombo != null && _selectedOverlay.TextColorIndex >= 0 && _selectedOverlay.TextColorIndex < _aiSubColorCombo.Items.Count)
+					_aiSubColorCombo.SelectedIndex = _selectedOverlay.TextColorIndex;
+				if (_aiSubStrokeCombo != null && _selectedOverlay.StrokeIndex >= 0 && _selectedOverlay.StrokeIndex < _aiSubStrokeCombo.Items.Count)
+					_aiSubStrokeCombo.SelectedIndex = _selectedOverlay.StrokeIndex;
+				if (_aiSubBannerCombo != null && _selectedOverlay.BannerBgIndex >= 0 && _selectedOverlay.BannerBgIndex < _aiSubBannerCombo.Items.Count)
+				{
+					_aiSubBannerCombo.SelectedIndex = _selectedOverlay.BannerBgIndex;
+				}
 			}
 			else
 			{
@@ -9984,7 +12000,35 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			_selectedOverlay.TextColorIndex = _cutEditTitleTextColorCombo?.SelectedIndex ?? 0;
 			_selectedOverlay.StrokeIndex = _cutEditTitleStrokeCombo?.SelectedIndex ?? 0;
 			_selectedOverlay.BannerBgIndex = _cutEditTitleBannerBgCombo?.SelectedIndex ?? 0;
+			_selectedOverlay.WordAnimMode = _cutEditWordAnimCombo?.SelectedIndex ?? 0;
 			_selectedOverlay.IsTitleCard = _cutEditTitleCardRadio?.Checked == true;
+
+			// 智能批量同步：当勾选“修改字幕时自动同步到全部字幕”且当前操作的是字幕，或用户在轨道上多选了多个字幕时，一键同步位置与样式（绝不改动各句文字和时段，也绝不影响居中标题）
+			bool autoSyncAllSubs = (_syncAllSubtitlesCheckBox?.Checked == true) && _selectedOverlay.IsSubtitleRole;
+			bool hasMultiSelection = _selectedOverlayIds.Count > 1 && _selectedOverlayIds.Contains(_selectedOverlay.Id);
+
+			if (autoSyncAllSubs || hasMultiSelection)
+			{
+				string curTrk = string.IsNullOrEmpty(_selectedOverlay.TrackId) ? "T1" : _selectedOverlay.TrackId;
+				foreach (var other in _cutEditOverlays)
+				{
+					if (other == _selectedOverlay || other.Type != OverlayItemType.Text) continue;
+					string otherTrk = string.IsNullOrEmpty(other.TrackId) ? "T1" : other.TrackId;
+					bool shouldSync = (autoSyncAllSubs && other.IsSubtitleRole && string.Equals(curTrk, otherTrk, StringComparison.OrdinalIgnoreCase))
+					                  || (hasMultiSelection && _selectedOverlayIds.Contains(other.Id));
+					if (!shouldSync) continue;
+
+					other.PositionPreset = _selectedOverlay.PositionPreset;
+					other.OffsetX = _selectedOverlay.OffsetX;
+					other.OffsetY = _selectedOverlay.OffsetY;
+					other.FontSize = _selectedOverlay.FontSize;
+					other.TextColorIndex = _selectedOverlay.TextColorIndex;
+					other.StrokeIndex = _selectedOverlay.StrokeIndex;
+					other.BannerBgIndex = _selectedOverlay.BannerBgIndex;
+					other.WordAnimMode = _selectedOverlay.WordAnimMode;
+					other.IsTitleCard = _selectedOverlay.IsTitleCard;
+				}
+			}
 		}
 		else
 		{
@@ -9993,36 +12037,233 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			_selectedOverlay.OpacityPercent = _overlayImageOpacitySlider?.Value ?? 100;
 		}
 
-		if (_overlayItemCombo != null && _selectedOverlay != null)
-		{
-			int idx = _cutEditOverlays.IndexOf(_selectedOverlay);
-			if (idx >= 0 && idx < _overlayItemCombo.Items.Count)
-			{
-				_updatingOverlayInspector = true;
-				_overlayItemCombo.Items[idx] = $"#{idx + 1} {_selectedOverlay.GetDisplayName()}";
-				_updatingOverlayInspector = false;
-			}
-		}
+		UpdateSelectedOverlayComboText();
+		SyncSelectedOverlayToControls();
 
 		_cutEditTimelineCanvas?.Invalidate();
-		UpdateCutEditWpfOverlay(_selectedOverlay?.StartSeconds ?? _cutEditCurrentPos, forcePreviewSelected: true);
-		TriggerTitleLivePreview();
-		UpdateDeliverSummary();
-	}
-
-	private void SelectOverlayItem(CutOverlayItem item)
-	{
-		if (item == null || !_cutEditOverlays.Contains(item)) return;
-		_selectedOverlay = item;
-		int idx = _cutEditOverlays.IndexOf(item);
-		if (_overlayItemCombo != null && idx >= 0 && idx < _overlayItemCombo.Items.Count)
+		if (_cutEditIsPlaying)
 		{
-			_overlayItemCombo.SelectedIndex = idx;
+			UpdateCutEditWpfOverlay(_selectedOverlay?.StartSeconds ?? _cutEditCurrentPos, forcePreviewSelected: true);
 		}
 		else
 		{
-			SyncSelectedOverlayToControls();
+			ScheduleCutEditLivePreviewUpdate(forcePreviewSelected: true);
 		}
+		UpdateDeliverSummary();
+	}
+
+	private void SelectOverlayItem(CutOverlayItem item, bool keepMultiSelection = false)
+	{
+		if (item == null || !_cutEditOverlays.Contains(item)) return;
+		_selectedOverlay = item;
+		if (!keepMultiSelection)
+		{
+			_selectedOverlayIds.Clear();
+			_selectedOverlayIds.Add(item.Id);
+		}
+		else
+		{
+			_selectedOverlayIds.Add(item.Id);
+		}
+		int idx = _cutEditOverlays.IndexOf(item);
+		if (_overlayItemCombo != null && idx >= 0 && idx < _overlayItemCombo.Items.Count)
+		{
+			_updatingOverlayInspector = true;
+			_overlayItemCombo.SelectedIndex = idx;
+			_updatingOverlayInspector = false;
+		}
+		if (_aiSubItemCombo != null)
+		{
+			int subIdx = _aiSubComboItems.IndexOf(item);
+			if (subIdx >= 0 && subIdx < _aiSubItemCombo.Items.Count)
+			{
+				_updatingOverlayInspector = true;
+				_aiSubItemCombo.SelectedIndex = subIdx;
+				_updatingOverlayInspector = false;
+			}
+		}
+		SyncSelectedOverlayToControls();
+	}
+
+	internal void SelectAllSubtitlesOnTimeline()
+	{
+		var subs = _cutEditOverlays.Where(o => o.IsSubtitleRole).ToList();
+		if (subs.Count == 0)
+		{
+			subs = _cutEditOverlays.Where(o => o.Type == OverlayItemType.Text).ToList();
+		}
+		if (subs.Count == 0) return;
+
+		_selectedOverlayIds.Clear();
+		foreach (var s in subs) _selectedOverlayIds.Add(s.Id);
+
+		_cutEditSelectedSegmentIndex = -1;
+		_cutEditSelectedTrackId = "T1";
+		SelectOverlayItem(subs[0], keepMultiSelection: true);
+		_cutEditTimelineCanvas?.Invalidate();
+		if (_cutEditAiSmartStatusLabel != null)
+		{
+			_cutEditAiSmartStatusLabel.Text = $"☑️ 已全选轨道上共 {subs.Count} 段字幕！现在修改右侧任一字号/颜色/位置将同步生效。";
+		}
+	}
+
+	internal void ApplyCurrentStyleToAllSubtitles()
+	{
+		if (_selectedOverlay == null || _selectedOverlay.Type != OverlayItemType.Text) return;
+		var subs = _cutEditOverlays.Where(o => o.IsSubtitleRole && o != _selectedOverlay).ToList();
+		if (subs.Count == 0)
+		{
+			subs = _cutEditOverlays.Where(o => o.Type == OverlayItemType.Text && o != _selectedOverlay && !(o.Name != null && o.Name.Contains("标题"))).ToList();
+		}
+		PushCutEditUndoState("样式与位置应用到全部字幕");
+		_selectedOverlayIds.Clear();
+		_selectedOverlayIds.Add(_selectedOverlay.Id);
+		foreach (var other in subs)
+		{
+			other.PositionPreset = _selectedOverlay.PositionPreset;
+			other.OffsetX = _selectedOverlay.OffsetX;
+			other.OffsetY = _selectedOverlay.OffsetY;
+			other.FontSize = _selectedOverlay.FontSize;
+			other.FontFamily = _selectedOverlay.FontFamily;
+			other.CustomTextColorHex = _selectedOverlay.CustomTextColorHex;
+			other.CustomStrokeColorHex = _selectedOverlay.CustomStrokeColorHex;
+			other.TextColorIndex = _selectedOverlay.TextColorIndex;
+			other.StrokeIndex = _selectedOverlay.StrokeIndex;
+			other.BannerBgIndex = _selectedOverlay.BannerBgIndex;
+			other.WordAnimMode = _selectedOverlay.WordAnimMode;
+			other.IsTitleCard = _selectedOverlay.IsTitleCard;
+			_selectedOverlayIds.Add(other.Id);
+		}
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: true);
+		TriggerTitleLivePreview();
+	}
+
+	internal void QuickSetAllSubtitlesPosition(string targetPreset, int? bottomOffsetPx = null)
+	{
+		var subs = _cutEditOverlays.Where(o => o.IsSubtitleRole).ToList();
+		if (subs.Count == 0)
+		{
+			subs = _cutEditOverlays.Where(o => o.Type == OverlayItemType.Text && !(o.Name != null && o.Name.Contains("标题"))).ToList();
+		}
+		if (subs.Count == 0 && _selectedOverlay != null && _selectedOverlay.Type == OverlayItemType.Text)
+		{
+			subs.Add(_selectedOverlay);
+		}
+		if (subs.Count == 0) return;
+
+		PushCutEditUndoState($"全部字幕位置设为{targetPreset}");
+		if (bottomOffsetPx.HasValue)
+		{
+			_cutEditSubtitleBottomOffset = bottomOffsetPx.Value;
+			if (_cutEditSubtitlePosTrackBar != null)
+			{
+				_cutEditSubtitlePosTrackBar.Value = Math.Max(_cutEditSubtitlePosTrackBar.Minimum, Math.Min(_cutEditSubtitlePosTrackBar.Maximum, bottomOffsetPx.Value));
+			}
+			if (_cutEditSubtitlePosLabel != null)
+			{
+				_cutEditSubtitlePosLabel.Text = $"高度 距离底部: {_cutEditSubtitleBottomOffset} px";
+			}
+		}
+
+		_selectedOverlayIds.Clear();
+		foreach (var s in subs)
+		{
+			s.PositionPreset = targetPreset;
+			s.OffsetX = 0;
+			s.OffsetY = 0;
+			s.IsSubtitle = true;
+			_selectedOverlayIds.Add(s.Id);
+		}
+		SelectOverlayItem(subs[0], keepMultiSelection: true);
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateCutEditWpfOverlay(_cutEditCurrentPos, forcePreviewSelected: true);
+		TriggerTitleLivePreview();
+	}
+
+	internal void DeleteSelectedOverlays()
+	{
+		if (_cutEditOverlays.Count == 0) return;
+		var toRemove = _cutEditOverlays.Where(o => _selectedOverlayIds.Contains(o.Id) || o == _selectedOverlay).ToList();
+		if (toRemove.Count == 0) return;
+
+		PushCutEditUndoState("删除选中字幕/贴片");
+		foreach (var item in toRemove)
+		{
+			_cutEditOverlays.Remove(item);
+		}
+		_selectedOverlayIds.Clear();
+		if (_cutEditOverlays.Count == 0)
+		{
+			InitDefaultOverlays();
+			_cutEditOverlays[0].Enabled = false;
+		}
+		RefreshOverlayCombo(_cutEditOverlays.FirstOrDefault());
+	}
+
+	private void ShowOverlayTimelineContextMenu(Point pt, CutOverlayItem hitItem)
+	{
+		ContextMenuStrip menu = new ContextMenuStrip();
+		int subCount = _cutEditOverlays.Count(o => o.IsSubtitleRole);
+
+		var miSelectAll = new ToolStripMenuItem($"☑️ 全选轨道上所有字幕 (共 {subCount} 句) [Ctrl+A]");
+		miSelectAll.Click += delegate { SelectAllSubtitlesOnTimeline(); };
+		menu.Items.Add(miSelectAll);
+
+		var miApplyAll = new ToolStripMenuItem("✨ 将当前字幕的【位置+字号+颜色+花字】应用到全部字幕");
+		miApplyAll.Click += delegate { ApplyCurrentStyleToAllSubtitles(); };
+		menu.Items.Add(miApplyAll);
+
+		menu.Items.Add(new ToolStripSeparator());
+
+		var miBottom = new ToolStripMenuItem("⬇ 一键将全部字幕移至【影片底部安全区】(防挡脸推荐)");
+		miBottom.Click += delegate { QuickSetAllSubtitlesPosition("底部字幕区", 120); };
+		menu.Items.Add(miBottom);
+
+		var miTop = new ToolStripMenuItem("⬆ 一键将全部字幕移至【影片顶部安全区】");
+		miTop.Click += delegate { QuickSetAllSubtitlesPosition("顶部字幕区"); };
+		menu.Items.Add(miTop);
+
+		if (hitItem != null && hitItem.Type == OverlayItemType.Text)
+		{
+			menu.Items.Add(new ToolStripSeparator());
+			var miRole = new ToolStripMenuItem(hitItem.IsSubtitleRole ? "🎬 切换此项为【居中标题】角色 (不受字幕批量同步影响)" : "💬 切换此项为【视频字幕】角色 (参与字幕全选与同步)");
+			miRole.Click += delegate
+			{
+				PushCutEditUndoState("切换标题/字幕角色");
+				if (hitItem.IsSubtitleRole)
+				{
+					hitItem.IsSubtitle = false;
+					hitItem.IsAiCaption = false;
+					if (hitItem.Name != null && hitItem.Name.Contains("字幕")) hitItem.Name = hitItem.Name.Replace("字幕", "标题");
+					hitItem.PositionPreset = "居中偏上";
+				}
+				else
+				{
+					hitItem.IsSubtitle = true;
+					hitItem.PositionPreset = "底部字幕区";
+				}
+				RefreshOverlayCombo(hitItem);
+			};
+			menu.Items.Add(miRole);
+		}
+
+		menu.Items.Add(new ToolStripSeparator());
+		var miDel = new ToolStripMenuItem($"🗑️ 删除选中的字幕/贴片 ({Math.Max(1, _selectedOverlayIds.Count)} 项) [Delete]");
+		miDel.Click += delegate { DeleteSelectedOverlays(); };
+		menu.Items.Add(miDel);
+
+		var miClearT1 = new ToolStripMenuItem("🧹 一键清空【T1 字幕与贴片轨】全部内容");
+		miClearT1.ForeColor = Color.FromArgb(234, 88, 12);
+		miClearT1.Click += delegate { ClearSingleCutEditTrack("T1"); };
+		menu.Items.Add(miClearT1);
+
+		var miClearAll = new ToolStripMenuItem("🧨 一键清空所有轨道");
+		miClearAll.ForeColor = Color.FromArgb(220, 38, 38);
+		miClearAll.Click += delegate { ClearCutEditorProject(suppressPrompt: false); };
+		menu.Items.Add(miClearAll);
+
+		menu.Show(_cutEditTimelineCanvas, pt);
 	}
 
 	private void UpdateOverlayImageThumb(string path)
@@ -10071,7 +12312,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 	}
 
-	private void RenderSingleTextOverlay(Graphics g, CutOverlayItem item, int w, int h)
+	private void RenderSingleTextOverlay(Graphics g, CutOverlayItem item, int w, int h, double currentTimeSec = -1.0)
 	{
 		if (item == null) return;
 		string mainText = item.TextContent ?? "CINEMATIC MOMENTS";
@@ -10080,6 +12321,50 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		int colorIdx = item.TextColorIndex;
 		int strokeIdx = item.StrokeIndex;
 		int bannerIdx = item.BannerBgIndex;
+		float popScaleBoost = 1.0f;
+		string activeHighlightWord = null;
+
+		if (item.WordAnimMode > 0 && !string.IsNullOrWhiteSpace(mainText))
+		{
+			double evalTime = (currentTimeSec >= 0.0) ? currentTimeSec : (item.StartSeconds + item.Duration * 0.45);
+			var slices = SmartCutEngine.GetWordSlices(item, mainText, item.StartSeconds, item.Duration);
+			if (slices.Count > 0)
+			{
+				int activeIdx = 0;
+				for (int wi = 0; wi < slices.Count; wi++)
+				{
+					if (evalTime >= slices[wi].StartSec - 0.005)
+						activeIdx = wi;
+				}
+				var curSlice = slices[activeIdx];
+				if (item.WordAnimMode == 1)
+				{
+					// 🔥 逐词单蹦 (Word-by-Word Pop-up)
+					mainText = curSlice.Word;
+					double prog = (evalTime - curSlice.StartSec) / Math.Max(0.06, curSlice.Duration);
+					if (prog >= 0.0 && prog <= 0.40)
+					{
+						popScaleBoost = 1.0f + (float)(0.16 * (1.0 - Math.Abs(prog - 0.15) / 0.25));
+						popScaleBoost = Math.Max(1.0f, Math.Min(1.18f, popScaleBoost));
+					}
+				}
+				else if (item.WordAnimMode == 2)
+				{
+					// ⌨️ 随音逐词追加 (Typewriter Accumulation)
+					string joinSep = mainText.Contains(' ') ? " " : "";
+					mainText = string.Join(joinSep, slices.Take(activeIdx + 1).Select(x => x.Word));
+				}
+				else if (item.WordAnimMode == 3)
+				{
+					// 🎤 逐词变色高亮 (Karaoke Highlight)
+					activeHighlightWord = curSlice.Word;
+					if (string.IsNullOrWhiteSpace(subText))
+					{
+						subText = $"🎤 {curSlice.Word}";
+					}
+				}
+			}
+		}
 
 		if (item.IsTitleCard || bannerIdx == 4)
 		{
@@ -10087,24 +12372,37 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 
 		float resScale = Math.Max(0.25f, (float)w / 1080f);
-		float chosenFontSize = fontSizeVal * resScale;
+		float chosenFontSize = fontSizeVal * resScale * popScaleBoost;
 
 		Color mainTextColor;
-		switch (colorIdx)
+		if (!string.IsNullOrEmpty(item.CustomTextColorHex))
 		{
-			case 1: mainTextColor = Color.FromArgb(253, 224, 71); break;
-			case 2: mainTextColor = Color.FromArgb(34, 211, 238); break;
-			case 3: mainTextColor = Color.FromArgb(239, 68, 68); break;
-			case 4: mainTextColor = Color.FromArgb(245, 158, 11); break;
-			case 5: mainTextColor = Color.FromArgb(132, 204, 22); break;
-			case 6: mainTextColor = Color.FromArgb(249, 115, 22); break;
-			case 7: mainTextColor = Color.FromArgb(244, 114, 182); break;
-			default: mainTextColor = Color.White; break;
+			try { mainTextColor = ColorTranslator.FromHtml(item.CustomTextColorHex); }
+			catch { mainTextColor = Color.White; }
+		}
+		else
+		{
+			switch (colorIdx)
+			{
+				case 1: mainTextColor = Color.FromArgb(253, 224, 71); break;
+				case 2: mainTextColor = Color.FromArgb(34, 211, 238); break;
+				case 3: mainTextColor = Color.FromArgb(239, 68, 68); break;
+				case 4: mainTextColor = Color.FromArgb(245, 158, 11); break;
+				case 5: mainTextColor = Color.FromArgb(132, 204, 22); break;
+				case 6: mainTextColor = Color.FromArgb(249, 115, 22); break;
+				case 7: mainTextColor = Color.FromArgb(244, 114, 182); break;
+				default: mainTextColor = Color.White; break;
+			}
 		}
 
 		float strokeWidth = 0f;
 		bool hasShadow = true;
 		Color strokeColor = Color.FromArgb(235, 10, 10, 14);
+		if (!string.IsNullOrEmpty(item.CustomStrokeColorHex))
+		{
+			try { strokeColor = ColorTranslator.FromHtml(item.CustomStrokeColorHex); }
+			catch { }
+		}
 		switch (strokeIdx)
 		{
 			case 0: strokeWidth = 8f * resScale; break;
@@ -10118,11 +12416,13 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		float effectiveFontSize = chosenFontSize;
 		List<string> mainLines = null;
 		Font fontMain = null;
+		string fontFam = string.IsNullOrWhiteSpace(item.FontFamily) ? "Microsoft YaHei UI" : item.FontFamily;
 
 		while (effectiveFontSize >= 20f * resScale)
 		{
 			fontMain?.Dispose();
-			fontMain = new Font("Microsoft YaHei UI", effectiveFontSize, FontStyle.Bold);
+			try { fontMain = new Font(fontFam, effectiveFontSize, FontStyle.Bold); }
+			catch { fontMain = new Font("Microsoft YaHei UI", effectiveFontSize, FontStyle.Bold); }
 			mainLines = WrapTextToBalancedLines(g, mainText, fontMain, maxTitleW);
 			if (mainLines.Count <= 3) break;
 			effectiveFontSize -= 2f * resScale;
@@ -10130,7 +12430,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 		if (fontMain == null)
 		{
-			fontMain = new Font("Microsoft YaHei UI", effectiveFontSize, FontStyle.Bold);
+			try { fontMain = new Font(fontFam, effectiveFontSize, FontStyle.Bold); }
+			catch { fontMain = new Font("Microsoft YaHei UI", effectiveFontSize, FontStyle.Bold); }
 			mainLines = WrapTextToBalancedLines(g, mainText, fontMain, maxTitleW);
 		}
 
@@ -10147,7 +12448,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			bool hasSub = !string.IsNullOrWhiteSpace(subText);
 			float subFontSize = Math.Max(11f * resScale, effectiveFontSize * 0.44f);
 			float subBlockHeight = 0f;
-			using (Font fontSub = new Font("Microsoft YaHei UI", subFontSize, FontStyle.Bold))
+			Font fontSub = null;
+			try { fontSub = new Font(fontFam, subFontSize, FontStyle.Bold); }
+			catch { fontSub = new Font("Microsoft YaHei UI", subFontSize, FontStyle.Bold); }
+			using (fontSub)
 			{
 				if (hasSub)
 				{
@@ -10169,16 +12473,36 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				}
 				maxLineWidth = Math.Min(w * 0.94f, maxLineWidth);
 
-				string pos = item.PositionPreset ?? "居中偏下";
+				string pos = item.PositionPreset ?? (item.IsSubtitleRole ? "底部字幕区" : "居中偏上");
 				float targetCenterX;
 				float targetCenterY;
+				float bottomOffsetScaled = Math.Max(20f * resScale, _cutEditSubtitleBottomOffset * ((float)h / 1080f));
 
-				if (pos.Contains("偏上"))
+				// 注意优先级：先判断“底部/偏下/顶部/偏上”，最后才判断“画面居中/正中”！彻底杜绝“居中偏下”误命中正中挡脸
+				if (pos.Contains("底部") || pos.Contains("居底"))
 				{
 					targetCenterX = w / 2f + item.OffsetX;
-					targetCenterY = h * 0.22f + item.OffsetY;
+					targetCenterY = h - bottomOffsetScaled - totalBlockH / 2f + item.OffsetY;
 				}
-				else if (pos.Contains("居中") || pos.Contains("中央"))
+				else if (pos.Contains("偏下"))
+				{
+					targetCenterX = w / 2f + item.OffsetX;
+					if (item.IsSubtitleRole)
+						targetCenterY = h - bottomOffsetScaled - totalBlockH / 2f + item.OffsetY;
+					else
+						targetCenterY = h * 0.82f + item.OffsetY;
+				}
+				else if (pos.Contains("顶部") || pos.Contains("居顶"))
+				{
+					targetCenterX = w / 2f + item.OffsetX;
+					targetCenterY = Math.Max(32f * resScale, h * 0.08f) + totalBlockH / 2f + item.OffsetY;
+				}
+				else if (pos.Contains("偏上"))
+				{
+					targetCenterX = w / 2f + item.OffsetX;
+					targetCenterY = h * 0.24f + item.OffsetY;
+				}
+				else if (pos.Contains("正中") || pos.Contains("居中") || pos.Contains("中央"))
 				{
 					targetCenterX = w / 2f + item.OffsetX;
 					targetCenterY = h * 0.50f + item.OffsetY;
@@ -10211,7 +12535,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				else
 				{
 					targetCenterX = w / 2f + item.OffsetX;
-					targetCenterY = h * 0.76f + item.OffsetY;
+					targetCenterY = h - bottomOffsetScaled - totalBlockH / 2f + item.OffsetY;
 				}
 
 				float blockTopY = targetCenterY - totalBlockH / 2f;
@@ -10373,13 +12697,14 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					float subY = blockTopY + mainBlockHeight + 10f * resScale;
 					SizeF subSz = g.MeasureString(subText, fontSub);
 
-					if (bannerIdx == 1 || colorIdx == 1)
+					if (bannerIdx == 1 || colorIdx == 1 || !string.IsNullOrEmpty(activeHighlightWord))
 					{
 						float pillW = Math.Min(w * 0.90f, subSz.Width + 36f * resScale);
 						float pillH = subSz.Height + 10f * resScale;
 						RectangleF pillRect = new RectangleF(targetCenterX - pillW / 2f, subY, pillW, pillH);
+						Color pillColor = !string.IsNullOrEmpty(activeHighlightWord) ? Color.FromArgb(14, 165, 233) : Color.FromArgb(220, 38, 38);
 						using (GraphicsPath pillPath = CreateRoundedRectanglePath(Rectangle.Round(pillRect), (int)(pillH / 2f)))
-						using (Brush pillBrush = new SolidBrush(Color.FromArgb(220, 38, 38)))
+						using (Brush pillBrush = new SolidBrush(pillColor))
 						{
 							g.FillPath(pillBrush, pillPath);
 						}
@@ -10486,10 +12811,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 			if (forcePreviewSelected && _selectedOverlay != null)
 			{
-				if (_selectedOverlay.Enabled)
+				if (_selectedOverlay.Enabled && IsOverlayTrackVisible(_selectedOverlay))
 				{
 					if (_selectedOverlay.Type == OverlayItemType.Text)
-						RenderSingleTextOverlay(g, _selectedOverlay, w, h);
+						RenderSingleTextOverlay(g, _selectedOverlay, w, h, timeSec);
 					else if (_selectedOverlay.Type == OverlayItemType.Image)
 						RenderSingleImageOverlay(g, _selectedOverlay, w, h);
 				}
@@ -10498,12 +12823,12 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 			foreach (var item in _cutEditOverlays)
 			{
-				if (!item.Enabled) continue;
+				if (!item.Enabled || !IsOverlayTrackVisible(item)) continue;
 				if (timeSec < item.StartSeconds || timeSec > (item.StartSeconds + item.Duration)) continue;
 
 				if (item.Type == OverlayItemType.Text)
 				{
-					RenderSingleTextOverlay(g, item, w, h);
+					RenderSingleTextOverlay(g, item, w, h, timeSec);
 				}
 				else if (item.Type == OverlayItemType.Image)
 				{
@@ -10536,25 +12861,1482 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		}
 
 		var kept = _cutEditSegments.Where(s => s.IsKept).ToList();
-		double totalKept = kept.Sum(s => s.Duration);
-		var activeOverlays = _cutEditOverlays.Where(o => o.Enabled).ToList();
+		var keptV = kept.Where(s => s.TrackId.StartsWith("V") || s.MediaType == "video" || s.MediaType == "image").ToList();
+		if (keptV.Count == 0) keptV = kept;
+		double totalKept = keptV.Sum(s => s.Duration);
+		var activeOverlays = _cutEditOverlays.Where(o => o.Enabled && IsOverlayTrackVisible(o)).ToList();
 		int txtCount = activeOverlays.Count(o => o.Type == OverlayItemType.Text);
+		int t2Count = activeOverlays.Count(o => string.Equals(o.TrackId, "T2", StringComparison.OrdinalIgnoreCase));
+		int wordAnimCount = activeOverlays.Count(o => o.Type == OverlayItemType.Text && o.WordAnimMode > 0);
 		int imgCount = activeOverlays.Count(o => o.Type == OverlayItemType.Image);
 		string overlayInfo = (activeOverlays.Count > 0)
-			? $"已启用 {activeOverlays.Count} 项图文包装 (文案: {txtCount} 条, 贴图/二维码: {imgCount} 张)"
+			? $"已启用 {activeOverlays.Count} 项包装 (字幕/标题: {txtCount} 条[含T2中文轨 {t2Count} 条, 逐词动效 {wordAnimCount} 条], 贴图: {imgCount} 张)"
 			: "未启用图文包装";
 		string audioInfo = _cutEditAudioMuted
 			? "A1 音频已静音 (不输出声音)"
-			: $"A1 声音正常 (音量 {_cutEditAudioVolume}%)";
+			: $"A1 音量 {_cutEditAudioVolume}% | 降噪:{(_cutEditDenoiseCheckBox?.Checked == true ? "开" : "关")} | 稳音:{(_cutEditLoudnormCheckBox?.Checked == true ? "开" : "关")} | 变声:{(_cutEditVoiceMorphCombo?.SelectedIndex > 0 ? _cutEditVoiceMorphCombo.Text : "原声")}";
+		string fxInfo = $"特效:{(_cutEditVisualEffectCombo?.SelectedIndex > 0 ? _cutEditVisualEffectCombo.Text : "无")} | 调色:{(_cutEditColorGradeCombo?.SelectedIndex > 0 ? _cutEditColorGradeCombo.Text : "原色")}";
 
 		_deliverProjectSummary.Text = $"当前待交付工程状态:\n" +
 			$"• 素材源: {Path.GetFileName(_cutEditSourcePath)} ({_cutEditWidth}x{_cutEditHeight})\n" +
-			$"• 剪辑分段: 共 {_cutEditSegments.Count} 段 (保留 {kept.Count} 段，已剔除 {_cutEditSegments.Count - kept.Count} 段)\n" +
+			$"• 剪辑分段: 视频轨保留 {keptV.Count} 段\n" +
 			$"• 预计成片时长: {FormatDuration(totalKept)}\n" +
-			$"• 图文与贴片: {overlayInfo}\n" +
-			$"• 音频轨道: {audioInfo}";
+			$"• 字幕与贴片: {overlayInfo}\n" +
+			$"• 音频与视效: {audioInfo} | {fxInfo}";
 		_deliverProjectSummary.ForeColor = _isDarkMode ? Color.White : Color.Black;
 		if (_deliverStartButton != null) _deliverStartButton.Enabled = kept.Count > 0;
+	}
+
+	private static string GetWordAnimBadge(int mode)
+	{
+		return mode switch
+		{
+			1 => "🔥 逐词单蹦 (Word-by-Word Pop-up)",
+			2 => "⌨️ 随音逐词追加 (打字机跟读)",
+			3 => "🎤 逐词变色高亮 (卡拉OK高亮)",
+			_ => "🎬 整句标准展示"
+		};
+	}
+
+	private string GetDefaultAiSubtitlePositionPreset()
+	{
+		int idx = _cutEditAiSubPosCombo?.SelectedIndex ?? 0;
+		return idx switch
+		{
+			1 => "顶部字幕区",
+			2 => "居中偏下",
+			_ => "底部字幕区"
+		};
+	}
+
+	private double GetCurrentSilencePadSeconds()
+	{
+		int idx = _cutEditSilencePadCombo?.SelectedIndex ?? 0;
+		return idx switch
+		{
+			1 => 0.26, // 0.26s 宽松留白
+			2 => 0.10, // 0.10s 紧凑留白
+			_ => 0.18  // 0.18s 自然留白 (推荐)
+		};
+	}
+
+	/// <summary>
+	/// 跨板块静默互助联动：从【智能字幕】板块一键将音视频与识别好的双语/逐词字幕送入【视频剪辑】工作台，全程无弹窗。
+	/// 若含中文翻译则自动建立独立的【T2 中文】轨道，与 T1 外文轨彻底分离。
+	/// </summary>
+	internal void ImportTranscribedMediaAndSubtitlesToCutEditor(string mediaPath, List<VideoBatchMerger.Transcriber.SubtitleSegment> segments, int subMode)
+	{
+		if (string.IsNullOrEmpty(mediaPath) || !File.Exists(mediaPath)) return;
+
+		SwitchToWorkspace(WorkspaceCutEdit);
+		AddCutEditMediaPoolPaths(new[] { mediaPath });
+		LoadVideoIntoCutEditor(mediaPath, clearExisting: true);
+
+		if (segments != null && segments.Count > 0)
+		{
+			_cutEditOverlays.RemoveAll(o => o.IsAiCaption || (o.Name == "片头标题包装" && !o.Enabled));
+			int wordMode = (_cutEditAiWordModeCombo != null)
+				? (_cutEditAiWordModeCombo.SelectedIndex switch { 0 => 1, 1 => 2, 2 => 3, _ => 0 })
+				: 1;
+			string subPosPreset = GetDefaultAiSubtitlePositionPreset();
+			bool hasBilingualT2 = false;
+
+			for (int i = 0; i < segments.Count; i++)
+			{
+				var seg = segments[i];
+				string mainTxt = seg.OriginalText ?? "";
+				string zhTrans = (seg.TranslatedText ?? "").Trim();
+				if (subMode == 1 && !string.IsNullOrWhiteSpace(zhTrans))
+				{
+					mainTxt = zhTrans;
+					zhTrans = "";
+				}
+				if (string.IsNullOrWhiteSpace(mainTxt)) continue;
+
+				double st = Math.Max(0.0, seg.StartTime.TotalSeconds);
+				double dur = Math.Max(0.35, (seg.EndTime - seg.StartTime).TotalSeconds);
+
+				var wordList = new List<OverlayWordTiming>();
+				if (seg.Words != null && seg.Words.Count > 0 && subMode != 1)
+				{
+					foreach (var w in seg.Words)
+					{
+						if (string.IsNullOrWhiteSpace(w.Text)) continue;
+						wordList.Add(new OverlayWordTiming
+						{
+							Word = w.Text.Trim(),
+							StartOffset = Math.Max(0.0, Math.Round(w.StartSec - st, 3)),
+							EndOffset = Math.Max(0.05, Math.Round(w.EndSec - st, 3))
+						});
+					}
+				}
+
+				_cutEditOverlays.Add(new CutOverlayItem
+				{
+					Name = $"AI字幕_{i + 1}",
+					TrackId = "T1",
+					Type = OverlayItemType.Text,
+					Enabled = true,
+					StartSeconds = Math.Round(st, 3),
+					Duration = Math.Round(dur, 3),
+					TextContent = mainTxt.Trim(),
+					SubtitleContent = "",
+					PositionPreset = subPosPreset,
+					FontSize = (wordMode == 1) ? 54 : 44,
+					TextColorIndex = 1, // 醒目柠檬黄
+					StrokeIndex = 0,    // 粗黑描边
+					BannerBgIndex = 8,  // 无底板纯大字+立体描边
+					WordAnimMode = wordMode,
+					WordTimings = wordList,
+					WordTimingsText = mainTxt.Trim(),
+					LowConfidence = seg.Confidence > 0.0 && seg.Confidence < 0.62,
+					IsAiCaption = true,
+					IsSubtitle = true
+				});
+
+				if (subMode == 0 && !string.IsNullOrWhiteSpace(zhTrans))
+				{
+					hasBilingualT2 = true;
+					_cutEditOverlays.Add(new CutOverlayItem
+					{
+						Name = $"中文字幕_{i + 1}",
+						TrackId = "T2",
+						Type = OverlayItemType.Text,
+						Enabled = true,
+						StartSeconds = Math.Round(st, 3),
+						Duration = Math.Round(dur, 3),
+						TextContent = zhTrans,
+						SubtitleContent = "",
+						PositionPreset = subPosPreset,
+						OffsetY = subPosPreset.Contains("顶部") ? 56 : -56,
+						FontSize = 36,
+						TextColorIndex = 0, // 纯白高对比度
+						StrokeIndex = 0,
+						BannerBgIndex = 8,
+						WordAnimMode = 0,
+						IsAiCaption = true,
+						IsSubtitle = true
+					});
+				}
+			}
+
+			if (hasBilingualT2)
+			{
+				EnsureT2SubtitleTrackExists();
+			}
+
+			RefreshOverlayCombo(_cutEditOverlays.FirstOrDefault(o => o.IsSubtitleRole) ?? _cutEditOverlays.FirstOrDefault());
+			if (_cutEditAiSmartStatusLabel != null)
+			{
+				_cutEditAiSmartStatusLabel.Text = hasBilingualT2
+					? $"✅ 已无缝导入 {segments.Count} 句外文字幕至【T1轨】+ 独立中文字幕至【T2轨】！"
+					: $"✅ 已从【智能字幕】无缝导入 {segments.Count} 句逐词对齐字幕（置于【{subPosPreset}】）！";
+			}
+		}
+	}
+
+	/// <summary>
+	/// ✨ 拖入素材一键 AI 智剪成片：按勾选自动执行【环境音降噪】→【智能切气口】→【非洲葡语/多语种 Large-v3 Turbo 逐词识别】→【口误切除与双语翻译(T2独立轨)】→【毫秒级对口型上轨】。
+	/// </summary>
+	private async Task RunAiSmartCaptionAndScriptAlignAsync()
+	{
+		if (_isAiSmartCutRunning) return;
+		string srcPath = _cutEditSourcePath;
+		var firstKept = _cutEditSegments.FirstOrDefault(s => s.IsKept && !string.IsNullOrEmpty(s.SourcePath) && File.Exists(s.SourcePath));
+		if (firstKept != null) srcPath = firstKept.SourcePath;
+
+		if (string.IsNullOrEmpty(srcPath) || !File.Exists(srcPath))
+		{
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "⚠ 请先将视频/音频素材拖入轨道或左侧媒体池！";
+			return;
+		}
+
+		_isAiSmartCutRunning = true;
+		if (_btnRunAiCaptionAlign != null)
+		{
+			_btnRunAiCaptionAlign.Enabled = false;
+			_btnRunAiCaptionAlign.Text = "⏳ AI 智剪全流程执行中... (请稍候)";
+		}
+		if (_cutEditAiSmartStatusLabel != null)
+		{
+			_cutEditAiSmartStatusLabel.ForeColor = Color.FromArgb(56, 189, 248);
+			_cutEditAiSmartStatusLabel.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Regular);
+			_cutEditAiSmartStatusLabel.Text = "⏳ [1/4] 正在启动 AI 智剪引擎并准备推理组件...";
+		}
+		try
+		{
+			if (_cutEditIsPlaying)
+			{
+				ToggleCutEditPlayPause();
+			}
+
+			PushCutEditUndoState("一键AI智剪成片");
+			string ffmpeg = FindFfmpeg();
+			using var runCts = new CancellationTokenSource();
+
+			// Step 1: Resolve & auto-prepare Whisper CLI and selected AI model (Large-v3 Turbo / Large-v3 / Small / Base)
+			string whisperCli = VideoBatchMerger.Transcriber.TranscribeEngine.FindWhisperCliPath();
+			if (string.IsNullOrEmpty(whisperCli) || !File.Exists(whisperCli))
+			{
+				if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "⏳ 正在自动配置 OpenAI Whisper 本地语音引擎...";
+				await VideoBatchMerger.Transcriber.TranscribeEngine.InstallCpuBuildAsync(msg => { }, runCts.Token);
+				whisperCli = VideoBatchMerger.Transcriber.TranscribeEngine.FindWhisperCliPath();
+			}
+
+			int modelIdx = _cutEditAiModelCombo?.SelectedIndex ?? 0;
+			string targetModelKey = modelIdx switch
+			{
+				0 => "turbo",
+				1 => "large",
+				2 => "small",
+				3 => "base",
+				_ => "auto"
+			};
+
+			string modelPath = (targetModelKey == "auto")
+				? VideoBatchMerger.Transcriber.TranscribeEngine.FindBestAvailableModelPath(out targetModelKey)
+				: VideoBatchMerger.Transcriber.TranscribeEngine.FindModelPathByKey(targetModelKey);
+
+			if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
+			{
+				string dlKey = (targetModelKey == "auto") ? "turbo" : targetModelKey;
+				if (_cutEditAiSmartStatusLabel != null)
+					_cutEditAiSmartStatusLabel.Text = $"⏳ 正在高速下载【{dlKey.ToUpperInvariant()}】高精多语种识别模型 (支持非洲葡语口音)...";
+
+				bool dlOk = await VideoBatchMerger.Transcriber.TranscribeEngine.DownloadModelAsync(
+					dlKey,
+					msg =>
+					{
+						if (IsHandleCreated && !string.IsNullOrWhiteSpace(msg))
+						{
+							BeginInvoke((MethodInvoker)delegate
+							{
+								if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "⏳ " + msg;
+							});
+						}
+					},
+					runCts.Token);
+
+				modelPath = VideoBatchMerger.Transcriber.TranscribeEngine.FindModelPathByKey(dlKey)
+					?? VideoBatchMerger.Transcriber.TranscribeEngine.FindBestAvailableModelPath(out _);
+
+				if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
+				{
+					await VideoBatchMerger.Transcriber.TranscribeEngine.DownloadModelAsync("base", msg => { }, runCts.Token);
+					modelPath = VideoBatchMerger.Transcriber.TranscribeEngine.FindBestAvailableModelPath(out _);
+				}
+			}
+
+			if (string.IsNullOrEmpty(whisperCli) || !File.Exists(whisperCli) || string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
+			{
+				if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "⚠ 未找到 Whisper 模型组件，请检查网络或先在【智能字幕】完成初始化。";
+				return;
+			}
+
+			// Step 2: Optional 1-click in-place audio denoise on timeline
+			bool doAutoDenoise = _cutEditAiAutoDenoiseCheckBox?.Checked == true;
+			int denoiseMode = doAutoDenoise ? GetCurrentAiDenoiseMode() : 0;
+			if (doAutoDenoise && denoiseMode > 0 && !string.IsNullOrEmpty(ffmpeg) && File.Exists(ffmpeg))
+			{
+				if (_cutEditAiSmartStatusLabel != null)
+					_cutEditAiSmartStatusLabel.Text = "🔇 (1/4) 正在滤除环境杂音/小孩哭闹/风雨声并提纯主播人声...";
+
+				if (string.IsNullOrEmpty(_cutEditOriginalRawSourcePath) || !File.Exists(_cutEditOriginalRawSourcePath))
+				{
+					_cutEditOriginalRawSourcePath = srcPath;
+				}
+
+				bool loudnorm = _cutEditLoudnormCheckBox?.Checked == true;
+				string denoisedPath = await SmartCutEngine.DenoiseMediaInPlaceAsync(srcPath, ffmpeg, denoiseMode, loudnorm);
+				if (!string.IsNullOrEmpty(denoisedPath) && File.Exists(denoisedPath) && GetMediaDuration(denoisedPath) > 0.5)
+				{
+					AddCutEditMediaPoolPaths(new[] { denoisedPath });
+					foreach (var seg in _cutEditSegments)
+					{
+						if (string.Equals(seg.SourcePath, srcPath, StringComparison.OrdinalIgnoreCase))
+						{
+							seg.SourcePath = denoisedPath;
+							if (seg.TrackId == "A1" && seg.Title != null && !seg.Title.Contains("[已降噪]"))
+								seg.Title = "🔇[已降噪] " + seg.Title;
+						}
+					}
+					if (string.Equals(_cutEditSourcePath, srcPath, StringComparison.OrdinalIgnoreCase))
+						_cutEditSourcePath = denoisedPath;
+					srcPath = denoisedPath;
+					RequestRealAudioWaveform(denoisedPath, Color.FromArgb(52, 211, 153));
+				}
+				else
+				{
+					try { if (!string.IsNullOrEmpty(denoisedPath) && File.Exists(denoisedPath)) File.Delete(denoisedPath); } catch { }
+				}
+			}
+
+			// Step 3: 先提取 16kHz WAV 并运行 Whisper 逐词高精识别 (人声语义优先原则)
+			// 彻底改变“盲切音量”的旧逻辑：先让 AI 模型听出所有人声单词的毫秒起止，再切停顿，绝不误切轻声经文与教义！
+			string langCode = (_cutEditAiLangCombo?.SelectedIndex ?? 0) switch
+			{
+				0 => "auto",  // 🌐 自动检测语种
+				1 => "pt-ao", // 🇦🇴 非洲葡萄牙语
+				2 => "pt",    // 🇧🇷 葡萄牙语
+				3 => "zh",    // 🇨🇳 中文普通话
+				4 => "en",    // 🇺🇸 英语
+				5 => "es",    // 🇪🇸 西班牙语
+				6 => "fr",    // 🇫🇷 法语
+				7 => "de",    // 🇩🇪 德语
+				8 => "ru",    // 🇷🇺 俄语
+				9 => "ja",    // 🇯🇵 日语
+				_ => "auto"
+			};
+
+			string stdScript = _cutEditStandardScriptText?.Text?.Trim() ?? "";
+
+			// 语种自动锁定：当语种为 auto 但提供了葡萄牙语文案时，自动锁定为 pt，防止静音杂音处幻听为丹麦/英语
+			if (langCode == "auto" && !string.IsNullOrWhiteSpace(stdScript))
+			{
+				string lowScript = stdScript.ToLowerInvariant();
+				if (lowScript.Contains("não") || lowScript.Contains("oração") || lowScript.Contains("senhor") || lowScript.Contains("deus") || lowScript.Contains("pai-nosso") || lowScript.Contains("primeiro") || lowScript.Contains("santificado"))
+				{
+					langCode = "pt";
+				}
+			}
+
+			if (_cutEditAiSmartStatusLabel != null)
+				_cutEditAiSmartStatusLabel.Text = "🎙️ (2/4) 正在提取 16kHz 高保真音频流并启动 AI 逐词毫秒听声...";
+
+			string wavPath = await VideoBatchMerger.Transcriber.TranscribeEngine.Extract16kWavAsync(srcPath, ffmpeg, msg => { }, runCts.Token);
+
+			List<VideoBatchMerger.Transcriber.SubtitleSegment> asrSegs;
+			try
+			{
+				string modelBadge = Path.GetFileNameWithoutExtension(modelPath);
+				if (_cutEditAiSmartStatusLabel != null)
+					_cutEditAiSmartStatusLabel.Text = $"🤖 (2/4) 正在使用【{modelBadge}】进行逐词毫秒级识别与语调捕获...";
+
+				asrSegs = await VideoBatchMerger.Transcriber.TranscribeEngine.TranscribeWithWordsAsync(
+					wavPath, whisperCli, modelPath, langCode, stdScript,
+					msg =>
+					{
+						if (IsHandleCreated && !string.IsNullOrWhiteSpace(msg) && (msg.Contains("错误") || msg.Contains("异常") || msg.Contains("重试") || msg.Contains("切换")))
+						{
+							try
+							{
+								BeginInvoke((MethodInvoker)delegate
+								{
+									if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "ℹ " + msg;
+								});
+							}
+							catch { }
+						}
+					},
+					runCts.Token,
+					pct =>
+					{
+						if (IsHandleCreated)
+						{
+							BeginInvoke((MethodInvoker)delegate
+							{
+								if (_cutEditAiSmartStatusLabel != null)
+									_cutEditAiSmartStatusLabel.Text = $"🤖 (2/4) Whisper 逐词高精识别中 ({pct}%)...";
+							});
+						}
+					});
+			}
+			finally
+			{
+				TryDelete(wavPath);
+			}
+
+			if (asrSegs == null || asrSegs.Count == 0)
+			{
+				if (_cutEditAiSmartStatusLabel != null)
+					_cutEditAiSmartStatusLabel.Text = "⚠ 音频中未检测到清晰人声对白（已检测为纯背景音/纯伴奏/静音素材）。如需转录其他语种，可在上方切换语种重试。";
+				return;
+			}
+			_lastAsrSegments = asrSegs.Select(s => new VideoBatchMerger.Transcriber.SubtitleSegment
+			{
+				Index = s.Index,
+				StartTime = s.StartTime,
+				EndTime = s.EndTime,
+				OriginalText = s.OriginalText,
+				TranslatedText = s.TranslatedText,
+				Confidence = s.Confidence,
+				Words = s.Words?.Select(w => new VideoBatchMerger.Transcriber.WordTiming { Text = w.Text, StartSec = w.StartSec, EndSec = w.EndSec, Prob = w.Prob }).ToList() ?? new List<VideoBatchMerger.Transcriber.WordTiming>()
+			}).ToList();
+
+			// Step 4: 黄金标准文案锚点对齐与去重
+			int alignMode = (_cutEditScriptConflictModeCombo?.SelectedIndex == 1) ? 0 : 1;
+			bool autoCutBadTakes = _cutEditAutoCutBadTakesCheckBox?.Checked == true;
+			int wordMode = (_cutEditAiWordModeCombo?.SelectedIndex ?? 0) switch { 0 => 1, 1 => 2, 2 => 3, _ => 0 };
+
+			string summaryMsg = $"✅ 一键智剪完成：共生成 {asrSegs.Count} 句逐词精准对口型字幕";
+			if (!string.IsNullOrWhiteSpace(stdScript))
+			{
+				if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "📐 (3/4) 正在与【标准文案】进行锚点比对、去重与同音纠错...";
+				var alignRes = SmartCutEngine.AlignWithStandardScript(asrSegs, stdScript, alignMode, autoCutBadTakes);
+				_lastBadTakeRanges = alignRes.BadTakeRangesToCut;
+				asrSegs = alignRes.KeptSegments;
+				summaryMsg = alignRes.SummaryText;
+			}
+			else
+			{
+				_lastBadTakeRanges = new List<(double, double, string)>();
+			}
+
+			// Step 5: 人声语义双保险切除 —— 将 Whisper 识别到的人声区间作为“最高豁免白名单”
+			// 彻底杜绝盲目切除：只要 Whisper 听到有人声（哪怕音量很小），绝对禁止被 FFmpeg 当成静音切断！
+			bool doAutoSilenceCut = _cutEditAiAutoSilenceCutCheckBox?.Checked == true;
+			double savedSilenceSec = 0.0;
+			double totalDur = GetMediaDuration(srcPath);
+			if (totalDur <= 0.5) totalDur = Math.Max(10.0, _cutEditDuration);
+			double padSec = GetCurrentSilencePadSeconds();
+
+			if ((doAutoSilenceCut || (autoCutBadTakes && _lastBadTakeRanges.Count > 0)) && !string.IsNullOrEmpty(ffmpeg) && File.Exists(ffmpeg))
+			{
+				if (_cutEditAiSmartStatusLabel != null)
+					_cutEditAiSmartStatusLabel.Text = "✂️ (4/4) 人声白名单护航切气口，闭合轨道并保留自然呼吸留白...";
+
+				double noiseDb = (_cutEditSilenceDbCombo?.SelectedIndex ?? 0) switch { 1 => -35.0, 2 => -48.0, _ => -42.0 };
+				double minSilenceSec = (_cutEditSilenceMinDurCombo?.SelectedIndex ?? 0) switch { 1 => 0.25, 2 => 0.50, 3 => 0.80, _ => 0.35 };
+
+				List<(double StartSec, double EndSec)> speechIntervals;
+				if (doAutoSilenceCut)
+				{
+					speechIntervals = await SmartCutEngine.DetectSpeechIntervalsAsync(srcPath, ffmpeg, totalDur, noiseDb, minSilenceSec, padSec, 0);
+				}
+				else
+				{
+					speechIntervals = new List<(double StartSec, double EndSec)> { (0.0, totalDur) };
+				}
+
+				// 【核心防误切装甲】强制将 Whisper 识别到的有效人声区间合并注入保留列表中
+				foreach (var seg in asrSegs)
+				{
+					double s0 = Math.Max(0.0, seg.StartTime.TotalSeconds - padSec);
+					double s1 = Math.Min(totalDur, seg.EndTime.TotalSeconds + padSec);
+					if (s1 > s0 + 0.10)
+					{
+						speechIntervals.Add((s0, s1));
+					}
+				}
+
+				// 合并所有重叠的人声区间
+				var mergedKept = new List<(double start, double end)>();
+				foreach (var iv in speechIntervals.OrderBy(x => x.StartSec))
+				{
+					if (mergedKept.Count == 0 || iv.StartSec > mergedKept[mergedKept.Count - 1].end + 0.05)
+					{
+						mergedKept.Add((iv.StartSec, iv.EndSec));
+					}
+					else
+					{
+						var last = mergedKept[mergedKept.Count - 1];
+						mergedKept[mergedKept.Count - 1] = (last.start, Math.Max(last.end, iv.EndSec));
+					}
+				}
+
+				// 扣除口误重念坏镜头 (带有 100ms 安全余音缓冲)
+				if (autoCutBadTakes && _lastBadTakeRanges.Count > 0)
+				{
+					var finalKept = new List<(double start, double end)>();
+					foreach (var mk in mergedKept)
+					{
+						double cur = mk.start;
+						foreach (var bad in _lastBadTakeRanges.OrderBy(b => b.StartSec))
+						{
+							double effBadStart = bad.StartSec + 0.10;
+							double effBadEnd = bad.EndSec - 0.10;
+							if (effBadEnd <= effBadStart + 0.22) continue;
+							if (effBadEnd <= cur || effBadStart >= mk.end) continue;
+							if (effBadStart > cur + 0.18) finalKept.Add((cur, effBadStart));
+							cur = Math.Max(cur, effBadEnd);
+						}
+						if (mk.end > cur + 0.18) finalKept.Add((cur, mk.end));
+					}
+					mergedKept = finalKept;
+				}
+
+				if (mergedKept.Count > 0 && !(mergedKept.Count == 1 && Math.Abs((mergedKept[0].end - mergedKept[0].start) - totalDur) < 0.25))
+				{
+					RebuildMainTrackFromIntervals(srcPath, mergedKept);
+					savedSilenceSec = Math.Max(0.0, totalDur - _cutEditDuration);
+					if (savedSilenceSec > 0.1)
+					{
+						summaryMsg += $"（已智能切掉 {savedSilenceSec:0.1}s 空白停顿，人声100%全保留）";
+					}
+				}
+			}
+
+			// Step 6: Optional bilingual Chinese translation (placed onto independent T2 track!)
+			bool translateToZh = _cutEditAiTranslateZhCheckBox?.Checked == true;
+			if (translateToZh && asrSegs.Count > 0)
+			{
+				if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "🌐 (4/4) 正在将外语字幕翻译为中文并生成独立【T2 中文】轨道...";
+				string srcLangForTrans = langCode.StartsWith("pt", StringComparison.OrdinalIgnoreCase) ? "pt" : langCode;
+				try
+				{
+					await VideoBatchMerger.Transcriber.TranscribeEngine.TranslateSegmentsAsync(asrSegs, srcLangForTrans, msg => { }, runCts.Token);
+				}
+				catch { }
+				EnsureT2SubtitleTrackExists();
+			}
+
+			// Step 7: Map every segment AND every word's exact [StartSec, EndSec] onto the post-cut timeline (NEVER dropping spoken lines!)
+			_cutEditOverlays.RemoveAll(o => o.IsAiCaption || (o.Name == "片头标题包装" && !o.Enabled));
+			string subPosPreset = GetDefaultAiSubtitlePositionPreset();
+			int addedCount = 0;
+			int addedZhCount = 0;
+			int lowConfCount = 0;
+
+			foreach (var seg in asrSegs)
+			{
+				if (string.IsNullOrWhiteSpace(seg.OriginalText)) continue;
+				double srcStart = seg.StartTime.TotalSeconds;
+				double srcEnd = seg.EndTime.TotalSeconds;
+
+				var mappedWords = new List<(string word, double tlStart, double tlEnd)>();
+				if (seg.Words != null && seg.Words.Count > 0)
+				{
+					foreach (var w in seg.Words)
+					{
+						if (string.IsNullOrWhiteSpace(w.Text)) continue;
+						double tlWStart = MapSourceTimeToTimelineTime(w.StartSec, out _);
+						double tlWEnd = MapSourceTimeToTimelineTime(w.EndSec, out _);
+						if (tlWEnd <= tlWStart + 0.03) tlWEnd = tlWStart + Math.Max(0.06, w.EndSec - w.StartSec);
+						mappedWords.Add((w.Text.Trim(), tlWStart, tlWEnd));
+					}
+				}
+
+				double tlStart;
+				double tlEnd;
+				if (mappedWords.Count > 0)
+				{
+					tlStart = mappedWords.First().tlStart;
+					tlEnd = Math.Max(tlStart + 0.30, mappedWords.Last().tlEnd);
+				}
+				else
+				{
+					tlStart = MapSourceTimeToTimelineTime(srcStart, out _);
+					tlEnd = MapSourceTimeToTimelineTime(srcEnd, out _);
+					if (tlEnd <= tlStart + 0.25) tlEnd = tlStart + Math.Max(0.35, srcEnd - srcStart);
+				}
+
+				if (_cutEditDuration > 0.2 && tlStart >= _cutEditDuration - 0.05)
+				{
+					tlStart = Math.Max(0.0, _cutEditDuration - 0.45);
+				}
+				double dur = Math.Max(0.30, tlEnd - tlStart);
+				var relWordList = new List<OverlayWordTiming>();
+				foreach (var mw in mappedWords)
+				{
+					relWordList.Add(new OverlayWordTiming
+					{
+						Word = mw.word,
+						StartOffset = Math.Max(0.0, Math.Round(mw.tlStart - tlStart, 3)),
+						EndOffset = Math.Max(0.04, Math.Round(mw.tlEnd - tlStart, 3))
+					});
+				}
+
+				bool isLowConf = seg.Confidence > 0.0 && seg.Confidence < 0.62;
+				if (isLowConf) lowConfCount++;
+
+				addedCount++;
+				string finalTxt = seg.OriginalText.Trim();
+				string zhTxt = (seg.TranslatedText ?? "").Trim();
+
+				// Add Primary Foreign/Spoken Subtitle on Track T1
+				_cutEditOverlays.Add(new CutOverlayItem
+				{
+					Name = $"AI字幕_{addedCount}",
+					TrackId = "T1",
+					Type = OverlayItemType.Text,
+					Enabled = true,
+					StartSeconds = Math.Round(tlStart, 3),
+					Duration = Math.Round(dur, 3),
+					TextContent = finalTxt,
+					SubtitleContent = "",
+					PositionPreset = subPosPreset,
+					FontSize = (wordMode == 1) ? 54 : 44,
+					TextColorIndex = 1, // 柠檬黄
+					StrokeIndex = 0,    // 粗黑描边
+					BannerBgIndex = 8,  // 无底板立体描边
+					WordAnimMode = wordMode,
+					WordTimings = relWordList,
+					WordTimingsText = finalTxt,
+					LowConfidence = isLowConf,
+					IsAiCaption = true,
+					IsSubtitle = true
+				});
+
+				// If bilingual Chinese is enabled, add Chinese translation as an independent item on Track T2!
+				if (translateToZh && !string.IsNullOrWhiteSpace(zhTxt))
+				{
+					addedZhCount++;
+					_cutEditOverlays.Add(new CutOverlayItem
+					{
+						Name = $"中文字幕_{addedCount}",
+						TrackId = "T2",
+						Type = OverlayItemType.Text,
+						Enabled = true,
+						StartSeconds = Math.Round(tlStart, 3),
+						Duration = Math.Round(dur, 3),
+						TextContent = zhTxt,
+						SubtitleContent = "",
+						PositionPreset = subPosPreset,
+						OffsetY = subPosPreset.Contains("顶部") ? 56 : -56,
+						FontSize = 36,
+						TextColorIndex = 0, // 纯白高对比度，与 T1 柠檬黄外文清晰区分
+						StrokeIndex = 0,
+						BannerBgIndex = 8,
+						WordAnimMode = 0,
+						IsAiCaption = true,
+						IsSubtitle = true
+					});
+				}
+			}
+
+			// Tighten any small overlaps between consecutive AI subtitles per track (T1 and T2 independently)
+			foreach (string tid in new[] { "T1", "T2" })
+			{
+				var trackAiList = _cutEditOverlays
+					.Where(o => o.IsAiCaption && o.Enabled && string.Equals(string.IsNullOrEmpty(o.TrackId) ? "T1" : o.TrackId, tid, StringComparison.OrdinalIgnoreCase))
+					.OrderBy(o => o.StartSeconds)
+					.ToList();
+				for (int i = 0; i < trackAiList.Count - 1; i++)
+				{
+					double endCur = trackAiList[i].StartSeconds + trackAiList[i].Duration;
+					if (endCur > trackAiList[i + 1].StartSeconds && trackAiList[i + 1].StartSeconds - trackAiList[i].StartSeconds >= 0.20)
+					{
+						trackAiList[i].Duration = Math.Round(trackAiList[i + 1].StartSeconds - trackAiList[i].StartSeconds, 3);
+					}
+				}
+			}
+
+			InitDefaultOverlays();
+			RefreshOverlayCombo(_cutEditOverlays.FirstOrDefault(o => o.IsSubtitleRole) ?? _cutEditOverlays.FirstOrDefault());
+			_lastActiveSegment = null;
+			SyncPlayerAtCurrentPos(forceReload: true);
+			_cutEditTimelineCanvas?.Invalidate();
+			UpdateDeliverSummary();
+
+			string totalDurStr = FormatDuration(_cutEditDuration);
+			string bannerMsg = $"🎉【AI 智剪已全部完成】\n✔ 共生成 {addedCount} 句毫秒级逐词对口型字幕 (全片总长 {totalDurStr})！";
+			if (addedZhCount > 0)
+			{
+				bannerMsg += $"\n✔ 已同步生成独立【T2 中文】双语字幕轨 {addedZhCount} 句！";
+			}
+			if (savedSilenceSec > 0.1)
+			{
+				bannerMsg += $"\n✔ 已自动切除 {savedSilenceSec:0.1}s 冗余气口停顿";
+			}
+			if (lowConfCount > 0)
+			{
+				bannerMsg += $"\n✔ 含 {lowConfCount} 句弱音/重口音已标 ⚠ (在下方4区即可直接点选核改)";
+			}
+			bannerMsg += "\n👉 下方【4. 字幕控制】可直接修改任意错字、字号、字色与描边。";
+
+			if (_cutEditAiSmartStatusLabel != null)
+			{
+				_cutEditAiSmartStatusLabel.Text = bannerMsg;
+				_cutEditAiSmartStatusLabel.ForeColor = Color.FromArgb(52, 211, 153);
+				_cutEditAiSmartStatusLabel.Font = new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold);
+			}
+			try { System.Media.SystemSounds.Asterisk.Play(); } catch { }
+		}
+		catch (Exception ex)
+		{
+			if (_cutEditAiSmartStatusLabel != null)
+			{
+				_cutEditAiSmartStatusLabel.Text = "⚠ AI 智剪未能完成: " + ex.Message;
+				_cutEditAiSmartStatusLabel.ForeColor = Color.FromArgb(248, 113, 113);
+				_cutEditAiSmartStatusLabel.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
+			}
+			try { System.Media.SystemSounds.Exclamation.Play(); } catch { }
+		}
+		finally
+		{
+			_isAiSmartCutRunning = false;
+			if (_btnRunAiCaptionAlign != null)
+			{
+				_btnRunAiCaptionAlign.Enabled = true;
+				_btnRunAiCaptionAlign.Text = "✨ 一键 AI 智剪成片 (降噪/切气口/对口型上字幕)";
+			}
+		}
+	}
+
+	internal QcInput BuildQcInputFromCurrentState(string standardScript = null)
+	{
+		QcInput input = new QcInput();
+		string src = _cutEditSourcePath;
+		input.SourceDuration = GetMediaDuration(src);
+		input.Script = standardScript ?? (_cutEditStandardScriptText?.Text?.Trim() ?? "");
+
+		var keptV = _cutEditSegments
+			.Where(s => s.IsKept && (s.TrackId == "V1" || s.MediaType == "video") && string.Equals(s.SourcePath, src, StringComparison.OrdinalIgnoreCase))
+			.OrderBy(s => s.TimelineStartSeconds)
+			.ToList();
+
+		if (keptV.Count == 0)
+		{
+			keptV = _cutEditSegments
+				.Where(s => s.IsKept && (s.TrackId.StartsWith("V") || s.MediaType == "video"))
+				.OrderBy(s => s.TimelineStartSeconds)
+				.ToList();
+		}
+
+		foreach (var s in keptV)
+		{
+			input.Kept.Add(new QcKeptPiece
+			{
+				SrcStart = s.StartSeconds,
+				SrcEnd = s.EndSeconds,
+				TimelineStart = s.TimelineStartSeconds
+			});
+		}
+
+		if (_lastAsrSegments != null && _lastAsrSegments.Count > 0)
+		{
+			input.Segments = _lastAsrSegments;
+		}
+		else
+		{
+			var subOverlays = _cutEditOverlays.Where(o => o.Enabled && (o.IsSubtitle || o.IsAiCaption || o.TrackId == "T1")).OrderBy(o => o.StartSeconds).ToList();
+			int idx = 1;
+			foreach (var o in subOverlays)
+			{
+				double sSec = o.StartSeconds;
+				double srcStart = MapTimelineTimeToSourceTime(sSec);
+				double srcEnd = MapTimelineTimeToSourceTime(sSec + o.Duration);
+				var seg = new VideoBatchMerger.Transcriber.SubtitleSegment
+				{
+					Index = idx++,
+					StartTime = TimeSpan.FromSeconds(srcStart),
+					EndTime = TimeSpan.FromSeconds(srcEnd),
+					OriginalText = o.TextContent ?? "",
+					TranslatedText = o.SubtitleContent ?? ""
+				};
+				if (o.WordTimings != null && o.WordTimings.Count > 0)
+				{
+					foreach (var wt in o.WordTimings)
+					{
+						double wStart = MapTimelineTimeToSourceTime(sSec + wt.StartOffset);
+						double wEnd = MapTimelineTimeToSourceTime(sSec + wt.EndOffset);
+						seg.Words.Add(new VideoBatchMerger.Transcriber.WordTiming
+						{
+							Text = wt.Word,
+							StartSec = wStart,
+							EndSec = wEnd
+						});
+					}
+				}
+				input.Segments.Add(seg);
+			}
+		}
+
+		if (_lastBadTakeRanges != null)
+		{
+			input.BadTakes = _lastBadTakeRanges;
+		}
+
+		return input;
+	}
+
+	private double MapTimelineTimeToSourceTime(double tlTimeSec)
+	{
+		var vSegs = _cutEditSegments.Where(s => s.IsKept && (s.TrackId.StartsWith("V") || s.MediaType == "video")).OrderBy(s => s.TimelineStartSeconds).ToList();
+		if (vSegs.Count == 0) return tlTimeSec;
+
+		foreach (var s in vSegs)
+		{
+			if (tlTimeSec >= s.TimelineStartSeconds - 0.05 && tlTimeSec <= s.TimelineStartSeconds + s.Duration + 0.05)
+			{
+				double offset = Math.Max(0.0, Math.Min(s.Duration, tlTimeSec - s.TimelineStartSeconds));
+				return s.StartSeconds + offset;
+			}
+		}
+		var first = vSegs.First();
+		if (tlTimeSec < first.TimelineStartSeconds) return first.StartSeconds;
+		var last = vSegs.Last();
+		return last.EndSeconds;
+	}
+
+	internal void RestoreCutIntervalToTimeline(double srcStart, double srcEnd, double timelineSeam)
+	{
+		if (string.IsNullOrEmpty(_cutEditSourcePath) || !File.Exists(_cutEditSourcePath)) return;
+		double dur = Math.Max(0.1, srcEnd - srcStart);
+
+		PushCutEditUndoState("质检恢复剪除片段");
+
+		// 1. Shift subsequent segments forward
+		foreach (var s in _cutEditSegments)
+		{
+			if (s.TimelineStartSeconds >= timelineSeam - 0.02)
+			{
+				s.TimelineStartSeconds = Math.Round(s.TimelineStartSeconds + dur, 3);
+			}
+		}
+
+		// 2. Shift subsequent overlays forward
+		foreach (var o in _cutEditOverlays)
+		{
+			if (o.StartSeconds >= timelineSeam - 0.02)
+			{
+				o.StartSeconds = Math.Round(o.StartSeconds + dur, 3);
+			}
+		}
+
+		// 3. Create restored video segment on V1
+		var vSeg = new CutSegment
+		{
+			Id = Guid.NewGuid().ToString("N"),
+			SourcePath = _cutEditSourcePath,
+			StartSeconds = Math.Round(srcStart, 3),
+			EndSeconds = Math.Round(srcEnd, 3),
+			TimelineStartSeconds = Math.Round(timelineSeam, 3),
+			IsKept = true,
+			TrackId = "V1",
+			MediaType = "video",
+			Title = $"已恢复片段 ({dur:0.1}s)"
+		};
+
+		// 4. Create restored audio segment on A1
+		var aSeg = new CutSegment
+		{
+			Id = Guid.NewGuid().ToString("N"),
+			SourcePath = _cutEditSourcePath,
+			StartSeconds = Math.Round(srcStart, 3),
+			EndSeconds = Math.Round(srcEnd, 3),
+			TimelineStartSeconds = Math.Round(timelineSeam, 3),
+			IsKept = true,
+			TrackId = "A1",
+			MediaType = "audio",
+			Title = $"已恢复原声 ({dur:0.1}s)",
+			VolumePercent = 100,
+			LinkedPartnerId = vSeg.Id
+		};
+		vSeg.LinkedPartnerId = aSeg.Id;
+
+		_cutEditSegments.Add(vSeg);
+		_cutEditSegments.Add(aSeg);
+
+		RecalculateTimelineTotalDuration();
+		RefreshCutEditSegmentList();
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateDeliverSummary();
+	}
+
+	public void OpenQcStudioForm()
+	{
+		if (string.IsNullOrEmpty(_cutEditSourcePath) || !File.Exists(_cutEditSourcePath))
+		{
+			MessageBox.Show(this, "尚未载入视频素材，请先在【🎬 视频剪辑】中载入素材！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			SwitchToWorkspace(WorkspaceCutEdit);
+			return;
+		}
+
+		var kept = _cutEditSegments.Where(s => s.IsKept).ToList();
+		if (kept.Count == 0)
+		{
+			MessageBox.Show(this, "当前时间线上所有分段均已被剔除，请至少保留一个分段再进行质检！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			return;
+		}
+
+		string lang = _cutEditAiLangCombo?.SelectedIndex switch
+		{
+			1 => "pt-ao",
+			2 => "pt",
+			3 => "zh",
+			4 => "en",
+			5 => "es",
+			6 => "fr",
+			7 => "de",
+			8 => "ru",
+			9 => "ja",
+			_ => "auto"
+		};
+
+		QcInput input = BuildQcInputFromCurrentState();
+		using (QcStudioForm form = new QcStudioForm(this, input, _cutEditSourcePath, lang))
+		{
+			form.ShowDialog(this);
+		}
+	}
+
+	private double MapSourceTimeToTimelineTime(double srcTimeSec, out bool isKept)
+	{
+		isKept = true;
+		// 优先以主视频轨道 V1 的精剪切片为基准对齐时间轴，严禁被 V2 辅助轨或未剪辑原片干扰
+		var vSegs = _cutEditSegments.Where(s => s.IsKept && s.TrackId == "V1").OrderBy(s => s.TimelineStartSeconds).ToList();
+		if (vSegs.Count == 0)
+		{
+			vSegs = _cutEditSegments.Where(s => s.IsKept && (s.TrackId.StartsWith("V") || s.MediaType == "video")).OrderBy(s => s.TimelineStartSeconds).ToList();
+		}
+		if (vSegs.Count == 0) return srcTimeSec;
+
+		foreach (var s in vSegs)
+		{
+			if (srcTimeSec >= s.StartSeconds - 0.15 && srcTimeSec <= s.EndSeconds + 0.15)
+			{
+				double clampedOffset = Math.Max(0.0, Math.Min(s.Duration, srcTimeSec - s.StartSeconds));
+				return s.TimelineStartSeconds + clampedOffset;
+			}
+		}
+
+		// If srcTimeSec falls inside a cut-out pause between two kept segments, snap smoothly to the boundary of the nearest kept segment!
+		isKept = false;
+		for (int i = 0; i < vSegs.Count; i++)
+		{
+			if (srcTimeSec < vSegs[i].StartSeconds)
+			{
+				return vSegs[i].TimelineStartSeconds;
+			}
+		}
+		var last = vSegs.Last();
+		return last.TimelineStartSeconds + last.Duration;
+	}
+
+	private void ApplyCutRangesToTimeline(List<(double startSec, double endSec, string reason)> badRanges)
+	{
+		if (badRanges == null || badRanges.Count == 0 || _cutEditSegments.Count == 0) return;
+
+		string mainSrc = _cutEditSourcePath;
+		double totalDur = GetMediaDuration(mainSrc);
+		if (totalDur <= 0.5) totalDur = Math.Max(10.0, _cutEditDuration);
+
+		// Build kept intervals by subtracting badRanges from existing kept video segments
+		var sortedBad = badRanges.OrderBy(r => r.startSec).ToList();
+		List<(double start, double end)> keptIntervals = new List<(double start, double end)>();
+
+		var existingKept = _cutEditSegments.Where(s => s.IsKept && (s.TrackId == "V1" || s.MediaType == "video")).OrderBy(s => s.TimelineStartSeconds).ToList();
+		if (existingKept.Count == 0)
+		{
+			existingKept.Add(new CutSegment { StartSeconds = 0, EndSeconds = totalDur, SourcePath = mainSrc });
+		}
+
+		foreach (var seg in existingKept)
+		{
+			double cur = seg.StartSeconds;
+			double segEnd = seg.EndSeconds;
+			foreach (var bad in sortedBad)
+			{
+				// 安全呼吸留白：切除区间两端各向内收缩 100ms（左右各留出 100ms 余音/起音缓冲），严禁把切刀砍在人声边缘吞字！
+				double padSec = 0.10;
+				double effBadStart = bad.startSec + padSec;
+				double effBadEnd = bad.endSec - padSec;
+
+				// 若扣除安全缓冲后，切除区间已不足 0.22 秒，则保留不切，保持人声自然连贯过渡
+				if (effBadEnd <= effBadStart + 0.22) continue;
+
+				if (effBadEnd <= cur || effBadStart >= segEnd) continue;
+				if (effBadStart > cur + 0.18)
+				{
+					keptIntervals.Add((cur, effBadStart));
+				}
+				cur = Math.Max(cur, effBadEnd);
+			}
+			if (segEnd > cur + 0.18)
+			{
+				keptIntervals.Add((cur, segEnd));
+			}
+		}
+
+		if (keptIntervals.Count == 0) return;
+
+		RebuildMainTrackFromIntervals(mainSrc, keptIntervals);
+	}
+
+	private void RebuildMainTrackFromIntervals(string srcPath, List<(double start, double end)> intervals)
+	{
+		if (intervals == null || intervals.Count == 0) return;
+
+		var otherTrackSegs = _cutEditSegments.Where(s => s.TrackId != "V1" && s.TrackId != "A1").ToList();
+		// 清理 V2 轨道上残留的相同主视频原片，避免未剪辑的长原片覆盖 V1 精剪切片导致口型错位
+		otherTrackSegs.RemoveAll(s => s.TrackId == "V2" && string.Equals(s.SourcePath, srcPath, StringComparison.OrdinalIgnoreCase));
+		_cutEditSegments.Clear();
+
+		double tlPos = 0.0;
+		for (int i = 0; i < intervals.Count; i++)
+		{
+			var iv = intervals[i];
+			double dur = iv.end - iv.start;
+			if (dur < 0.15) continue;
+
+			var vSeg = new CutSegment
+			{
+				Id = Guid.NewGuid().ToString("N"),
+				SourcePath = srcPath,
+				StartSeconds = Math.Round(iv.start, 3),
+				EndSeconds = Math.Round(iv.end, 3),
+				TimelineStartSeconds = Math.Round(tlPos, 3),
+				IsKept = true,
+				TrackId = "V1",
+				MediaType = "video",
+				Title = $"精剪片段 #{i + 1}"
+			};
+			var aSeg = new CutSegment
+			{
+				Id = Guid.NewGuid().ToString("N"),
+				SourcePath = srcPath,
+				StartSeconds = Math.Round(iv.start, 3),
+				EndSeconds = Math.Round(iv.end, 3),
+				TimelineStartSeconds = Math.Round(tlPos, 3),
+				IsKept = true,
+				TrackId = "A1",
+				MediaType = "audio",
+				Title = $"精剪原声 #{i + 1}",
+				VolumePercent = 100,
+				LinkedPartnerId = vSeg.Id
+			};
+			vSeg.LinkedPartnerId = aSeg.Id;
+			_cutEditSegments.Add(vSeg);
+			_cutEditSegments.Add(aSeg);
+			tlPos += dur;
+		}
+
+		_cutEditSegments.AddRange(otherTrackSegs);
+		_cutEditSelectedSegmentIndex = 0;
+		RecalculateTimelineTotalDuration();
+		RefreshCutEditSegmentList();
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateDeliverSummary();
+	}
+
+	private int GetCurrentAiDenoiseMode()
+	{
+		if (_cutEditAiDenoiseModeCombo == null)
+		{
+			return (_cutEditDenoiseCheckBox?.Checked == true) ? 2 : 0;
+		}
+		return _cutEditAiDenoiseModeCombo.SelectedIndex switch
+		{
+			0 => 2, // 🛡️ 强力人声提纯 (滤除小孩吵闹/风雨声/环境杂音 · 推荐)
+			1 => 1, // 🔇 智能标准降噪 (滤除室内空调/风扇/设备底噪)
+			2 => 3, // 🌬️ 室外抗风噪 + 电流麦净化
+			3 => 4, // 🍃 轻度自然降噪
+			_ => 0  // ⭕ 不开启降噪
+		};
+	}
+
+	/// <summary>
+	/// 🔊 一键对当前时间线素材执行深度人声提纯与环境噪音消除（滤除小孩声、风雨声、环境杂音），并直接替换 V1+A1 轨道供立即播放试听。
+	/// </summary>
+	private async Task RunAiDenoiseTimelineMediaAsync()
+	{
+		if (_isAiSmartCutRunning) return;
+		string srcPath = _cutEditSourcePath;
+		var firstKept = _cutEditSegments.FirstOrDefault(s => s.IsKept && !string.IsNullOrEmpty(s.SourcePath) && File.Exists(s.SourcePath));
+		if (firstKept != null) srcPath = firstKept.SourcePath;
+
+		if (string.IsNullOrEmpty(srcPath) || !File.Exists(srcPath))
+		{
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "⚠ 请先在左侧媒体池或时间线上载入需要降噪的素材！";
+			return;
+		}
+
+		string ffmpeg = FindFfmpeg();
+		if (string.IsNullOrEmpty(ffmpeg)) return;
+
+		int mode = GetCurrentAiDenoiseMode();
+		if (mode <= 0) mode = 2; // Default to strong vocal isolation when user clicks the denoise button explicitly
+		bool loudnorm = _cutEditLoudnormCheckBox?.Checked ?? true;
+
+		_isAiSmartCutRunning = true;
+		try
+		{
+			// Save raw original path before first denoise so user can always click "↺ 恢复原声"
+			if (string.IsNullOrEmpty(_cutEditOriginalRawSourcePath) || !File.Exists(_cutEditOriginalRawSourcePath))
+			{
+				if (srcPath.IndexOf("_denoised_", StringComparison.OrdinalIgnoreCase) < 0)
+				{
+					_cutEditOriginalRawSourcePath = srcPath;
+				}
+			}
+
+			// Always run denoise from the original raw source if available so switching modes doesn't over-filter
+			string inputForDenoise = (!string.IsNullOrEmpty(_cutEditOriginalRawSourcePath) && File.Exists(_cutEditOriginalRawSourcePath))
+				? _cutEditOriginalRawSourcePath
+				: srcPath;
+
+			string modeName = _cutEditAiDenoiseModeCombo?.SelectedItem?.ToString() ?? "强力人声提纯";
+			if (_cutEditAiSmartStatusLabel != null)
+			{
+				_cutEditAiSmartStatusLabel.Text = $"🔇 正在执行【{modeName}】（滤除环境杂音/小孩声/风雨声并提取主播人声），请稍候...";
+			}
+
+			if (_cutEditIsPlaying)
+			{
+				ToggleCutEditPlayPause();
+			}
+
+			string denoisedPath = await SmartCutEngine.DenoiseMediaInPlaceAsync(inputForDenoise, ffmpeg, mode, loudnorm);
+			if (string.IsNullOrEmpty(denoisedPath) || !File.Exists(denoisedPath))
+			{
+				if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "⚠ 降噪处理未能生成有效文件，请确认素材包含有效音轨。";
+				return;
+			}
+
+			PushCutEditUndoState("一键环境音降噪净化");
+
+			AddCutEditMediaPoolPaths(new[] { denoisedPath });
+			foreach (var seg in _cutEditSegments)
+			{
+				if (string.Equals(seg.SourcePath, srcPath, StringComparison.OrdinalIgnoreCase) ||
+				    string.Equals(seg.SourcePath, inputForDenoise, StringComparison.OrdinalIgnoreCase))
+				{
+					seg.SourcePath = denoisedPath;
+					if (seg.TrackId == "A1" && seg.Title != null && !seg.Title.Contains("[已降噪]"))
+					{
+						seg.Title = "🔇[已降噪] " + seg.Title;
+					}
+				}
+			}
+			_cutEditSourcePath = denoisedPath;
+
+			if (_cutEditDenoiseCheckBox != null) _cutEditDenoiseCheckBox.Checked = true;
+			if (_cutEditAiAutoDenoiseCheckBox != null) _cutEditAiAutoDenoiseCheckBox.Checked = true;
+
+			// Force WPF MediaElement to unload the old cached stream and reload the newly denoised stream immediately
+			_lastActiveSegment = null;
+			if (_cutEditMediaElement != null)
+			{
+				_cutEditMediaElement.Stop();
+				_cutEditMediaElement.Source = null;
+			}
+			RequestRealAudioWaveform(denoisedPath, Color.FromArgb(52, 211, 153));
+			SyncPlayerAtCurrentPos(forceReload: true);
+			_cutEditTimelineCanvas?.Invalidate();
+			UpdateDeliverSummary();
+
+			if (_cutEditAiSmartStatusLabel != null)
+			{
+				_cutEditAiSmartStatusLabel.Text = $"✅ 人声提纯降噪完成！已替换为【{Path.GetFileName(denoisedPath)}】，现在点击 ▶ 播放即可试听滤除杂音后的纯净人声！";
+			}
+		}
+		catch (Exception ex)
+		{
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "⚠ 降噪异常: " + ex.Message;
+		}
+		finally
+		{
+			_isAiSmartCutRunning = false;
+		}
+	}
+
+	private void RestoreOriginalRawAudioOnTimeline()
+	{
+		if (string.IsNullOrEmpty(_cutEditOriginalRawSourcePath) || !File.Exists(_cutEditOriginalRawSourcePath))
+		{
+			if (_cutEditAiSmartStatusLabel != null)
+			{
+				_cutEditAiSmartStatusLabel.Text = "ℹ️ 当前轨道已经是原始未降噪素材。";
+			}
+			return;
+		}
+
+		PushCutEditUndoState("恢复原始未降噪音频");
+		foreach (var seg in _cutEditSegments)
+		{
+			if (seg.TrackId == "V1" || seg.TrackId == "A1")
+			{
+				seg.SourcePath = _cutEditOriginalRawSourcePath;
+				if (seg.Title != null)
+				{
+					seg.Title = seg.Title.Replace("🔇[已降噪] ", "");
+				}
+			}
+		}
+		_cutEditSourcePath = _cutEditOriginalRawSourcePath;
+		if (_cutEditDenoiseCheckBox != null) _cutEditDenoiseCheckBox.Checked = false;
+
+		_lastActiveSegment = null;
+		if (_cutEditMediaElement != null)
+		{
+			_cutEditMediaElement.Stop();
+			_cutEditMediaElement.Source = null;
+		}
+		RequestRealAudioWaveform(_cutEditOriginalRawSourcePath, Color.FromArgb(34, 197, 94));
+		SyncPlayerAtCurrentPos(forceReload: true);
+		_cutEditTimelineCanvas?.Invalidate();
+		UpdateDeliverSummary();
+
+		if (_cutEditAiSmartStatusLabel != null)
+		{
+			_cutEditAiSmartStatusLabel.Text = "↺ 已恢复为原始未降噪素材音轨！";
+		}
+	}
+
+	/// <summary>
+	/// ✂️ 一键智能切除静音/呼吸气口停顿并自动闭合时间线（带自然气口前后留白保护，防止切得太狠导致生硬吞字）。
+	/// </summary>
+	private async Task RunAutoCutSilencePausesAsync()
+	{
+		if (_isAiSmartCutRunning) return;
+		string srcPath = _cutEditSourcePath;
+		var firstKept = _cutEditSegments.FirstOrDefault(s => s.IsKept && !string.IsNullOrEmpty(s.SourcePath) && File.Exists(s.SourcePath));
+		if (firstKept != null) srcPath = firstKept.SourcePath;
+
+		if (string.IsNullOrEmpty(srcPath) || !File.Exists(srcPath))
+		{
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "⚠ 请先在时间线或媒体池中载入需要切气口的视频！";
+			return;
+		}
+
+		string ffmpeg = FindFfmpeg();
+		if (string.IsNullOrEmpty(ffmpeg)) return;
+
+		_isAiSmartCutRunning = true;
+		try
+		{
+			double noiseDb = (_cutEditSilenceDbCombo?.SelectedIndex ?? 0) switch { 1 => -35.0, 2 => -48.0, _ => -42.0 };
+			double minSilenceSec = (_cutEditSilenceMinDurCombo?.SelectedIndex ?? 0) switch { 1 => 0.25, 2 => 0.50, 3 => 0.80, _ => 0.35 };
+			double padSec = GetCurrentSilencePadSeconds();
+			int preDenoise = (_cutEditAiAutoDenoiseCheckBox?.Checked != false) ? GetCurrentAiDenoiseMode() : 0;
+
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "⏳ 正在滤除环境底噪并扫描全片声波，精准定位静音停顿并保留自然呼吸留白...";
+			double totalDur = GetMediaDuration(srcPath);
+			if (totalDur <= 0.5) totalDur = Math.Max(10.0, _cutEditDuration);
+
+			var speechIntervals = await SmartCutEngine.DetectSpeechIntervalsAsync(srcPath, ffmpeg, totalDur, noiseDb, minSilenceSec, padSec, preDenoise);
+			if (speechIntervals.Count <= 1 && speechIntervals.Count > 0 && Math.Abs((speechIntervals[0].EndSec - speechIntervals[0].StartSec) - totalDur) < 0.25)
+			{
+				if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "ℹ️ 当前视频节奏紧凑，未检测到明显静音停顿。";
+				return;
+			}
+
+			PushCutEditUndoState("一键智能切气口");
+			RebuildMainTrackFromIntervals(srcPath, speechIntervals);
+			_lastActiveSegment = null;
+			SyncPlayerAtCurrentPos(forceReload: true);
+
+			double newDur = _cutEditDuration;
+			double savedSec = Math.Max(0.0, totalDur - newDur);
+			if (_cutEditAiSmartStatusLabel != null)
+			{
+				_cutEditAiSmartStatusLabel.Text = $"✅ 智能切气口完成：共保留 {speechIntervals.Count} 段有声精华（前后自然留白 {padSec:0.00}s），已切掉 {savedSec:0.1} 秒停顿并无缝闭合轨道！";
+			}
+		}
+		catch (Exception ex)
+		{
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "⚠ 切气口失败: " + ex.Message;
+		}
+		finally
+		{
+			_isAiSmartCutRunning = false;
+		}
+	}
+
+	/// <summary>
+	/// 🌄 只有文案 -> 海外多语种 TTS 转成音频 -> 自动抽取风景视频素材铺满画面 + 丝滑转场 + 逐词动态字幕 一键成片！
+	/// </summary>
+	private async Task RunScriptToVoiceAndSceneryMontageAsync()
+	{
+		if (_isAiSmartCutRunning) return;
+		string scriptText = _cutEditTtsScriptText?.Text?.Trim() ?? "";
+		if (string.IsNullOrWhiteSpace(scriptText))
+		{
+			MessageBox.Show(this, "请先在【成片文案】框中输入或粘贴需要转换成音频的文案！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+			return;
+		}
+
+		// 1. Gather scenery videos from specified folder OR from left Media Pool
+		List<string> sceneryClips = new List<string>();
+		string sceneryFolder = _cutEditSceneryFolderText?.Text?.Trim() ?? "";
+		if (!string.IsNullOrEmpty(sceneryFolder) && Directory.Exists(sceneryFolder))
+		{
+			foreach (string ext in VideoExtensions)
+			{
+				sceneryClips.AddRange(Directory.GetFiles(sceneryFolder, "*" + ext, SearchOption.AllDirectories));
+			}
+		}
+		if (sceneryClips.Count == 0 && _cutEditMediaPool.Count > 0)
+		{
+			sceneryClips.AddRange(_cutEditMediaPool.Where(p => File.Exists(p) && VideoExtensions.Any(e => string.Equals(e, Path.GetExtension(p), StringComparison.OrdinalIgnoreCase))));
+		}
+		if (sceneryClips.Count == 0 && !string.IsNullOrEmpty(_cutEditSourcePath) && File.Exists(_cutEditSourcePath))
+		{
+			sceneryClips.Add(_cutEditSourcePath);
+		}
+
+		if (sceneryClips.Count == 0)
+		{
+			using (OpenFileDialog ofd = new OpenFileDialog())
+			{
+				ofd.Title = "请选择 1 个或多个风景视频素材用于铺满配音画面";
+				ofd.Multiselect = true;
+				ofd.Filter = "视频文件 (*.mp4;*.mov;*.mkv;*.avi;*.webm)|*.mp4;*.mov;*.mkv;*.avi;*.webm|所有文件 (*.*)|*.*";
+				if (ofd.ShowDialog(this) == DialogResult.OK && ofd.FileNames.Length > 0)
+				{
+					sceneryClips.AddRange(ofd.FileNames);
+					AddCutEditMediaPoolPaths(ofd.FileNames);
+				}
+				else
+				{
+					return;
+				}
+			}
+		}
+
+		string ffmpeg = FindFfmpeg();
+		if (string.IsNullOrEmpty(ffmpeg)) return;
+
+		_isAiSmartCutRunning = true;
+		try
+		{
+			int voiceIdx = _cutEditTtsVoiceCombo?.SelectedIndex ?? 0;
+			int rateVal = _cutEditTtsRateTrackBar?.Value ?? 0;
+			double speedRatio = Math.Max(0.65, Math.Min(1.50, 1.0 + rateVal * 0.08));
+
+			if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = "🎙️ 正在将文案合成为高保真语音并测算逐句时间戳...";
+			using var cts = new CancellationTokenSource();
+			var ttsRes = await SmartCutEngine.SynthesizeScriptToAudioAsync(
+				scriptText, voiceIdx, speedRatio, ffmpeg,
+				msg =>
+				{
+					if (IsHandleCreated)
+					{
+						BeginInvoke((MethodInvoker)delegate
+						{
+							if (_cutEditAiSmartStatusLabel != null) _cutEditAiSmartStatusLabel.Text = msg;
+						});
+					}
+				},
+				cts.Token);
+
+			if (string.IsNullOrEmpty(ttsRes.AudioWavPath) || !File.Exists(ttsRes.AudioWavPath) || ttsRes.TotalDurationSeconds <= 0.2)
+			{
+				MessageBox.Show(this, "语音合成未生成有效音频，请检查文案内容。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
+			}
+
+			// Persist synthesized voiceover WAV into a permanent project folder next to first scenery clip
+			string baseDir = Path.GetDirectoryName(sceneryClips[0]) ?? Path.GetTempPath();
+			string voiceoverPath = Path.Combine(baseDir, $"AI配音_{DateTime.Now:yyyyMMdd_HHmmss}.wav");
+			File.Copy(ttsRes.AudioWavPath, voiceoverPath, overwrite: true);
+			AddCutEditMediaPoolPaths(new[] { voiceoverPath });
+
+			PushCutEditUndoState("文案转配音+风景视频一键成片");
+			_cutEditSegments.Clear();
+			_cutEditOverlays.Clear();
+
+			// 2. Auto-assemble scenery video clips on V1 to match total voiceover duration
+			double targetTotalDur = ttsRes.TotalDurationSeconds;
+			double curTl = 0.0;
+			int clipCursor = 0;
+			int segIdx = 0;
+
+			while (curTl < targetTotalDur - 0.05)
+			{
+				string vPath = sceneryClips[clipCursor % sceneryClips.Count];
+				clipCursor++;
+				double vDur = GetMediaDuration(vPath);
+				if (vDur <= 0.4) vDur = 5.0;
+
+				// Take up to 4.5s~6.0s per scenery shot so visual pacing feels cinematic and dynamic
+				double takeDur = Math.Min(vDur, Math.Min(5.5, targetTotalDur - curTl));
+				if (takeDur < 0.2) break;
+
+				segIdx++;
+				var vSeg = new CutSegment
+				{
+					Id = Guid.NewGuid().ToString("N"),
+					SourcePath = vPath,
+					StartSeconds = 0.0,
+					EndSeconds = Math.Round(takeDur, 3),
+					TimelineStartSeconds = Math.Round(curTl, 3),
+					IsKept = true,
+					TrackId = "V1",
+					MediaType = "video",
+					Title = $"风景镜头 #{segIdx} ({Path.GetFileNameWithoutExtension(vPath)})",
+					TransitionInType = (segIdx > 1) ? "dissolve" : "none",
+					TransitionInDuration = 0.5,
+					TransitionOutType = "dissolve",
+					TransitionOutDuration = 0.5
+				};
+				_cutEditSegments.Add(vSeg);
+				curTl += takeDur;
+			}
+
+			// 3. Place synthesized TTS voiceover on A1 track (muting noisy original scenery audio automatically)
+			var a1VoiceSeg = new CutSegment
+			{
+				Id = Guid.NewGuid().ToString("N"),
+				SourcePath = voiceoverPath,
+				StartSeconds = 0.0,
+				EndSeconds = Math.Round(targetTotalDur, 3),
+				TimelineStartSeconds = 0.0,
+				IsKept = true,
+				TrackId = "A1",
+				MediaType = "audio",
+				Title = "🎙️ AI合成配音音轨",
+				VolumePercent = 100
+			};
+			_cutEditSegments.Add(a1VoiceSeg);
+			RequestRealAudioWaveform(voiceoverPath, Color.FromArgb(34, 197, 94));
+
+			// 4. Populate synchronized word-by-word dynamic subtitles on T1 track
+			int wordMode = (_cutEditAiWordModeCombo != null)
+				? (_cutEditAiWordModeCombo.SelectedIndex switch { 0 => 1, 1 => 2, 2 => 3, _ => 0 })
+				: 1;
+			string subPosPreset = GetDefaultAiSubtitlePositionPreset();
+
+			for (int i = 0; i < ttsRes.Segments.Count; i++)
+			{
+				var s = ttsRes.Segments[i];
+				double st = s.StartTime.TotalSeconds;
+				double dur = Math.Max(0.4, (s.EndTime - s.StartTime).TotalSeconds);
+				_cutEditOverlays.Add(new CutOverlayItem
+				{
+					Name = $"配音字幕_{i + 1}",
+					TrackId = "T1",
+					Type = OverlayItemType.Text,
+					StartSeconds = Math.Round(st, 2),
+					Duration = Math.Round(dur, 2),
+					TextContent = s.OriginalText.Trim(),
+					SubtitleContent = "",
+					PositionPreset = subPosPreset,
+					FontSize = (wordMode == 1) ? 54 : 44,
+					TextColorIndex = 1,
+					StrokeIndex = 0,
+					BannerBgIndex = 8,
+					WordAnimMode = wordMode,
+					IsAiCaption = true,
+					IsSubtitle = true
+				});
+			}
+
+			_cutEditSourcePath = sceneryClips[0];
+			var probeInfo = Probe(ffmpeg, _cutEditSourcePath);
+			if (probeInfo.Width > 0) _cutEditWidth = probeInfo.Width;
+			if (probeInfo.Height > 0) _cutEditHeight = probeInfo.Height;
+
+			if (_cutEditEmptyPlaceholder != null) _cutEditEmptyPlaceholder.Visible = false;
+			if (_cutEditPreviewBox != null)
+			{
+				_cutEditPreviewBox.Visible = true;
+				_cutEditPreviewBox.BringToFront();
+			}
+
+			RecalculateTimelineTotalDuration();
+			RefreshCutEditSegmentList();
+			RefreshOverlayCombo(_cutEditOverlays.FirstOrDefault());
+			SeekCutEditVideo(0.0);
+			UpdateDeliverSummary();
+
+			MessageBox.Show(this,
+				$"🎬【文案转音频 + 风景视频成片】已一键装配完成！\n\n" +
+				$"• 合成配音时长：{FormatDuration(targetTotalDur)} ({Path.GetFileName(voiceoverPath)})\n" +
+				$"• 自动铺设风景镜头：共 {segIdx} 段 (已自动静音原视频环境杂音并添加柔和叠化转场)\n" +
+				$"• 同步上轨逐词字幕：共 {ttsRes.Segments.Count} 句 ({GetWordAnimBadge(wordMode)})\n\n" +
+				$"您现在可以直接点击播放预览，或前往【🚀 导出交付】渲染成片！",
+				"一键成片装配完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+		}
+		catch (Exception ex)
+		{
+			MessageBox.Show(this, "文案转音频成片失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+		}
+		finally
+		{
+			_isAiSmartCutRunning = false;
+		}
 	}
 
 	private void StartDeliverExport()
@@ -10616,26 +14398,71 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 		ThreadPool.QueueUserWorkItem(delegate
 		{
-			string tempTitlePng = null;
-			List<string> tempOverlayPngs = new List<string>();
+			string tempDeliverDir = Path.Combine(Path.GetTempPath(), "DeliverStudio_" + Guid.NewGuid().ToString("N"));
 			try
 			{
-				List<CutOverlayItem> exportOverlays = new List<CutOverlayItem>();
+				Directory.CreateDirectory(tempDeliverDir);
+				List<CutOverlayItem> rawOverlays = new List<CutOverlayItem>();
 				int outResIndex = 0;
 				int qualityIndex = 1;
 				int fpsIndex = 0;
 				int audioBitrateIndex = 1;
 				bool audioMuted = _cutEditAudioMuted;
 				int audioVolume = _cutEditAudioVolume;
+				bool denoiseAudio = false;
+				int denoiseMode = 1;
+				bool loudnormAudio = true;
+				bool bgmDucking = true;
+				int voiceMorphIdx = 0;
+				int visualFxIdx = 0;
+				int colorGradeIdx = 0;
+				int chromaKeyIdx = 0;
 
 				Invoke((MethodInvoker)delegate
 				{
-					exportOverlays = _cutEditOverlays.Where(o => o.Enabled && o.Duration > 0.0).Select(o => o.Clone()).ToList();
+					rawOverlays = _cutEditOverlays.Where(o => o.Enabled && IsOverlayTrackVisible(o) && o.Duration > 0.0).Select(o => o.Clone()).ToList();
 					outResIndex = _deliverResolutionCombo?.SelectedIndex ?? 0;
 					qualityIndex = _deliverQualityCombo?.SelectedIndex ?? 1;
 					fpsIndex = _deliverFpsCombo?.SelectedIndex ?? 0;
 					audioBitrateIndex = _deliverAudioBitrateCombo?.SelectedIndex ?? 1;
+					denoiseMode = GetCurrentAiDenoiseMode();
+					bool alreadyDenoisedInPlace = kept.All(s => (s.SourcePath ?? "").IndexOf("_denoised_", StringComparison.OrdinalIgnoreCase) >= 0);
+					denoiseAudio = !alreadyDenoisedInPlace && ((_cutEditDenoiseCheckBox?.Checked == true) || (_cutEditAiAutoDenoiseCheckBox?.Checked == true && denoiseMode > 0));
+					loudnormAudio = _cutEditLoudnormCheckBox?.Checked == true;
+					bgmDucking = _cutEditBgmDuckingCheckBox?.Checked == true;
+					voiceMorphIdx = _cutEditVoiceMorphCombo?.SelectedIndex ?? 0;
+					visualFxIdx = _cutEditVisualEffectCombo?.SelectedIndex ?? 0;
+					colorGradeIdx = _cutEditColorGradeCombo?.SelectedIndex ?? 0;
+					chromaKeyIdx = _cutEditChromaKeyCombo?.SelectedIndex ?? 0;
 				});
+
+				// Expand word-by-word dynamic captions into timed slices while keeping parent reference so RenderSingleTextOverlay evaluates exact word slice!
+				List<CutOverlayItem> exportOverlays = new List<CutOverlayItem>();
+				List<CutOverlayItem> exportOverlayRenderRefs = new List<CutOverlayItem>();
+				List<double> exportOverlaySampleTimes = new List<double>();
+				foreach (var ol in rawOverlays)
+				{
+					if (ol.Type == OverlayItemType.Text && ol.WordAnimMode > 0)
+					{
+						var slices = SmartCutEngine.GetWordSlices(ol, ol.TextContent, ol.StartSeconds, ol.Duration);
+						if (slices.Count > 1)
+						{
+							foreach (var sl in slices)
+							{
+								var wClone = ol.Clone();
+								wClone.StartSeconds = sl.StartSec;
+								wClone.Duration = Math.Max(0.05, sl.Duration);
+								exportOverlays.Add(wClone);
+								exportOverlayRenderRefs.Add(ol);
+								exportOverlaySampleTimes.Add(sl.StartSec + sl.Duration * 0.45);
+							}
+							continue;
+						}
+					}
+					exportOverlays.Add(ol);
+					exportOverlayRenderRefs.Add(ol);
+					exportOverlaySampleTimes.Add(ol.StartSeconds + ol.Duration * 0.45);
+				}
 
 				int targetW = _cutEditWidth > 0 ? _cutEditWidth : 1920;
 				int targetH = _cutEditHeight > 0 ? _cutEditHeight : 1080;
@@ -10645,10 +14472,13 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				else if (outResIndex == 4) { targetW = 1080; targetH = 1920; }
 				else if (outResIndex == 5) { targetW = 1080; targetH = 1080; }
 
+				List<string> tempOverlayPngs = new List<string>();
 				for (int oi = 0; oi < exportOverlays.Count; oi++)
 				{
 					var olItem = exportOverlays[oi];
-					string tempOlPng = Path.Combine(Path.GetTempPath(), $"CutEdit_ExportOl_{oi}_" + Guid.NewGuid().ToString("N") + ".png");
+					var renderRef = (oi < exportOverlayRenderRefs.Count) ? exportOverlayRenderRefs[oi] : olItem;
+					double sampleTime = (oi < exportOverlaySampleTimes.Count) ? exportOverlaySampleTimes[oi] : olItem.StartSeconds;
+					string tempOlPng = Path.Combine(tempDeliverDir, $"ol_{oi}.png");
 					tempOverlayPngs.Add(tempOlPng);
 					using (Bitmap olBmp = new Bitmap(targetW, targetH, PixelFormat.Format32bppArgb))
 					{
@@ -10659,18 +14489,39 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 							g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 							g.InterpolationMode = InterpolationMode.HighQualityBicubic;
 
-							if (olItem.Type == OverlayItemType.Text)
+							if (renderRef.Type == OverlayItemType.Text)
 							{
-								RenderSingleTextOverlay(g, olItem, targetW, targetH);
+								RenderSingleTextOverlay(g, renderRef, targetW, targetH, sampleTime);
 							}
-							else if (olItem.Type == OverlayItemType.Image)
+							else if (renderRef.Type == OverlayItemType.Image)
 							{
-								RenderSingleImageOverlay(g, olItem, targetW, targetH);
+								RenderSingleImageOverlay(g, renderRef, targetW, targetH);
 							}
 						}
 						olBmp.Save(tempOlPng, ImageFormat.Png);
 					}
+
+					if (oi % 20 == 0 || oi == exportOverlays.Count - 1)
+					{
+						int renderProgress = (int)(10 + (20.0 * (oi + 1) / Math.Max(1, exportOverlays.Count)));
+						BeginInvoke((MethodInvoker)delegate
+						{
+							_deliverProgressBar.Value = renderProgress;
+							_deliverStatusLabel.Text = $"正在渲染视觉包装与动态字幕 ({oi + 1}/{exportOverlays.Count})...";
+						});
+					}
 				}
+
+				string blankPngPath = Path.Combine(tempDeliverDir, "blank.png");
+				using (Bitmap blankBmp = new Bitmap(targetW, targetH, PixelFormat.Format32bppArgb))
+				{
+					using (Graphics g = Graphics.FromImage(blankBmp))
+					{
+						g.Clear(Color.Transparent);
+					}
+					blankBmp.Save(blankPngPath, ImageFormat.Png);
+				}
+				string blankPngForward = Path.GetFullPath(blankPngPath).Replace("\r", "").Replace("\n", "").Replace('\\', '/').Replace("'", "'\\''");
 
 				List<string> inputs = new List<string>();
 				Dictionary<string, int> srcMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -10754,7 +14605,15 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					curV = "[v0]";
 				}
 
-				// 2. Process Audio Streams (A1 Voice + A2 BGM multi-track mixing)
+				// Apply CapCut-style Visual Effects, Cinema Color Grading & Chroma Key
+				string vFxChain = SmartCutEngine.BuildVisualEffectAndColorFilter(visualFxIdx, colorGradeIdx, chromaKeyIdx, targetW, targetH).TrimStart(',');
+				if (!string.IsNullOrEmpty(vFxChain))
+				{
+					fg.Append($"{curV}{vFxChain}[v_fx];");
+					curV = "[v_fx]";
+				}
+
+				// 2. Process Audio Streams (A1 Voice + A2 BGM multi-track mixing + Denoise/Loudnorm/VoiceMorph/BGM Ducking)
 				string curA = "[a_concat]";
 				if (outputAudio)
 				{
@@ -10800,6 +14659,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 								string st = s.StartSeconds.ToString("0.000", CultureInfo.InvariantCulture);
 								string et = s.EndSeconds.ToString("0.000", CultureInfo.InvariantCulture);
 								float bgmVol = ((float)_cutEditBgmVolume / 100.0f) * ((float)s.VolumePercent / 100.0f);
+								if (bgmDucking && a1Out != null) bgmVol *= 0.48f; // Auto-duck BGM under active speech
 								string volFilter = $",volume={bgmVol.ToString("0.00", CultureInfo.InvariantCulture)}";
 								fg.Append($"[{inIdx}:a]atrim=start={st}:end={et},asetpts=PTS-STARTPTS{volFilter}[a2_{m}];");
 							}
@@ -10863,29 +14723,96 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 							curA = "[a0]";
 						}
 					}
+
+					// Apply AI Voice Denoise, EBU R128 Loudnorm, and Voice Morphing
+					string aFxChain = SmartCutEngine.BuildAudioEnhancementFilter(denoiseAudio, loudnormAudio, voiceMorphIdx, denoiseMode).TrimStart(',');
+					if (!string.IsNullOrEmpty(aFxChain))
+					{
+						fg.Append($"{curA}{aFxChain}[a_fx];");
+						curA = "[a_fx]";
+					}
 				}
 
+				double totalDur = keptVideo.Sum(s => s.Duration);
 				string finalV = curV;
 				if (exportOverlays.Count > 0)
 				{
-					double timelineOffset = kept.Count > 0 ? kept.Min(s => s.TimelineStartSeconds) : 0.0;
+					double timelineOffset = keptVideo.Count > 0 ? keptVideo.Min(s => s.TimelineStartSeconds) : 0.0;
 
+					// Collect valid slices
+					var allSlices = new List<Tuple<double, double, string>>();
 					for (int oi = 0; oi < exportOverlays.Count; oi++)
 					{
 						var olItem = exportOverlays[oi];
 						string tempOlPng = (oi < tempOverlayPngs.Count) ? tempOverlayPngs[oi] : null;
 						if (string.IsNullOrEmpty(tempOlPng) || !File.Exists(tempOlPng)) continue;
 
-						int olInIdx = inputs.Count;
-						inputs.Add($"-loop 1 -i {QuoteArg(tempOlPng)}");
 						double shiftedStart = Math.Max(0.0, olItem.StartSeconds - timelineOffset);
-						double shiftedEnd = Math.Max(shiftedStart + 0.1, (olItem.StartSeconds + olItem.Duration) - timelineOffset);
-						string startStr = shiftedStart.ToString("0.00", CultureInfo.InvariantCulture);
-						string endStr = shiftedEnd.ToString("0.00", CultureInfo.InvariantCulture);
+						double shiftedEnd = Math.Max(shiftedStart + 0.04, (olItem.StartSeconds + olItem.Duration) - timelineOffset);
+						allSlices.Add(Tuple.Create(shiftedStart, shiftedEnd, tempOlPng));
+					}
 
-						fg.Append($"[{olInIdx}:v]format=rgba[ol_in_{oi}];");
-						fg.Append($"{curV}[ol_in_{oi}]overlay=0:0:shortest=1:enable='between(t,{startStr},{endStr})'[v_ol_{oi}];");
-						curV = $"[v_ol_{oi}]";
+					allSlices.Sort((a, b) => a.Item1.CompareTo(b.Item1));
+
+					List<List<Tuple<double, double, string>>> layers = new List<List<Tuple<double, double, string>>>();
+					foreach (var sl in allSlices)
+					{
+						bool placed = false;
+						foreach (var lyr in layers)
+						{
+							var last = lyr[lyr.Count - 1];
+							if (sl.Item1 >= last.Item2 - 0.005)
+							{
+								lyr.Add(sl);
+								placed = true;
+								break;
+							}
+						}
+						if (!placed)
+						{
+							layers.Add(new List<Tuple<double, double, string>> { sl });
+						}
+					}
+
+					for (int li = 0; li < layers.Count; li++)
+					{
+						var lyr = layers[li];
+						string concatListPath = Path.Combine(tempDeliverDir, $"concat_layer_{li}.txt");
+						StringBuilder sbConcat = new StringBuilder();
+						double curTime = 0.0;
+
+						for (int si = 0; si < lyr.Count; si++)
+						{
+							var sl = lyr[si];
+							if (sl.Item1 > curTime + 0.01)
+							{
+								double gap = sl.Item1 - curTime;
+								sbConcat.AppendLine($"file '{blankPngForward}'");
+								sbConcat.AppendLine($"duration {gap.ToString("0.000", CultureInfo.InvariantCulture)}");
+							}
+							double sliceDur = Math.Max(0.04, sl.Item2 - Math.Max(curTime, sl.Item1));
+							string slicePathForward = Path.GetFullPath(sl.Item3).Replace("\r", "").Replace("\n", "").Replace('\\', '/').Replace("'", "'\\''");
+							sbConcat.AppendLine($"file '{slicePathForward}'");
+							sbConcat.AppendLine($"duration {sliceDur.ToString("0.000", CultureInfo.InvariantCulture)}");
+							curTime = Math.Max(curTime, sl.Item2);
+						}
+
+						if (curTime < totalDur)
+						{
+							double remaining = totalDur - curTime;
+							sbConcat.AppendLine($"file '{blankPngForward}'");
+							sbConcat.AppendLine($"duration {remaining.ToString("0.000", CultureInfo.InvariantCulture)}");
+						}
+						sbConcat.AppendLine($"file '{blankPngForward}'");
+
+						File.WriteAllText(concatListPath, sbConcat.ToString(), new UTF8Encoding(false));
+
+						int lyrInIdx = inputs.Count;
+						inputs.Add($"-f concat -safe 0 -i {QuoteArg(concatListPath)}");
+
+						fg.Append($"[{lyrInIdx}:v]format=rgba[ol_lyr_{li}];");
+						fg.Append($"{curV}[ol_lyr_{li}]overlay=0:0:eof_action=pass[v_ol_{li}];");
+						curV = $"[v_ol_{li}]";
 					}
 					finalV = curV;
 				}
@@ -10911,7 +14838,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 				if (fg.Length > 0)
 				{
-					args.Append($"-filter_complex {QuoteArg(fg.ToString())} ");
+					string filterScriptPath = Path.Combine(tempDeliverDir, "filter_complex.txt");
+					File.WriteAllText(filterScriptPath, fg.ToString(), new UTF8Encoding(false));
+
+					args.Append($"-filter_complex_script {QuoteArg(filterScriptPath)} ");
 					args.Append($"-map {QuoteArg(finalV)} ");
 					if (outputAudio)
 					{
@@ -10953,7 +14883,6 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 					_deliverStatusLabel.Text = "正在进行专业级多轨道编码与封装交付...";
 				});
 
-				double totalDur = kept.Sum(s => s.Duration);
 				string lastError = "";
 				int exitCode = RunFfmpeg(ffmpeg, args.ToString(), totalDur, p =>
 				{
@@ -11015,14 +14944,14 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			}
 			finally
 			{
-				TryDelete(tempTitlePng);
-				if (tempOverlayPngs != null)
+				try
 				{
-					foreach (var f in tempOverlayPngs)
+					if (Directory.Exists(tempDeliverDir))
 					{
-						TryDelete(f);
+						Directory.Delete(tempDeliverDir, true);
 					}
 				}
+				catch { }
 			}
 		});
 	}
@@ -11107,7 +15036,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 	{
 		if (_deliverPreviewBox == null) return;
 
-		var kept = _cutEditSegments?.Where(s => s.IsKept).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
+		var kept = _cutEditSegments?.Where(s => s.IsKept && (s.TrackId.StartsWith("V") || s.MediaType == "video" || s.MediaType == "image")).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
+		if (kept.Count == 0) kept = _cutEditSegments?.Where(s => s.IsKept).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
 		bool hasContent = (kept.Count > 0) || (!string.IsNullOrEmpty(_cutEditSourcePath) && File.Exists(_cutEditSourcePath));
 
 		if (!hasContent)
@@ -11173,7 +15103,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 		if (_deliverPlayTimer == null)
 		{
-			_deliverPlayTimer = new System.Windows.Forms.Timer { Interval = 33 };
+			_deliverPlayTimer = new System.Windows.Forms.Timer { Interval = 25 };
 			_deliverPlayTimer.Tick += DeliverPlayTimer_Tick;
 		}
 		_deliverPlayTimer.Start();
@@ -11281,7 +15211,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	private void SyncDeliverPlaybackSegment()
 	{
-		var kept = _cutEditSegments?.Where(s => s.IsKept).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
+		var kept = _cutEditSegments?.Where(s => s.IsKept && (s.TrackId.StartsWith("V") || s.MediaType == "video" || s.MediaType == "image")).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
+		if (kept.Count == 0) kept = _cutEditSegments?.Where(s => s.IsKept).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
 		CutSegment activeSeg = null;
 		double tAccum = 0.0;
 		double segOffset = 0.0;
@@ -11322,9 +15253,17 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				}
 				double inSrcSec = (activeSeg != null ? activeSeg.StartSeconds : 0.0) + segOffset;
 				TimeSpan targetPos = TimeSpan.FromSeconds(Math.Max(0.0, inSrcSec));
-				if (Math.Abs((_deliverMediaElement.Position - targetPos).TotalSeconds) > 0.35)
+				double mediaSec = _deliverMediaElement.Position.TotalSeconds;
+				double diffSec = Math.Abs(mediaSec - targetPos.TotalSeconds);
+				if (diffSec > 0.16)
 				{
 					_deliverMediaElement.Position = targetPos;
+				}
+				else if (activeSeg != null && mediaSec >= activeSeg.StartSeconds + 0.01 && mediaSec <= activeSeg.EndSeconds + 0.02 && diffSec > 0.015)
+				{
+					_deliverCurrentPos = tAccum + (mediaSec - activeSeg.StartSeconds);
+					_deliverPlaybackStartPos = _deliverCurrentPos;
+					_deliverPlaybackSw.Restart();
 				}
 				_deliverMediaElement.Volume = _cutEditAudioMuted ? 0.0 : (_cutEditAudioVolume / 100.0);
 				_deliverMediaElement.IsMuted = _cutEditAudioMuted;
@@ -11353,7 +15292,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 	{
 		if (_deliverPreviewBox == null) return;
 
-		var kept = _cutEditSegments?.Where(s => s.IsKept).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
+		var kept = _cutEditSegments?.Where(s => s.IsKept && (s.TrackId.StartsWith("V") || s.MediaType == "video" || s.MediaType == "image")).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
+		if (kept.Count == 0) kept = _cutEditSegments?.Where(s => s.IsKept).OrderBy(s => s.TimelineStartSeconds).ToList() ?? new List<CutSegment>();
 		CutSegment activeSeg = null;
 		double tAccum = 0.0;
 		double segOffset = 0.0;
@@ -11707,6 +15647,46 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			{
 				new RectangleF(0f, 0f, 0.5f, 1f),
 				new RectangleF(0.5f, 0f, 0.5f, 1f)
+			}
+		});
+		_splitScreenLayouts.Add(new SplitScreenLayoutDefinition
+		{
+			Id = "left3_right2",
+			DisplayName = "左 3 / 右 2 (左窄右宽)",
+			Category = "常用分屏",
+			Regions = new RectangleF[5]
+			{
+				new RectangleF(0f, 0f, 0.38f, 1f / 3f),
+				new RectangleF(0f, 1f / 3f, 0.38f, 1f / 3f),
+				new RectangleF(0f, 2f / 3f, 0.38f, 1f / 3f),
+				new RectangleF(0.38f, 0f, 0.62f, 0.5f),
+				new RectangleF(0.38f, 0.5f, 0.62f, 0.5f)
+			}
+		});
+		_splitScreenLayouts.Add(new SplitScreenLayoutDefinition
+		{
+			Id = "left3_right1",
+			DisplayName = "左 3 / 右 1 (左三右主)",
+			Category = "多格拼屏",
+			Regions = new RectangleF[4]
+			{
+				new RectangleF(0f, 0f, 0.38f, 1f / 3f),
+				new RectangleF(0f, 1f / 3f, 0.38f, 1f / 3f),
+				new RectangleF(0f, 2f / 3f, 0.38f, 1f / 3f),
+				new RectangleF(0.38f, 0f, 0.62f, 1f)
+			}
+		});
+		_splitScreenLayouts.Add(new SplitScreenLayoutDefinition
+		{
+			Id = "left2_right2_asym",
+			DisplayName = "左 2 / 右 2 (左窄右宽)",
+			Category = "多格拼屏",
+			Regions = new RectangleF[4]
+			{
+				new RectangleF(0f, 0f, 0.38f, 0.5f),
+				new RectangleF(0f, 0.5f, 0.38f, 0.5f),
+				new RectangleF(0.38f, 0f, 0.62f, 0.5f),
+				new RectangleF(0.38f, 0.5f, 0.62f, 0.5f)
 			}
 		});
 		_splitScreenLayouts.Add(new SplitScreenLayoutDefinition
@@ -12541,7 +16521,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			"居中偏上",
 			"居中 (画面正中央)",
 			"居中偏下",
-			"底部居中"
+			"底部居中",
+			"右侧栏分割线 (不挡左栏)"
 		});
 		_splitScreenTitlePositionCombo.SelectedIndex = 0;
 		settings.Controls.Add(_splitScreenTitlePositionCombo);
@@ -12606,7 +16587,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			string sampleText = _splitScreenTitleTextBox?.Text?.Trim();
 			if (string.IsNullOrEmpty(sampleText) || sampleText == "{文件名}")
 			{
-				string firstFile = _splitScreenRegionVideos.Where(x => x != null && x.Count > 0).Select(x => x[0]).FirstOrDefault();
+				int mainIdx = GetActiveSplitScreenMainRegion();
+				string firstFile = (mainIdx >= 0 && mainIdx < _splitScreenRegionVideos.Length && _splitScreenRegionVideos[mainIdx] != null && _splitScreenRegionVideos[mainIdx].Count > 0)
+					? _splitScreenRegionVideos[mainIdx][0]
+					: _splitScreenRegionVideos.Where(x => x != null && x.Count > 0).Select(x => x[0]).FirstOrDefault();
 				sampleText = !string.IsNullOrEmpty(firstFile) ? MergeTitleStyleCatalog.CleanFilenameForTitle(firstFile) : "🔥 热门拼屏对比标题示例";
 			}
 			using (var dlg = new MergeTitleStyleDialog(_splitScreenTitlePlan, sampleText, _isDarkMode))
@@ -12775,7 +16759,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		listView.Alignment = ListViewAlignment.Top;
 		listView.AutoArrange = true;
 		ListView listView2 = listView;
-		foreach (SplitScreenLayoutDefinition item in _splitScreenLayouts.Where((SplitScreenLayoutDefinition x) => x.Category == category))
+		foreach (SplitScreenLayoutDefinition item in _splitScreenLayouts.Where((SplitScreenLayoutDefinition x) => x.Category == category || (category == "多格拼屏" && x.Id == "left3_right2")))
 		{
 			imageList2.Images.Add(item.Id, DrawSplitScreenTemplateThumbnail(item, imageList2.ImageSize));
 			ListViewItem listViewItem = new ListViewItem(item.DisplayName, item.Id);
@@ -12857,6 +16841,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				3 => "居中",
 				4 => "居中偏下",
 				5 => "底部居中",
+				6 => "右侧栏分割线",
 				_ => "中间分割线"
 			};
 		}
@@ -12884,7 +16869,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			string targetPos = _splitScreenTitlePlan.Position ?? "中间分割线";
 			int pidx = 0;
-			if (targetPos.Contains("分割线")) pidx = 0;
+			if (targetPos.Contains("右侧")) pidx = 6;
+			else if (targetPos.Contains("分割线")) pidx = 0;
 			else if (targetPos.Contains("顶部") || targetPos.Contains("顶端")) pidx = 1;
 			else if (targetPos.Contains("偏上")) pidx = 2;
 			else if (targetPos.Contains("中央") || (targetPos.Contains("居中") && !targetPos.Contains("偏") && !targetPos.Contains("顶") && !targetPos.Contains("底"))) pidx = 3;
@@ -13223,6 +17209,23 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		RefreshSplitScreenRegionSelector();
 		UpdateSplitScreenAudioChoices();
 		UpdateSplitScreenMainRegionChoices();
+		int mainReg = GetActiveSplitScreenMainRegion();
+		if (_splitScreenAudioRegion != null && mainReg >= 0 && mainReg < definition.RegionCount && _splitScreenAudioRegion.SelectedIndex < definition.RegionCount)
+		{
+			_splitScreenAudioRegion.SelectedIndex = mainReg;
+		}
+		if (_splitScreenTitlePositionCombo != null)
+		{
+			bool isRightColSplit = definition.Id == "left3_right2" || definition.Id == "left2_right2_asym";
+			if (isRightColSplit && _splitScreenTitlePositionCombo.SelectedIndex == 0 && _splitScreenTitlePositionCombo.Items.Count > 6)
+			{
+				_splitScreenTitlePositionCombo.SelectedIndex = 6;
+			}
+			else if (!isRightColSplit && _splitScreenTitlePositionCombo.SelectedIndex == 6)
+			{
+				_splitScreenTitlePositionCombo.SelectedIndex = 0;
+			}
+		}
 		LoadSplitScreenRegionControls();
 		UpdateSplitScreenPlanningUi();
 		UpdateSplitScreenPipUi();
@@ -14426,7 +18429,18 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			{
 				try
 				{
-					List<string> sampleFiles = _splitScreenRegionVideos.Where(x => x != null && x.Count > 0).Select(x => x[0]).ToList();
+					List<string> sampleFiles = new List<string>();
+					if (activeSplitScreenMainRegion >= 0 && activeSplitScreenMainRegion < _splitScreenRegionVideos.Length && _splitScreenRegionVideos[activeSplitScreenMainRegion] != null && _splitScreenRegionVideos[activeSplitScreenMainRegion].Count > 0)
+					{
+						sampleFiles.Add(_splitScreenRegionVideos[activeSplitScreenMainRegion][0]);
+					}
+					foreach (var rv in _splitScreenRegionVideos)
+					{
+						if (rv != null && rv.Count > 0 && !sampleFiles.Contains(rv[0]))
+						{
+							sampleFiles.Add(rv[0]);
+						}
+					}
 					string previewMain = MergeTitleStyleCatalog.ResolveTitleText(_splitScreenTitleTextBox.Text, sampleFiles, 0);
 					string previewSub = MergeTitleStyleCatalog.ResolveTitleText(_splitScreenTitlePlan.SubTitleTemplate, sampleFiles, 0);
 					if (!string.IsNullOrWhiteSpace(previewMain))
@@ -15113,8 +19127,24 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				error = "无法读取刚生成的拼屏成品。";
 				return false;
 			}
-			string resolvedMain = MergeTitleStyleCatalog.ResolveTitleText(titlePlan.MainTitleTemplate, regionFiles, outputIndex);
-			string resolvedSub = MergeTitleStyleCatalog.ResolveTitleText(titlePlan.SubTitleTemplate, regionFiles, outputIndex);
+			List<string> orderedFiles = new List<string>();
+			int mainReg = GetActiveSplitScreenMainRegion();
+			if (regionFiles != null)
+			{
+				if (mainReg >= 0 && mainReg < regionFiles.Count && !string.IsNullOrWhiteSpace(regionFiles[mainReg]))
+				{
+					orderedFiles.Add(regionFiles[mainReg]);
+				}
+				foreach (var rf in regionFiles)
+				{
+					if (!string.IsNullOrWhiteSpace(rf) && !orderedFiles.Contains(rf))
+					{
+						orderedFiles.Add(rf);
+					}
+				}
+			}
+			string resolvedMain = MergeTitleStyleCatalog.ResolveTitleText(titlePlan.MainTitleTemplate, orderedFiles, outputIndex);
+			string resolvedSub = MergeTitleStyleCatalog.ResolveTitleText(titlePlan.SubTitleTemplate, orderedFiles, outputIndex);
 			if (string.IsNullOrWhiteSpace(resolvedMain)) return true;
 
 			using (Bitmap bmp = MergeTitleStyleCatalog.RenderTitleBitmap(titlePlan, videoInfo.Width, videoInfo.Height, resolvedMain, resolvedSub))
@@ -16087,14 +20117,39 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		label.Enabled = false;
 		Label value = label;
 		list.Controls.Add(value);
-		list.Resize += delegate
+
+		int baseListTotalW = 1090;
+		int[] baseColWidths = new int[] { 52, 280, 280, 76, 68, 68, 68, 62, 78, 58 };
+
+		Action scaleCols = delegate
 		{
 			PositionVideoListEmptyHint(list);
+			if (list.Columns.Count == baseColWidths.Length && list.ClientSize.Width > 200)
+			{
+				int availW = list.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4;
+				if (availW > 300)
+				{
+					float scaleRatio = Math.Max(0.70f, Math.Min(2.5f, (float)availW / baseListTotalW));
+					float newFontSize = Math.Max(8.25f, Math.Min(12f, 9f * (0.88f + 0.12f * scaleRatio)));
+					if (Math.Abs(list.Font.Size - newFontSize) > 0.4f)
+					{
+						list.Font = new Font(list.Font.FontFamily, newFontSize, list.Font.Style);
+					}
+
+					int assignedW = 0;
+					for (int ci = 0; ci < baseColWidths.Length - 1; ci++)
+					{
+						int cw = Math.Max(30, (int)Math.Round(baseColWidths[ci] * scaleRatio));
+						list.Columns[ci].Width = cw;
+						assignedW += cw;
+					}
+					list.Columns[baseColWidths.Length - 1].Width = Math.Max(46, availW - assignedW);
+				}
+			}
 		};
-		list.HandleCreated += delegate
-		{
-			PositionVideoListEmptyHint(list);
-		};
+
+		list.Resize += delegate { scaleCols(); };
+		list.HandleCreated += delegate { scaleCols(); };
 		PositionVideoListEmptyHint(list);
 		return list;
 	}
@@ -17020,7 +21075,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		listView.ForeColor = InkColor;
 		ImageList imageList = listView.LargeImageList;
 		imageList.Images.Clear();
-		foreach (SplitScreenLayoutDefinition item in _splitScreenLayouts.Where(x => x.Category == category))
+		foreach (SplitScreenLayoutDefinition item in _splitScreenLayouts.Where(x => x.Category == category || (category == "多格拼屏" && x.Id == "left3_right2")))
 		{
 			imageList.Images.Add(item.Id, DrawSplitScreenTemplateThumbnail(item, imageList.ImageSize));
 		}
@@ -17105,7 +21160,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			}
 			else if (control is Panel panel)
 			{
-				if (panel != _bottomNavBar && panel != _bottomNavLine)
+				if (panel != _bottomNavBar && panel != _bottomNavLine && panel.Parent != _bottomNavBar)
 				{
 					panel.BackColor = SurfaceColor;
 				}
@@ -17130,6 +21185,8 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				comboBox.BackColor = InputBgColor;
 				comboBox.ForeColor = InkColor;
 				HookFocusVisual(comboBox);
+				comboBox.DropDown -= AutoFitComboBoxDropDownWidth;
+				comboBox.DropDown += AutoFitComboBoxDropDownWidth;
 			}
 			else if (control is CheckedListBox || control is ListBox)
 			{
@@ -17158,7 +21215,10 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			{
 				tabControl.DrawMode = TabDrawMode.OwnerDrawFixed;
 				tabControl.SizeMode = TabSizeMode.Fixed;
-				tabControl.ItemSize = ((tabControl == _tabs) ? new Size(0, 1) : ((tabControl == _splitScreenPresetTabs) ? new Size(92, 32) : new Size(150, 32)));
+				int inspectorTabW = (_cutEditInspectorTabs != null && _cutEditInspectorTabs.Width > 200)
+					? Math.Max(78, (_cutEditInspectorTabs.Width - 16) / Math.Max(1, _cutEditInspectorTabs.TabCount))
+					: 94;
+				tabControl.ItemSize = ((tabControl == _tabs) ? new Size(0, 1) : ((tabControl == _splitScreenPresetTabs) ? new Size(92, 32) : ((tabControl == _cutEditInspectorTabs) ? new Size(inspectorTabW, 32) : new Size(150, 32))));
 				tabControl.DrawItem -= DrawModernTab;
 				tabControl.DrawItem += DrawModernTab;
 				tabControl.Invalidate();
@@ -17184,6 +21244,27 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			}
 
 			ApplyThemeRecursive(control);
+		}
+	}
+
+	private void AutoFitComboBoxDropDownWidth(object sender, EventArgs e)
+	{
+		if (!(sender is ComboBox cb) || cb.Items.Count == 0) return;
+		try
+		{
+			int maxW = Math.Max(100, cb.Width);
+			Font f = cb.Font ?? Font;
+			foreach (object item in cb.Items)
+			{
+				string txt = item?.ToString() ?? "";
+				if (txt.Length == 0) continue;
+				int w = TextRenderer.MeasureText(txt, f).Width + 36;
+				if (w > maxW) maxW = w;
+			}
+			cb.DropDownWidth = Math.Min(720, maxW);
+		}
+		catch
+		{
 		}
 	}
 
@@ -17219,11 +21300,12 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		if (isSelected)
 		{
 			using Brush brush2 = new SolidBrush(tabIndicator);
-			int pad = (tabControl == _tabs) ? 8 : 6;
+			int pad = (tabControl == _tabs) ? 8 : 4;
 			e.Graphics.FillRectangle(brush2, bounds.Left + pad, bounds.Bottom - 3, Math.Max(4, bounds.Width - pad * 2), 3);
 		}
 
-		using Font font = new Font("Microsoft YaHei UI", (tabControl == _tabs) ? 10f : 9f, isSelected ? FontStyle.Bold : FontStyle.Regular);
+		float tabFontSize = (tabControl == _tabs) ? 10f : ((tabControl == _cutEditInspectorTabs) ? 8.25f : 9f);
+		using Font font = new Font("Microsoft YaHei UI", tabFontSize, isSelected ? FontStyle.Bold : FontStyle.Regular);
 		TextRenderer.DrawText(e.Graphics, tabControl.TabPages[e.Index].Text, font, bounds, tabTextColor, TextFormatFlags.EndEllipsis | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
 
 		if (e.Index == tabControl.TabPages.Count - 1 && bounds.Right < tabControl.ClientSize.Width)
@@ -18834,7 +22916,7 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			TextFormatFlags textFormatFlags = ((e.ColumnIndex == 0) ? TextFormatFlags.HorizontalCenter : TextFormatFlags.Default);
 			Rectangle bounds = Rectangle.Inflate(e.Bounds, -7, 0);
-			using Font font = new Font("Microsoft YaHei UI", 9f);
+			using Font font = (e.Item?.Font != null) ? new Font(e.Item.Font.FontFamily, e.Item.Font.Size, FontStyle.Regular) : new Font("Microsoft YaHei UI", 9f);
 			TextRenderer.DrawText(e.Graphics, e.SubItem.Text, font, bounds, InkColor, textFormatFlags | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
 			return;
 		}
@@ -24640,33 +28722,76 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 
 	private int RunFfmpeg(string ffmpeg, string arguments, double durationSeconds, Action<double> progress, out string errorText)
 	{
-		ProcessStartInfo startInfo = NewProcessInfo(ffmpeg, arguments);
-		StringBuilder errors = new StringBuilder();
-		using Process process = new Process();
-		process.StartInfo = startInfo;
-		process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
+		string autoFilterScript = null;
+		try
 		{
-			if (e.Data != null)
+			if (!string.IsNullOrEmpty(arguments) && arguments.Length > 8192)
 			{
-				lock (errors)
+				int fcIdx = arguments.IndexOf("-filter_complex ", StringComparison.OrdinalIgnoreCase);
+				if (fcIdx >= 0)
 				{
-					errors.AppendLine(e.Data);
+					int start = fcIdx + "-filter_complex ".Length;
+					while (start < arguments.Length && arguments[start] == ' ') start++;
+					if (start < arguments.Length)
+					{
+						int end = -1;
+						string filterContent = null;
+						if (arguments[start] == '"')
+						{
+							int search = start + 1;
+							while (search < arguments.Length)
+							{
+								if (arguments[search] == '"' && arguments[search - 1] != '\\')
+								{
+									end = search;
+									break;
+								}
+								search++;
+							}
+							if (end > start)
+							{
+								filterContent = arguments.Substring(start + 1, end - start - 1);
+								filterContent = filterContent.Replace("\\\"", "\"");
+								end++;
+							}
+						}
+						if (!string.IsNullOrEmpty(filterContent))
+						{
+							autoFilterScript = Path.Combine(Path.GetTempPath(), "ffmpeg_fc_" + Guid.NewGuid().ToString("N") + ".txt");
+							File.WriteAllText(autoFilterScript, filterContent, new UTF8Encoding(false));
+							arguments = arguments.Substring(0, fcIdx) + "-filter_complex_script " + QuoteArg(autoFilterScript) + arguments.Substring(end);
+						}
+					}
 				}
 			}
-		};
-		process.Start();
-		lock (_processLock)
-		{
-			_currentProcess = process;
-		}
-		process.BeginErrorReadLine();
-		while (!process.StandardOutput.EndOfStream)
-		{
-			if (_cancelRequested)
+
+			ProcessStartInfo startInfo = NewProcessInfo(ffmpeg, arguments);
+			StringBuilder errors = new StringBuilder();
+			using Process process = new Process();
+			process.StartInfo = startInfo;
+			process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
 			{
-				TryKill(process);
-				break;
+				if (e.Data != null)
+				{
+					lock (errors)
+					{
+						errors.AppendLine(e.Data);
+					}
+				}
+			};
+			process.Start();
+			lock (_processLock)
+			{
+				_currentProcess = process;
 			}
+			process.BeginErrorReadLine();
+			while (!process.StandardOutput.EndOfStream)
+			{
+				if (_cancelRequested)
+				{
+					TryKill(process);
+					break;
+				}
 			string text = process.StandardOutput.ReadLine();
 			if (text == null)
 			{
@@ -24697,7 +28822,12 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 		{
 			errorText = errors.ToString();
 		}
-		return _cancelRequested ? (-999) : process.ExitCode;
+			return _cancelRequested ? (-999) : process.ExitCode;
+		}
+		finally
+		{
+			TryDelete(autoFilterScript);
+		}
 	}
 
 	private bool ApplyBackgroundMusic(string ffmpeg, string videoPath, string bgmPath, int volumePercent, Action<double> progress, out string error)
@@ -26757,6 +30887,12 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 				return base.ProcessCmdKey(ref msg, keyData);
 			}
 
+			if (keyData == (Keys.Control | Keys.A))
+			{
+				SelectAllSubtitlesOnTimeline();
+				return true;
+			}
+
 			if (keyData == Keys.Space)
 			{
 				ToggleCutEditPlayPause();
@@ -26809,11 +30945,21 @@ splitMain.Panel2.Controls.Add(bottomTimelineHost);
 			}
 			if (keyData == (Keys.Shift | Keys.Delete) || keyData == (Keys.Shift | Keys.Back))
 			{
+				if (_cutEditSelectedTrackId == "T1" || _selectedOverlayIds.Count > 1)
+				{
+					DeleteSelectedOverlays();
+					return true;
+				}
 				DeleteSelectedCutSegment(isRipple: true);
 				return true;
 			}
 			if (keyData == Keys.Delete || keyData == Keys.Back)
 			{
+				if (_cutEditSelectedTrackId == "T1" || _selectedOverlayIds.Count > 1)
+				{
+					DeleteSelectedOverlays();
+					return true;
+				}
 				DeleteSelectedCutSegment(isRipple: false);
 				return true;
 			}

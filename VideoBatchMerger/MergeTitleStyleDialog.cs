@@ -92,7 +92,8 @@ namespace VideoBatchMerger
 				"居中 (画面正中央大字)",
 				"居中偏下 (适合无底部字幕时)",
 				"顶部居中 (视频顶端通栏)",
-				"底部居中 (下三分之一解说栏)"
+				"底部居中 (下三分之一解说栏)",
+				"右侧栏分割线 (左窄右宽专属·不挡左栏)"
 			});
 			_positionCombo.SelectedIndexChanged += (s, e) => UpdatePreview();
 			this.Controls.Add(_positionCombo);
@@ -177,7 +178,8 @@ namespace VideoBatchMerger
 		{
 			_subTitleBox.Text = _plan.SubTitleTemplate ?? "";
 			string pos = _plan.Position ?? "中间分割线";
-			if (pos.Contains("分割线")) _positionCombo.SelectedIndex = 0;
+			if (pos.Contains("右侧")) _positionCombo.SelectedIndex = 6;
+			else if (pos.Contains("分割线")) _positionCombo.SelectedIndex = 0;
 			else if (pos.Contains("偏上")) _positionCombo.SelectedIndex = 1;
 			else if (pos.Contains("中央") || (pos.Contains("居中") && !pos.Contains("偏") && !pos.Contains("顶") && !pos.Contains("底"))) _positionCombo.SelectedIndex = 2;
 			else if (pos.Contains("偏下")) _positionCombo.SelectedIndex = 3;
@@ -207,6 +209,7 @@ namespace VideoBatchMerger
 				3 => "居中偏下",
 				4 => "顶部居中",
 				5 => "底部居中",
+				6 => "右侧栏分割线",
 				_ => "中间分割线"
 			};
 			_plan.FontSizeScale = (float)_fontSizeNum.Value / 100f;
@@ -227,6 +230,7 @@ namespace VideoBatchMerger
 					3 => "居中偏下",
 					4 => "顶部居中",
 					5 => "底部居中",
+					6 => "右侧栏分割线",
 					_ => "中间分割线"
 				};
 				tempPlan.FontSizeScale = (float)_fontSizeNum.Value / 100f;
@@ -269,6 +273,24 @@ namespace VideoBatchMerger
 			using (Graphics g = Graphics.FromImage(cropped))
 			{
 				g.Clear(Color.FromArgb(20, 26, 38));
+				if (pos != null && pos.Contains("右侧"))
+				{
+					int splitX = (int)Math.Round(cropW * 0.38f);
+					using (Brush leftZoneBrush = new SolidBrush(Color.FromArgb(30, 41, 59)))
+					{
+						g.FillRectangle(leftZoneBrush, 0, 0, splitX, cropH);
+					}
+					using (Pen dividerPen = new Pen(Color.FromArgb(140, 255, 255, 255), 3f))
+					{
+						g.DrawLine(dividerPen, splitX, 0, splitX, cropH);
+					}
+					using (Font hintFont = new Font("Microsoft YaHei UI", 18f, FontStyle.Bold))
+					using (Brush hintBrush = new SolidBrush(Color.FromArgb(140, 180, 195, 215)))
+					{
+						var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+						g.DrawString("左侧反应视频区\n(38%宽·无遮挡)", hintFont, hintBrush, new RectangleF(0, 0, splitX, cropH), sf);
+					}
+				}
 				g.DrawImage(fullBmp, new Rectangle(0, 0, cropW, cropH), new Rectangle(0, topY, cropW, cropH), GraphicsUnit.Pixel);
 			}
 			return cropped;

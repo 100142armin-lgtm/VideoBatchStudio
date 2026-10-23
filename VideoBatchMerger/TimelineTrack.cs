@@ -22,6 +22,7 @@ internal sealed class TimelineTrack
 
 	public Color GetBadgeColor()
 	{
+		if (Id == "T2") return Color.FromArgb(147, 51, 234); // Purple for T2 Chinese Subtitle Track
 		return Type switch
 		{
 			TrackType.Video => Color.FromArgb(6, 182, 212),     // Cyan

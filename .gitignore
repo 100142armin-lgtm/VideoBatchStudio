@@ -13,8 +13,13 @@ release_assets/
 # Sensitive / Environment files
 .env
 .env.*
+!.env.example
 *.pfx
 *.snk
+*keys.json
+*settings.json
+*.key
+auditions/
 
 # OS generated files
 .DS_Store

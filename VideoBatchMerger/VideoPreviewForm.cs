@@ -33,11 +33,15 @@ public sealed class VideoPreviewForm : Form
 	private bool _isMuted;
 	private double _lastVolume = 1.0;
 	private TimeSpan _totalDuration = TimeSpan.Zero;
+	private double _startSeconds = 0.0;
+	private double _endSeconds = 0.0;
 
-	public VideoPreviewForm(string videoPath, string title = "视频播放预览", bool deleteOnClose = true)
+	public VideoPreviewForm(string videoPath, string title = "视频播放预览", bool deleteOnClose = true, double startSeconds = 0.0, double endSeconds = 0.0)
 	{
 		_videoPath = videoPath;
 		_deleteOnClose = deleteOnClose;
+		_startSeconds = Math.Max(0.0, startSeconds);
+		_endSeconds = Math.Max(0.0, endSeconds);
 
 		InitializeUi(title);
 
@@ -398,7 +402,11 @@ public sealed class VideoPreviewForm : Form
 		if (_mediaElement.NaturalDuration.HasTimeSpan)
 		{
 			_totalDuration = _mediaElement.NaturalDuration.TimeSpan;
-			_lblTime.Text = $"00:00 / {FormatTime(_totalDuration)}";
+			if (_startSeconds > 0 && _startSeconds < _totalDuration.TotalSeconds)
+			{
+				_mediaElement.Position = TimeSpan.FromSeconds(_startSeconds);
+			}
+			_lblTime.Text = $"{FormatTime(_mediaElement.Position)} / {FormatTime(_totalDuration)}";
 		}
 	}
 
@@ -430,6 +438,20 @@ public sealed class VideoPreviewForm : Form
 		if (!_isDraggingSeek && _totalDuration.TotalSeconds > 0)
 		{
 			TimeSpan pos = _mediaElement.Position;
+			if (_endSeconds > _startSeconds && pos.TotalSeconds >= _endSeconds)
+			{
+				if (_chkLoop.Checked)
+				{
+					_mediaElement.Position = TimeSpan.FromSeconds(_startSeconds);
+					_mediaElement.Play();
+				}
+				else
+				{
+					_mediaElement.Pause();
+					_isPlaying = false;
+					_btnPlayPause.Text = "▶ 播放 (空格)";
+				}
+			}
 			double ratio = Math.Max(0.0, Math.Min(1.0, pos.TotalSeconds / _totalDuration.TotalSeconds));
 			int targetVal = (int)(ratio * 1000);
 			if (targetVal >= 0 && targetVal <= 1000)
