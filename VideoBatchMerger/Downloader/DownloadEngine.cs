@@ -681,12 +681,12 @@ public sealed class DownloadEngine
 
 			// 输出文件名模版
 			string outTemplate = Path.Combine(outputDir, "%(title).100B [%(id)s].%(ext)s");
-			sb.Append($"--output \"{outTemplate}\" ");
+			sb.Append($"--output {ScriptBatch.ScriptBatchComposer.QuoteArg(outTemplate)} ");
 
 			if (!string.IsNullOrWhiteSpace(ffmpegPath) && File.Exists(ffmpegPath))
 			{
 				string ffmpegDir = Path.GetDirectoryName(ffmpegPath);
-				sb.Append($"--ffmpeg-location \"{ffmpegDir}\" ");
+				sb.Append($"--ffmpeg-location {ScriptBatch.ScriptBatchComposer.QuoteArg(ffmpegDir)} ");
 			}
 		}
 
@@ -695,7 +695,7 @@ public sealed class DownloadEngine
 			string safeProxy = proxyUrl.Replace("\"", "").Replace("\r", "").Replace("\n", "").Trim();
 			if (!string.IsNullOrWhiteSpace(safeProxy))
 			{
-				sb.Append($"--proxy \"{safeProxy}\" ");
+				sb.Append($"--proxy {ScriptBatch.ScriptBatchComposer.QuoteArg(safeProxy)} ");
 			}
 		}
 

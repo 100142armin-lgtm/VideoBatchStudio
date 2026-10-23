@@ -1184,7 +1184,7 @@ internal sealed class DownloaderPanel : UserControl
 		{
 			Directory.CreateDirectory(dir);
 		}
-		Process.Start("explorer.exe", $"\"{dir}\"");
+		Process.Start("explorer.exe", ScriptBatch.ScriptBatchComposer.QuoteArg(dir));
 	}
 
 	private string[] GetUrlsFromInput()
@@ -1454,7 +1454,7 @@ internal sealed class DownloaderPanel : UserControl
 		var item = _listView.SelectedItems[0].Tag as DownloadItem;
 		if (item != null && File.Exists(item.SaveFilePath))
 		{
-			Process.Start("explorer.exe", $"/select,\"{item.SaveFilePath}\"");
+			Process.Start("explorer.exe", $"/select,{ScriptBatch.ScriptBatchComposer.QuoteArg(item.SaveFilePath)}");
 		}
 	}
 

@@ -140,7 +140,7 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					try
 					{
-						Process.Start("explorer.exe", $"/select,\"{_item.VideoOutputPath}\"");
+						Process.Start("explorer.exe", $"/select,{ScriptBatchComposer.QuoteArg(_item.VideoOutputPath)}");
 					}
 					catch { }
 				};

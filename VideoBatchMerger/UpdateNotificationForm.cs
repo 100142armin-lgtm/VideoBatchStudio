@@ -45,10 +45,10 @@ internal sealed class UpdateNotificationForm : Form
 		_newVer = newVer;
 		_fastPortableZipUrl = string.IsNullOrWhiteSpace(fastPortableZipUrl)
 			? $"https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v{newVer}/VideoBatchStudio_Portable.zip"
-			: fastPortableZipUrl;
+			: IsApprovedUpdateUrl(fastPortableZipUrl) ? fastPortableZipUrl : $"https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v{newVer}/VideoBatchStudio_Portable.zip";
 		_portableZipUrl = string.IsNullOrWhiteSpace(portableZipUrl)
 			? $"https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v{newVer}/VideoBatchStudio_Portable.zip"
-			: portableZipUrl;
+			: IsApprovedUpdateUrl(portableZipUrl) ? portableZipUrl : $"https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v{newVer}/VideoBatchStudio_Portable.zip";
 
 		Text = $"🎉 发现新版本 V{newVer} · 视频批处理工具升级提示";
 		Width = 680;
@@ -269,7 +269,7 @@ internal sealed class UpdateNotificationForm : Form
 				if (Directory.Exists(tempExtractDir)) Directory.Delete(tempExtractDir, true);
 				Directory.CreateDirectory(tempExtractDir);
 
-				ZipFile.ExtractToDirectory(tempZip, tempExtractDir);
+				ExtractZipSafely(tempZip, tempExtractDir);
 
 				string exeFound = Directory.GetFiles(tempExtractDir, "VideoBatchStudio.exe", SearchOption.AllDirectories).FirstOrDefault();
 				if (string.IsNullOrEmpty(exeFound))
@@ -335,6 +335,42 @@ internal sealed class UpdateNotificationForm : Form
 			_btnUpdateNow.Text = "🔄 重试更新";
 			_btnCancel.Enabled = true;
 			TryCleanFiles(tempZip, tempExtractDir);
+		}
+	}
+
+	private static bool IsApprovedUpdateUrl(string value)
+	{
+		if (!Uri.TryCreate(value, UriKind.Absolute, out Uri uri) || uri.Scheme != Uri.UriSchemeHttps) return false;
+		string host = uri.Host.TrimEnd('.').ToLowerInvariant();
+		return host == "github.com" || host == "ghfast.top" || host == "ghproxy.net" || host == "objects.githubusercontent.com";
+	}
+
+	private static void ExtractZipSafely(string zipPath, string destination)
+	{
+		string root = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+		using (ZipArchive archive = ZipFile.OpenRead(zipPath))
+		{
+			foreach (ZipArchiveEntry entry in archive.Entries)
+			{
+				string entryName = entry.FullName.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+				string target = Path.GetFullPath(Path.Combine(root, entryName));
+				if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+					throw new InvalidDataException("更新包包含越界压缩路径，已拒绝解压。");
+				if (string.IsNullOrEmpty(entry.Name))
+				{
+					Directory.CreateDirectory(target);
+					continue;
+				}
+				string parent = Path.GetDirectoryName(target);
+				if (string.IsNullOrEmpty(parent) || !parent.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+					throw new InvalidDataException("更新包包含异常文件路径，已拒绝解压。");
+				Directory.CreateDirectory(parent);
+				using (Stream input = entry.Open())
+				using (FileStream output = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None))
+				{
+					input.CopyTo(output);
+				}
+			}
 		}
 	}
 

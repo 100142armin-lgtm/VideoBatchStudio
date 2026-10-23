@@ -887,6 +887,54 @@ internal sealed class MainForm : Form
 	private BgmPlan _activeWatermarkBgmPlan = new BgmPlan();
 
 	private ListBox _slideshowImageList;
+	private ComboBox _imageGroupingMode;
+	private CheckBox _imageUseWatermarks;
+	private Button _imageWatermarkSettingsButton;
+	private string _imageGifPath = "";
+	private int _imageGifX = 50, _imageGifY = 50, _imageGifSize = 25;
+	private sealed class ImageGifLayer
+	{
+		public string Path;
+		public int X = 50, Y = 50, Size = 25, Rotation;
+		public ImageGifLayer Copy() { return new ImageGifLayer { Path = Path, X = X, Y = Y, Size = Size, Rotation = Rotation }; }
+	}
+	private sealed class GifPreviewResource : IDisposable
+	{
+		public MemoryStream Stream;
+		public Image Image;
+		public int[] Delays;
+		public int Frame;
+		public DateTime NextFrame;
+		public void Dispose() { Image?.Dispose(); Stream?.Dispose(); }
+	}
+	private readonly List<ImageGifLayer> _imageGifLayers = new List<ImageGifLayer>();
+	private readonly Dictionary<string, GifPreviewResource> _imageGifPreviewResources = new Dictionary<string, GifPreviewResource>(StringComparer.OrdinalIgnoreCase);
+	private ListBox _imageGifLayerList;
+	private int _imageGifSelectedIndex = -1;
+	private bool _syncingImageGifControls;
+	private System.Windows.Forms.Timer _imageGifPreviewTimer;
+	private bool _imageGifDragging;
+	private int _imageGifDragMode; // 1 move, 2 resize, 3 rotate
+	private Point _imageGifDragStart;
+	private ImageGifLayer _imageGifDragOriginal;
+	private Button _imageGifButton;
+	private Button _imagePreviewButton;
+	private PictureBox _imageLivePreview;
+	private TabControl _imageSettingsTabs;
+	private Form _imageLargePreviewWindow;
+	private PictureBox _imageLargePreviewPicture;
+	private TextBox _imageGifPathBox;
+	private NumericUpDown _imageGifXControl, _imageGifYControl, _imageGifSizeControl, _imageGifRotationControl;
+	private int _imageParticlePreset;
+	private int _imageParticleDensity = 50;
+	private ListBox _imageParticleList;
+	private TrackBar _imageParticleDensitySlider;
+	private DateTime _imageMotionPreviewStartedUtc = DateTime.UtcNow;
+	private Image _imagePreviewSource;
+	private string _imagePreviewSourcePath;
+	private DateTime _imagePreviewSourceModifiedUtc;
+	private readonly List<List<string>> _imageCustomGroups = new List<List<string>>();
+	private Button _imageCreateGroupButton;
 
 	private Button _imageAddButton;
 
@@ -2282,12 +2330,11 @@ internal sealed class MainForm : Form
 		TableLayoutPanel tableLayoutPanel = new TableLayoutPanel();
 		tableLayoutPanel.Dock = DockStyle.Fill;
 		tableLayoutPanel.ColumnCount = 1;
-		tableLayoutPanel.RowCount = 3;
+		tableLayoutPanel.RowCount = 2;
 		tableLayoutPanel.Margin = new Padding(0);
 		TableLayoutPanel tableLayoutPanel2 = tableLayoutPanel;
-		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Absolute, 92f));
 		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-		tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Absolute, 550f));
 		tabPage.Controls.Add(tableLayoutPanel2);
 		Panel panel = new Panel();
 		panel.Dock = DockStyle.Fill;
@@ -2297,7 +2344,7 @@ internal sealed class MainForm : Form
 		Panel panel2 = panel;
 		FlowLayoutPanel flowLayoutPanel = new FlowLayoutPanel();
 		flowLayoutPanel.Dock = DockStyle.Fill;
-		flowLayoutPanel.WrapContents = false;
+		flowLayoutPanel.WrapContents = true;
 		FlowLayoutPanel flowLayoutPanel2 = flowLayoutPanel;
 		_imageAddButton = MakeButton("＋ 添加图片", 106);
 		_imageRemoveButton = MakeButton("移除", 66);
@@ -2306,6 +2353,18 @@ internal sealed class MainForm : Form
 		_imageShuffleButton = MakeButton("随机打乱", 88);
 		_imageClearButton = MakeButton("清空", 62);
 		_imageResetButton = MakeButton("重置本页参数", 112);
+		_imageGroupingMode = new ComboBox { Width = 142, DropDownStyle = ComboBoxStyle.DropDownList };
+		_imageGroupingMode.Items.AddRange(new object[] { "按输出数量分组", "每张单独成片", "手动创建分组" });
+		_imageGroupingMode.SelectedIndex = 0;
+		_imageUseWatermarks = new CheckBox { AutoSize = true, Text = "应用文字/图片水印", Margin = new Padding(8, 8, 0, 0) };
+		_imageWatermarkSettingsButton = MakeButton("设置水印", 80);
+		_imageWatermarkSettingsButton.Click += delegate { _tabs.SelectedIndex = 2; };
+		_imageGifButton = MakeButton("GIF 设置 ↓", 92);
+		_imageGifButton.Click += delegate { ConfigureImageGif(); };
+		_imagePreviewButton = MakeButton("▶ 预览成片", 105);
+		_imagePreviewButton.Click += delegate { PreviewImageVideo(); };
+		_imageCreateGroupButton = MakeButton("选中图片建组", 112);
+		_imageCreateGroupButton.Click += delegate { CreateImageVideoGroup(); };
 		_imageCountLabel = MakeCountLabel();
 		flowLayoutPanel2.Controls.Add(_imageAddButton);
 		flowLayoutPanel2.Controls.Add(_imageRemoveButton);
@@ -2314,9 +2373,35 @@ internal sealed class MainForm : Form
 		flowLayoutPanel2.Controls.Add(_imageShuffleButton);
 		flowLayoutPanel2.Controls.Add(_imageClearButton);
 		flowLayoutPanel2.Controls.Add(_imageResetButton);
+		flowLayoutPanel2.Controls.Add(_imageGroupingMode);
+		flowLayoutPanel2.Controls.Add(_imageCreateGroupButton);
+		flowLayoutPanel2.Controls.Add(_imageGifButton);
+		flowLayoutPanel2.Controls.Add(_imagePreviewButton);
 		flowLayoutPanel2.Controls.Add(_imageCountLabel);
 		panel2.Controls.Add(flowLayoutPanel2);
 		tableLayoutPanel2.Controls.Add(panel2, 0, 0);
+		SplitContainer imageSplit = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, SplitterWidth = 7, BackColor = CanvasColor };
+		bool splitInitialized = false;
+		imageSplit.SizeChanged += delegate
+		{
+			if (splitInitialized || imageSplit.Width < 820) return;
+			imageSplit.Panel1MinSize = 490;
+			imageSplit.Panel2MinSize = 280;
+			imageSplit.SplitterDistance = Math.Max(490, Math.Min(imageSplit.Width - 280 - imageSplit.SplitterWidth, (int)(imageSplit.Width * 0.58)));
+			splitInitialized = true;
+		};
+		tableLayoutPanel2.Controls.Add(imageSplit, 0, 1);
+		SplitContainer leftSplit = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterWidth = 6, BackColor = CanvasColor };
+		bool leftInitialized = false;
+		leftSplit.SizeChanged += delegate
+		{
+			if (leftInitialized || leftSplit.Height < 440) return;
+			leftSplit.Panel1MinSize = 120;
+			leftSplit.Panel2MinSize = 260;
+			leftSplit.SplitterDistance = Math.Max(120, Math.Min(leftSplit.Height - 260 - leftSplit.SplitterWidth, (int)(leftSplit.Height * 0.28)));
+			leftInitialized = true;
+		};
+		imageSplit.Panel1.Controls.Add(leftSplit);
 		Panel panel3 = new Panel();
 		panel3.Dock = DockStyle.Fill;
 		panel3.Margin = new Padding(0);
@@ -2326,17 +2411,52 @@ internal sealed class MainForm : Form
 		_slideshowImageList = new ListBox
 		{
 			Dock = DockStyle.Fill,
+			SelectionMode = SelectionMode.MultiExtended,
 			AllowDrop = true,
 			HorizontalScrollbar = true,
 			Font = new Font("Microsoft YaHei UI", 10f),
 			ItemHeight = 27
 		};
+		_slideshowImageList.SelectedIndexChanged += delegate { InvalidateImageLivePreview(); };
 		panel4.Controls.Add(_slideshowImageList);
-		tableLayoutPanel2.Controls.Add(panel4, 0, 1);
+		Panel previewSide = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8, 0, 8, 0), BackColor = SurfaceColor };
+		Label previewHint = new Label { Dock = DockStyle.Bottom, Height = 30, Text = "9:16 实时构图 · 双击放大", ForeColor = _isDarkMode ? Color.White : Color.Black, TextAlign = ContentAlignment.MiddleCenter };
+		_imageLivePreview = new PictureBox { Dock = DockStyle.Fill, BackColor = Color.Black };
+		_imageLivePreview.Paint += PaintImageVideoLivePreview;
+		_imageLivePreview.MouseDown += ImageGifPreviewMouseDown;
+		_imageLivePreview.MouseMove += ImageGifPreviewMouseMove;
+		_imageLivePreview.MouseUp += delegate { _imageGifDragging = false; };
+		_imageLivePreview.DoubleClick += delegate { OpenLargeImagePreview(); };
+		previewSide.Controls.Add(_imageLivePreview);
+		previewSide.Controls.Add(previewHint);
+		imageSplit.Panel2.Controls.Add(previewSide);
+		_imageUseWatermarks.CheckedChanged += delegate { InvalidateImageLivePreview(); };
+		_tabs.SelectedIndexChanged += delegate { if (_tabs.SelectedTab == tabPage) InvalidateImageLivePreview(); };
+		leftSplit.Panel1.Controls.Add(panel4);
+		_imageSettingsTabs = new TabControl { Dock = DockStyle.Fill, Font = new Font("Microsoft YaHei UI", 9f) };
+		TabPage mainSettingsPage = new TabPage("成片与导出") { BackColor = SurfaceColor };
+		TabPage layoutSettingsPage = new TabPage("排版与律动") { BackColor = SurfaceColor };
+		TabPage transitionSettingsPage = new TabPage("转场与配乐") { BackColor = SurfaceColor };
+		TabPage gifSettingsPage = new TabPage("GIF 图层 / 水印") { BackColor = SurfaceColor };
+		TabPage particleSettingsPage = new TabPage("粒子效果") { BackColor = SurfaceColor };
+		_imageSettingsTabs.TabPages.Add(mainSettingsPage);
+		_imageSettingsTabs.TabPages.Add(layoutSettingsPage);
+		_imageSettingsTabs.TabPages.Add(transitionSettingsPage);
+		_imageSettingsTabs.TabPages.Add(gifSettingsPage);
+		_imageSettingsTabs.TabPages.Add(particleSettingsPage);
+		leftSplit.Panel2.Controls.Add(_imageSettingsTabs);
+		gifSettingsPage.Controls.Add(BuildImageGifSettingsPanel());
+		particleSettingsPage.Controls.Add(BuildImageParticleSettingsPanel());
+		_imageGifPreviewTimer = new System.Windows.Forms.Timer { Interval = 40 };
+		_imageGifPreviewTimer.Tick += delegate { AdvanceImageGifFrames(); };
+		_imageGifPreviewTimer.Start();
+		tabPage.Disposed += delegate { _imageGifPreviewTimer?.Dispose(); foreach (GifPreviewResource item in _imageGifPreviewResources.Values) item.Dispose(); _imageGifPreviewResources.Clear(); _imagePreviewSource?.Dispose(); _imagePreviewSource = null; };
 		Panel panel5 = new Panel();
 		panel5.Dock = DockStyle.Fill;
 		panel5.Margin = new Padding(0);
 		panel5.BackColor = SurfaceColor;
+		panel5.AutoScroll = true;
+		panel5.AutoScrollMinSize = new Size(620, 310);
 		panel5.Size = new Size(base.ClientSize.Width, 550);
 		Panel panel6 = panel5;
 		panel6.Controls.Add(MakeLabel("每页基础时长", 20, 20));
@@ -2450,14 +2570,16 @@ internal sealed class MainForm : Form
 		_imageMotionPool = new CheckedListBox
 		{
 			Location = new Point(144, 164),
-			Size = new Size(474, 102),
+			Size = new Size(474, 164),
 			CheckOnClick = true,
 			MultiColumn = true,
 			ColumnWidth = 155,
 			IntegralHeight = false
 		};
-		_imageMotionPool.Items.AddRange(new object[9] { "轻微放大", "呼吸缩放", "轻柔漂移", "微微律动", "交错淡入淡出", "从左滑入后淡出", "上浮进入后淡出", "向右滑出", "向下沉出" });
+		_imageMotionPool.Items.AddRange(new object[] { "轻微放大", "呼吸缩放", "轻柔漂移", "微微律动", "交错淡入淡出", "从左滑入后淡出", "上浮进入后淡出", "向右滑出", "向下沉出", "持续·缓慢拉远", "持续·平移向左", "持续·平移向右", "持续·平移向上", "持续·平移向下", "持续·对角漂移", "入场·柔和显现", "入场·上扬出现", "入场·从右滑入", "入场·回弹出现" });
 		_imageMotionPool.SetItemChecked(0, value: true);
+		_imageMotionPool.SelectedIndex = 0;
+		_imageMotionPool.SelectedIndexChanged += delegate { RestartImageMotionLivePreview(); };
 		panel6.Controls.Add(_imageMotionPool);
 		_imageMotionSelectAllButton = MakeButton("全选", 58);
 		_imageMotionSelectAllButton.Location = new Point(626, 165);
@@ -2487,6 +2609,10 @@ internal sealed class MainForm : Form
 		};
 		panel6.Controls.Add(_imageTileAnimationDuration);
 		panel6.Controls.Add(MakeLabel("秒", 829, 207));
+		Label motionPreviewHint = MakeLabel("点击律动名称，右侧即循环试看；勾选后参与成片。", 694, 241);
+		motionPreviewHint.Size = new Size(350, 39);
+		motionPreviewHint.ForeColor = MutedColor;
+		panel6.Controls.Add(motionPreviewHint);
 		panel6.Controls.Add(MakeLabel("组间转场（可多选）", 20, 288));
 		_imageTransitions = new CheckedListBox
 		{
@@ -2573,8 +2699,69 @@ internal sealed class MainForm : Form
 		Label label2 = MakeLabel("每批创建独立“日期_图片成片_编号”文件夹；原图片不会被修改。", 292, 514);
 		label2.ForeColor = MutedColor;
 		panel6.Controls.Add(label2);
-		tableLayoutPanel2.Controls.Add(panel6, 0, 2);
+		ReorganizeImageVideoSettings(panel6, mainSettingsPage, layoutSettingsPage, transitionSettingsPage);
 		return tabPage;
+	}
+
+	private void ReorganizeImageVideoSettings(Panel basic, TabPage basicPage, TabPage layoutPage, TabPage transitionPage)
+	{
+		Panel layout = new Panel { Dock = DockStyle.Fill, BackColor = SurfaceColor, AutoScroll = true, AutoScrollMinSize = new Size(610, 485) };
+		Panel transitions = new Panel { Dock = DockStyle.Fill, BackColor = SurfaceColor, AutoScroll = true, AutoScrollMinSize = new Size(610, 315) };
+		foreach (Control control in basic.Controls.Cast<Control>().ToArray())
+		{
+			int originalY = control.Top;
+			if (originalY >= 45 && originalY < 278)
+			{
+				layout.Controls.Add(control);
+				control.Top = originalY < 164 ? originalY - 40 : originalY + 35;
+			}
+			else if (originalY >= 278 && originalY < 410)
+			{
+				transitions.Controls.Add(control);
+				control.Top = originalY < 378 ? originalY - 260 : originalY - 150;
+			}
+			else if (originalY >= 410) control.Top = originalY - 286;
+			control.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+		}
+		basic.AutoScrollMinSize = new Size(610, 300);
+		basicPage.Controls.Add(basic);
+		layoutPage.Controls.Add(layout);
+		transitionPage.Controls.Add(transitions);
+		foreach (Control label in basic.Controls.Cast<Control>().Where(c => c is Label && c.Text == "画面尺寸")) label.Location = new Point(20, 58);
+		_imageResolution.Location = new Point(95, 54);
+		_imageSmartEnhance.Location = new Point(295, 56);
+		_imageOutputFolder.Location = new Point(110, 130); _imageOutputFolder.Width = 370;
+		_imageOutputBrowseButton.Location = new Point(490, 127);
+		_imageOutputOpenButton.Location = new Point(550, 127);
+		_imageProgressBar.Width = 585; _imageStatusLabel.Width = 585;
+		foreach (Control note in basic.Controls.Cast<Control>().Where(c => c is Label && c.Text.StartsWith("每批创建独立"))) note.Width = 300;
+		_imageLayoutPool.Width = 450; _imageLayoutPool.ColumnWidth = 220;
+		_imageMotionPool.Width = 450; _imageMotionPool.ColumnWidth = 148;
+		_imageLayoutSelectAllButton.Location = new Point(144, 126);
+		_imageLayoutClearButton.Location = new Point(208, 126);
+		_imageLayoutOrder.Location = new Point(310, 126);
+		_imageMotionSelectAllButton.Location = new Point(144, 375);
+		_imageMotionClearButton.Location = new Point(208, 375);
+		_imageMotionOrder.Location = new Point(310, 375);
+		_imageTileAnimationDuration.Location = new Point(400, 420);
+		foreach (Control label in layout.Controls.Cast<Control>().Where(c => c is Label && c.Left >= 690))
+		{
+			if (label.Text.StartsWith("一个成品内")) label.Location = new Point(144, 163);
+			else if (label.Text == "效果时长") { label.Text = "入场时长"; label.Location = new Point(310, 424); }
+			else if (label.Text == "秒") label.Location = new Point(470, 424);
+		}
+		_imageTransitions.Width = 450; _imageTransitions.ColumnWidth = 145;
+		_imageTransitionSelectAllButton.Location = new Point(144, 116);
+		_imageTransitionClearButton.Location = new Point(208, 116);
+		_imageTransitionOrder.Location = new Point(378, 116);
+		_imageTransitionDuration.Location = new Point(395, 155);
+		foreach (Control label in transitions.Controls.Cast<Control>().Where(c => c is Label && c.Left >= 690))
+		{
+			if (label.Text == "使用方式") label.Location = new Point(310, 120);
+			else if (label.Text == "转场时间") label.Location = new Point(310, 159);
+			else if (label.Text == "秒") label.Location = new Point(480, 159);
+		}
+		foreach (Control hint in transitions.Controls.Cast<Control>().Where(c => c is Label && c.Left >= 584 && c.Text.Contains("原声混合"))) hint.Location = new Point(112, 270);
 	}
 
 	private static GroupBox MakeGroupBox(string text, int x, int y, int width, int height)
@@ -21706,6 +21893,7 @@ internal sealed class MainForm : Form
 		};
 		_imageMotionPool.ItemCheck += delegate
 		{
+			RestartImageMotionLivePreview();
 			if (base.IsHandleCreated)
 			{
 				BeginInvoke(new MethodInvoker(UpdateImageLayoutUi));
@@ -21715,6 +21903,8 @@ internal sealed class MainForm : Form
 				UpdateImageLayoutUi();
 			}
 		};
+		_imageTileAnimationDuration.ValueChanged += delegate { RestartImageMotionLivePreview(); };
+		_imageDuration.ValueChanged += delegate { RestartImageMotionLivePreview(); };
 		_imageLayoutOrder.SelectedIndexChanged += delegate
 		{
 			UpdateImageLayoutUi();
@@ -22016,10 +22206,635 @@ internal sealed class MainForm : Form
 		_slideshowImageList.Items.Clear();
 		for (int i = 0; i < _slideshowImages.Count; i++)
 		{
-			_slideshowImageList.Items.Add((i + 1).ToString("000") + "    " + Path.GetFileName(_slideshowImages[i]) + "    —    " + Path.GetDirectoryName(_slideshowImages[i]));
+			int groupIndex = _imageCustomGroups.FindIndex(g => g.Contains(_slideshowImages[i]));
+			string group = groupIndex < 0 ? "未分组" : "组 " + (groupIndex + 1);
+			_slideshowImageList.Items.Add((i + 1).ToString("000") + "    [" + group + "] " + Path.GetFileName(_slideshowImages[i]) + "    —    " + Path.GetDirectoryName(_slideshowImages[i]));
 		}
 		_slideshowImageList.EndUpdate();
 		_imageCountLabel.Text = "共 " + _slideshowImages.Count + " 张图片";
+		InvalidateImageLivePreview();
+	}
+
+	private void CreateImageVideoGroup()
+	{
+		if (_isRunning || _slideshowImageList.SelectedIndices.Count == 0) return;
+		var selected = _slideshowImageList.SelectedIndices.Cast<int>().OrderBy(i => i).Select(i => _slideshowImages[i]).ToList();
+		foreach (var group in _imageCustomGroups) group.RemoveAll(selected.Contains);
+		_imageCustomGroups.RemoveAll(group => group.Count == 0);
+		_imageCustomGroups.Add(selected);
+		_imageGroupingMode.SelectedIndex = 2;
+		UpdateSlideshowImageList();
+		_imageStatusLabel.Text = "已建立 " + _imageCustomGroups.Count + " 个成片组；未分组图片会各自成片。";
+	}
+
+	private void ConfigureImageGif()
+	{
+		if (!_isRunning && _imageSettingsTabs != null) _imageSettingsTabs.SelectedIndex = 3;
+	}
+
+	private void SyncImageGifControls()
+	{
+		_syncingImageGifControls = true;
+		try
+		{
+			ImageGifLayer layer = _imageGifSelectedIndex >= 0 && _imageGifSelectedIndex < _imageGifLayers.Count ? _imageGifLayers[_imageGifSelectedIndex] : null;
+			if (_imageGifPathBox != null) _imageGifPathBox.Text = layer?.Path ?? "";
+			if (_imageGifXControl != null) _imageGifXControl.Value = layer?.X ?? 50;
+			if (_imageGifYControl != null) _imageGifYControl.Value = layer?.Y ?? 50;
+			if (_imageGifSizeControl != null) _imageGifSizeControl.Value = layer?.Size ?? 25;
+			if (_imageGifRotationControl != null) _imageGifRotationControl.Value = layer?.Rotation ?? 0;
+			if (_imageGifButton != null) _imageGifButton.Text = _imageGifLayers.Count == 0 ? "GIF 设置 ↓" : "GIF 图层 " + _imageGifLayers.Count;
+		}
+		finally { _syncingImageGifControls = false; }
+		InvalidateImageLivePreview();
+	}
+
+	private void RefreshImageGifLayerList()
+	{
+		if (_imageGifLayerList == null) return;
+		_imageGifLayerList.BeginUpdate();
+		_imageGifLayerList.Items.Clear();
+		for (int i = 0; i < _imageGifLayers.Count; i++) _imageGifLayerList.Items.Add((i + 1) + ". " + Path.GetFileName(_imageGifLayers[i].Path));
+		_imageGifLayerList.EndUpdate();
+		_imageGifSelectedIndex = Math.Min(_imageGifSelectedIndex, _imageGifLayers.Count - 1);
+		_imageGifLayerList.SelectedIndex = _imageGifSelectedIndex;
+		SyncImageGifControls();
+	}
+
+	private Panel BuildImageParticleSettingsPanel()
+	{
+		Panel panel = new Panel { Dock = DockStyle.Fill, BackColor = SurfaceColor, AutoScroll = true, AutoScrollMinSize = new Size(590, 455) };
+		Color ink = _isDarkMode ? Color.FromArgb(235, 242, 255) : Color.FromArgb(22, 35, 55);
+		Color muted = _isDarkMode ? Color.FromArgb(169, 188, 220) : Color.FromArgb(75, 90, 110);
+		panel.Controls.Add(new Label { Left = 12, Top = 8, Width = 550, Height = 28, Text = "图片成片 · 动态粒子", Font = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold), ForeColor = ink });
+		panel.Controls.Add(new Label { Left = 12, Top = 41, Width = 555, Height = 38, Text = "选择一种效果，右侧画面立即播放；点击“一键播放预览”可查看合成视频。", ForeColor = muted });
+		_imageParticleList = new ListBox { Left = 12, Top = 85, Width = 555, Height = 250, BackColor = _isDarkMode ? Color.FromArgb(22, 37, 61) : Color.White, ForeColor = ink, Font = new Font("Microsoft YaHei UI", 10f), IntegralHeight = false };
+		_imageParticleList.Items.AddRange(new object[] { "无粒子", "轻雪飘落 · 安静柔和", "金色微尘 · 温暖高级", "星光闪烁 · 梦幻点缀", "萤火浮游 · 自然氛围", "柔焦光斑 · 朦胧氛围", "彩纸飘落 · 庆祝活力" });
+		_imageParticleList.SelectedIndex = Math.Max(0, Math.Min(6, _imageParticlePreset));
+		_imageParticleList.SelectedIndexChanged += delegate { _imageParticlePreset = _imageParticleList.SelectedIndex; InvalidateImageLivePreview(); };
+		panel.Controls.Add(_imageParticleList);
+		panel.Controls.Add(new Label { Left = 12, Top = 353, Width = 135, Height = 23, Text = "粒子密度", ForeColor = ink, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) });
+		_imageParticleDensitySlider = new TrackBar { Left = 145, Top = 344, Width = 410, Height = 42, Minimum = 10, Maximum = 100, Value = _imageParticleDensity, TickStyle = TickStyle.None, BackColor = SurfaceColor };
+		_imageParticleDensitySlider.ValueChanged += delegate { _imageParticleDensity = _imageParticleDensitySlider.Value; InvalidateImageLivePreview(); };
+		panel.Controls.Add(_imageParticleDensitySlider);
+		panel.Controls.Add(new Label { Left = 12, Top = 397, Width = 550, Height = 45, Text = "粒子自动循环播放并覆盖整个视频。密度越高，画面越热闹，导出速度也会稍慢。", ForeColor = muted });
+		return panel;
+	}
+
+	private Panel BuildImageGifSettingsPanel()
+	{
+		Panel panel = new Panel { Dock = DockStyle.Fill, BackColor = SurfaceColor, AutoScroll = true, AutoScrollMinSize = new Size(590, 565) };
+		Color ink = _isDarkMode ? Color.FromArgb(235, 242, 255) : Color.FromArgb(22, 35, 55);
+		Color muted = _isDarkMode ? Color.FromArgb(169, 188, 220) : Color.FromArgb(75, 90, 110);
+		panel.Controls.Add(new Label { Left = 12, Top = 8, Width = 550, Height = 27, Text = "GIF 图层与水印", Font = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold), ForeColor = ink });
+		panel.Controls.Add(new Label { Left = 12, Top = 38, Width = 550, Height = 20, Text = "可添加多个 GIF；点击右侧预览中的贴图，或从列表选择图层。", ForeColor = muted });
+		_imageGifLayerList = new ListBox { Left = 12, Top = 68, Width = 220, Height = 225, BackColor = _isDarkMode ? Color.FromArgb(22, 37, 61) : Color.White, ForeColor = ink, Font = new Font("Microsoft YaHei UI", 9f) };
+		_imageGifLayerList.SelectedIndexChanged += delegate { _imageGifSelectedIndex = _imageGifLayerList.SelectedIndex; SyncImageGifControls(); };
+		panel.Controls.Add(_imageGifLayerList);
+		_imageGifPathBox = new TextBox { Left = 250, Top = 68, Width = 320, Height = 28, ReadOnly = true, BackColor = _isDarkMode ? Color.FromArgb(28, 45, 72) : Color.White, ForeColor = ink };
+		panel.Controls.Add(_imageGifPathBox);
+		Button browse = MakeButton("添加 GIF…", 104);
+		browse.Location = new Point(12, 304);
+		browse.Click += delegate
+		{
+			if (_isRunning) return;
+			using (OpenFileDialog file = new OpenFileDialog { Filter = "GIF 动画|*.gif", Title = "选择动态贴图（可多选）", Multiselect = true })
+			{
+				if (file.ShowDialog(this) != DialogResult.OK) return;
+				foreach (string path in file.FileNames) _imageGifLayers.Add(new ImageGifLayer { Path = path });
+				_imageGifSelectedIndex = _imageGifLayers.Count - 1;
+				RefreshImageGifLayerList();
+			}
+		};
+		panel.Controls.Add(browse);
+		Button clear = MakeButton("删除选中", 104);
+		clear.Location = new Point(128, 304);
+		clear.Click += delegate
+		{
+			if (_isRunning || _imageGifSelectedIndex < 0) return;
+			_imageGifLayers.RemoveAt(_imageGifSelectedIndex);
+			RefreshImageGifLayerList();
+		};
+		panel.Controls.Add(clear);
+		panel.Controls.Add(new Label { Left = 12, Top = 350, Width = 225, Height = 48, Text = "列表顺序即叠加顺序；后面的 GIF 显示在上层。", ForeColor = muted });
+		string[] names = { "横向中心", "纵向中心", "贴图大小", "旋转角度" };
+		NumericUpDown[] controls = new NumericUpDown[4];
+		for (int i = 0; i < 4; i++)
+		{
+			int row = i;
+			int top = 120 + 85 * i;
+			int minimum = i == 2 ? 1 : i == 3 ? -180 : -200;
+			int maximum = i == 2 ? 400 : i == 3 ? 180 : 200;
+			int initial = i == 2 ? 25 : i == 3 ? 0 : 50;
+			panel.Controls.Add(new Label { Left = 250, Top = top, Width = 155, Height = 22, Text = names[i] + (i == 3 ? "  °" : "  %"), ForeColor = ink, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold) });
+			NumericUpDown value = new NumericUpDown { Left = 490, Top = top - 2, Width = 80, Minimum = minimum, Maximum = maximum, Value = initial, BackColor = Color.White, ForeColor = Color.FromArgb(20, 30, 50) };
+			TrackBar slider = new TrackBar { Left = 245, Top = top + 25, Width = 325, Height = 40, Minimum = minimum, Maximum = maximum, TickStyle = TickStyle.None, Value = initial, BackColor = SurfaceColor };
+			value.ValueChanged += delegate
+			{
+				if (slider.Value != (int)value.Value) slider.Value = (int)value.Value;
+				if (_syncingImageGifControls || _imageGifSelectedIndex < 0 || _imageGifSelectedIndex >= _imageGifLayers.Count) return;
+				ImageGifLayer layer = _imageGifLayers[_imageGifSelectedIndex];
+				if (row == 0) layer.X = (int)value.Value;
+				else if (row == 1) layer.Y = (int)value.Value;
+				else if (row == 2) layer.Size = (int)value.Value;
+				else layer.Rotation = (int)value.Value;
+				InvalidateImageLivePreview();
+			};
+			slider.ValueChanged += delegate { if (value.Value != slider.Value) value.Value = slider.Value; };
+			controls[i] = value;
+			panel.Controls.Add(value);
+			panel.Controls.Add(slider);
+		}
+		_imageGifXControl = controls[0]; _imageGifYControl = controls[1]; _imageGifSizeControl = controls[2]; _imageGifRotationControl = controls[3];
+		panel.Controls.Add(new Label { Left = 12, Top = 490, Width = 550, Height = 42, Text = "右侧拖动贴图移动；拖动右下角缩放，顶部圆点旋转。画面外部分在预览和导出时都会裁掉。", ForeColor = muted });
+		_imageUseWatermarks.Location = new Point(12, 535);
+		_imageWatermarkSettingsButton.Location = new Point(260, 529);
+		panel.Controls.Add(_imageUseWatermarks);
+		panel.Controls.Add(_imageWatermarkSettingsButton);
+		RefreshImageGifLayerList();
+		return panel;
+	}
+
+	private void OpenLargeImagePreview()
+	{
+		if (_imageLargePreviewWindow != null && !_imageLargePreviewWindow.IsDisposed) { _imageLargePreviewWindow.BringToFront(); return; }
+		_imageLargePreviewWindow = new Form { Text = "图片成片 · 9:16 放大预览", Width = 620, Height = 860, MinimumSize = new Size(400, 600), StartPosition = FormStartPosition.CenterParent, BackColor = SurfaceColor };
+		_imageLargePreviewPicture = new PictureBox { Dock = DockStyle.Fill, BackColor = Color.Black };
+		_imageLargePreviewPicture.Paint += PaintImageVideoLivePreview;
+		_imageLargePreviewPicture.MouseDown += ImageGifPreviewMouseDown;
+		_imageLargePreviewPicture.MouseMove += ImageGifPreviewMouseMove;
+		_imageLargePreviewPicture.MouseUp += delegate { _imageGifDragging = false; };
+		_imageLargePreviewWindow.Controls.Add(_imageLargePreviewPicture);
+		_imageLargePreviewWindow.FormClosed += delegate { _imageLargePreviewPicture = null; _imageLargePreviewWindow = null; };
+		_imageLargePreviewWindow.Show(this);
+	}
+
+	private void InvalidateImageLivePreview()
+	{
+		_imageLivePreview?.Invalidate();
+		_imageLargePreviewPicture?.Invalidate();
+	}
+
+	private void RestartImageMotionLivePreview()
+	{
+		_imageMotionPreviewStartedUtc = DateTime.UtcNow;
+		InvalidateImageLivePreview();
+	}
+
+	private Image GetImageLivePreviewSource(string path)
+	{
+		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+		DateTime modified = File.GetLastWriteTimeUtc(path);
+		if (_imagePreviewSource != null && string.Equals(path, _imagePreviewSourcePath, StringComparison.OrdinalIgnoreCase) && modified == _imagePreviewSourceModifiedUtc) return _imagePreviewSource;
+		_imagePreviewSource?.Dispose();
+		_imagePreviewSource = null;
+		_imagePreviewSourcePath = path;
+		_imagePreviewSourceModifiedUtc = modified;
+		using (Image loaded = Image.FromFile(path)) _imagePreviewSource = new Bitmap(loaded);
+		return _imagePreviewSource;
+	}
+
+	private static void DrawImagePreviewCover(Graphics graphics, Image source, Rectangle destination, float opacity)
+	{
+		if (destination.Width <= 0 || destination.Height <= 0) return;
+		float sourceAspect = (float)source.Width / source.Height;
+		float targetAspect = (float)destination.Width / destination.Height;
+		Rectangle sourceRect;
+		if (sourceAspect > targetAspect)
+		{
+			int cropWidth = Math.Max(1, (int)Math.Round(source.Height * targetAspect));
+			sourceRect = new Rectangle((source.Width - cropWidth) / 2, 0, cropWidth, source.Height);
+		}
+		else
+		{
+			int cropHeight = Math.Max(1, (int)Math.Round(source.Width / targetAspect));
+			sourceRect = new Rectangle(0, (source.Height - cropHeight) / 2, source.Width, cropHeight);
+		}
+		using (var attributes = new System.Drawing.Imaging.ImageAttributes())
+		{
+			var matrix = new System.Drawing.Imaging.ColorMatrix { Matrix33 = Math.Max(0, Math.Min(1, opacity)) };
+			attributes.SetColorMatrix(matrix);
+			graphics.DrawImage(source, destination, sourceRect.X, sourceRect.Y, sourceRect.Width, sourceRect.Height, GraphicsUnit.Pixel, attributes);
+		}
+	}
+
+	private static double ImageMotionClamp(double value) => Math.Max(0, Math.Min(1, value));
+	private static double ImageMotionEase(double value) { value = ImageMotionClamp(value); return value * value * (3 - 2 * value); }
+
+	private void DrawImageMotionLivePreview(Graphics graphics, Image source, Rectangle frame, string effect, double elapsed, double pageDuration, double entryDuration)
+	{
+		float alpha = 1f;
+		double smooth = ImageMotionEase(elapsed / Math.Max(0.2, pageDuration));
+		double zoom = 1.0, xFactor = 0.5, yFactor = 0.5;
+		bool pan = false;
+		if (IsImagePageMotion(effect))
+		{
+			switch (effect)
+			{
+				case "轻柔漂移": xFactor = 0.5 + 0.20 * Math.Sin(2 * Math.PI * elapsed / pageDuration); yFactor = 0.5 + 0.13 * Math.Cos(2 * Math.PI * elapsed / pageDuration); pan = true; break;
+				case "持续·平移向左": xFactor = smooth; pan = true; break;
+				case "持续·平移向右": xFactor = 1 - smooth; pan = true; break;
+				case "持续·平移向上": yFactor = smooth; pan = true; break;
+				case "持续·平移向下": yFactor = 1 - smooth; pan = true; break;
+				case "持续·对角漂移": xFactor = smooth; yFactor = 1 - smooth; pan = true; break;
+				case "呼吸缩放": zoom = 1.035 + 0.014 * Math.Sin(2 * Math.PI * elapsed / pageDuration); break;
+				case "微微律动": zoom = 1.035 + 0.007 * Math.Sin(4 * Math.PI * elapsed / pageDuration); break;
+				case "持续·缓慢拉远": zoom = 1.085 - 0.075 * smooth; break;
+				default: zoom = 1.010 + 0.060 * smooth; break;
+			}
+		}
+		if (pan) zoom = 1.09;
+		int drawWidth = Math.Max(1, (int)Math.Ceiling(frame.Width * zoom));
+		int drawHeight = Math.Max(1, (int)Math.Ceiling(frame.Height * zoom));
+		int x = frame.X - (int)Math.Round((drawWidth - frame.Width) * xFactor);
+		int y = frame.Y - (int)Math.Round((drawHeight - frame.Height) * yFactor);
+		if (!IsImagePageMotion(effect))
+		{
+			double entryProgress = ImageMotionClamp(elapsed / entryDuration);
+			double ease = 1 - Math.Pow(1 - entryProgress, 3);
+			if (effect != "直接显示" && effect != "向右滑出" && effect != "向下沉出") alpha = (float)entryProgress;
+			if (effect == "从左滑入后淡出") x -= (int)Math.Round(frame.Width * (1 - ease));
+			else if (effect == "上浮进入后淡出") y += (int)Math.Round(frame.Height * (1 - ease));
+			else if (effect == "入场·上扬出现") y += (int)Math.Round(frame.Height / 12.0 * (1 - ease));
+			else if (effect == "入场·从右滑入") x += (int)Math.Round(frame.Width * (1 - ease));
+			else if (effect == "入场·回弹出现") y += (int)Math.Round(frame.Height / 10.0 * (1 - ease) - frame.Height / 10.0 * 0.13 * Math.Sin(Math.PI * entryProgress));
+			if (effect == "交错淡入淡出" || effect.EndsWith("后淡出", StringComparison.Ordinal) || effect == "向右滑出" || effect == "向下沉出")
+			{
+				double exitProgress = ImageMotionClamp((elapsed - (pageDuration - entryDuration)) / entryDuration);
+				alpha *= (float)(1 - exitProgress);
+				if (effect == "向右滑出") x += (int)Math.Round(frame.Width * exitProgress);
+				else if (effect == "向下沉出") y += (int)Math.Round(frame.Height * exitProgress);
+			}
+		}
+		var state = graphics.Save();
+		try
+		{
+			graphics.SetClip(frame);
+			graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+			DrawImagePreviewCover(graphics, source, new Rectangle(x, y, drawWidth, drawHeight), alpha);
+		}
+		finally { graphics.Restore(state); }
+	}
+
+	private GifPreviewResource GetImageGifPreviewResource(string path)
+	{
+		if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+		if (_imageGifPreviewResources.TryGetValue(path, out GifPreviewResource cached)) return cached;
+		GifPreviewResource resource = new GifPreviewResource();
+		try
+		{
+			resource.Stream = new MemoryStream(File.ReadAllBytes(path));
+			resource.Image = Image.FromStream(resource.Stream);
+			int count = resource.Image.GetFrameCount(FrameDimension.Time);
+			resource.Delays = Enumerable.Repeat(100, Math.Max(1, count)).ToArray();
+			try
+			{
+				byte[] raw = resource.Image.GetPropertyItem(0x5100).Value;
+				for (int i = 0; i < resource.Delays.Length && i * 4 + 4 <= raw.Length; i++) resource.Delays[i] = Math.Max(20, BitConverter.ToInt32(raw, i * 4) * 10);
+			}
+			catch { }
+			resource.NextFrame = DateTime.UtcNow.AddMilliseconds(resource.Delays[0]);
+			_imageGifPreviewResources[path] = resource;
+			return resource;
+		}
+		catch { resource.Dispose(); return null; }
+	}
+
+	private void AdvanceImageGifFrames()
+	{
+		bool changed = false;
+		DateTime now = DateTime.UtcNow;
+		foreach (ImageGifLayer layer in _imageGifLayers)
+		{
+			GifPreviewResource resource = GetImageGifPreviewResource(layer.Path);
+			if (resource == null || resource.Delays.Length < 2 || now < resource.NextFrame) continue;
+			resource.Frame = (resource.Frame + 1) % resource.Delays.Length;
+			resource.NextFrame = now.AddMilliseconds(resource.Delays[resource.Frame]);
+			try { resource.Image.SelectActiveFrame(FrameDimension.Time, resource.Frame); changed = true; } catch { }
+		}
+		if (changed || _imageParticlePreset > 0 || (_imageLivePreview != null && _imageLivePreview.Visible && _slideshowImages.Count > 0)) InvalidateImageLivePreview();
+	}
+
+	private static double ImageParticleWrap(double value) => value - Math.Floor(value);
+
+	private static void PaintImageParticles(Graphics graphics, Rectangle frame, int preset, int density, double seconds)
+	{
+		if (preset <= 0 || frame.Width < 1 || frame.Height < 1) return;
+		var state = graphics.Save();
+		try
+		{
+			graphics.SetClip(frame);
+			graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+			Random random = new Random(1937 + preset * 997);
+			double phase = ImageParticleWrap(seconds / 4.0);
+			int count = (int)Math.Round((preset == 5 ? 8 : 12) + density * (preset == 5 ? 0.18 : 0.38));
+			for (int i = 0; i < count; i++)
+			{
+				double x0 = random.NextDouble(), y0 = random.NextDouble(), wave = random.NextDouble(), size = random.NextDouble(), brightness = random.NextDouble();
+				double turn = 2 * Math.PI * (phase + wave);
+				double x = x0 + (preset == 4 ? 0.035 : 0.018) * Math.Sin(turn);
+				double y = preset == 2 ? ImageParticleWrap(y0 - phase * (i % 3 == 0 ? 2 : 1)) :
+					preset == 3 || preset == 4 || preset == 5 ? y0 + 0.015 * Math.Sin(turn) : ImageParticleWrap(y0 + phase * (i % 3 == 0 ? 2 : 1));
+				float px = frame.X + (float)(x * frame.Width), py = frame.Y + (float)(y * frame.Height);
+				float radius = Math.Max(1.5f, frame.Width * (float)((preset == 5 ? 0.025 : preset == 6 ? 0.008 : 0.004) + size * (preset == 5 ? 0.04 : preset == 6 ? 0.014 : preset == 4 ? 0.012 : 0.009)));
+				int alpha = (int)(preset == 3 ? 75 + 150 * Math.Pow(Math.Sin(turn), 2) : preset == 5 ? 32 + brightness * 34 : 80 + brightness * 120);
+				Color color;
+				switch (preset)
+				{
+					case 1: color = Color.White; break;
+					case 2: color = Color.FromArgb(255, 205 + i % 3 * 12, 105 + i % 4 * 15); break;
+					case 3: color = Color.FromArgb(230, 245, 255); break;
+					case 4: color = i % 3 == 0 ? Color.FromArgb(174, 255, 166) : Color.FromArgb(255, 230, 115); break;
+					case 5: color = i % 2 == 0 ? Color.FromArgb(255, 225, 185) : Color.FromArgb(185, 215, 255); break;
+					default: color = Color.FromArgb(255 - i % 3 * 80, 105 + i % 4 * 35, 130 + i % 5 * 20); break;
+				}
+				if (preset == 6)
+				{
+					using (Brush brush = new SolidBrush(Color.FromArgb(Math.Min(255, alpha), color)))
+					{
+						var rotated = graphics.Save();
+						graphics.TranslateTransform(px, py);
+						graphics.RotateTransform((float)(360 * phase * (i % 2 == 0 ? 1 : -1) + wave * 180));
+						graphics.FillRectangle(brush, -radius, -radius * 0.55f, radius * 2, radius * 1.1f);
+						graphics.Restore(rotated);
+					}
+				}
+				else
+				{
+					if (preset >= 2 && preset <= 5)
+						using (Brush glow = new SolidBrush(Color.FromArgb(Math.Min(70, alpha / 4), color))) graphics.FillEllipse(glow, px - radius * 2, py - radius * 2, radius * 4, radius * 4);
+					using (Brush brush = new SolidBrush(Color.FromArgb(Math.Min(255, alpha), color))) graphics.FillEllipse(brush, px - radius, py - radius, radius * 2, radius * 2);
+				}
+			}
+		}
+		finally { graphics.Restore(state); }
+	}
+
+	private static Rectangle ImagePreviewFrame(Control canvas)
+	{
+		Rectangle bounds = canvas.ClientRectangle;
+		int h = Math.Max(1, bounds.Height - 8);
+		int w = Math.Max(1, Math.Min(bounds.Width - 8, (int)(h * 9.0 / 16.0)));
+		h = Math.Min(h, (int)(w * 16.0 / 9.0));
+		return new Rectangle((bounds.Width - w) / 2, (bounds.Height - h) / 2, w, h);
+	}
+
+	private Rectangle ImageGifPreviewRectangle(ImageGifLayer layer, Rectangle frame)
+	{
+		GifPreviewResource resource = GetImageGifPreviewResource(layer.Path);
+		if (resource == null) return Rectangle.Empty;
+		int width = Math.Max(1, frame.Width * layer.Size / 100);
+		int height = Math.Max(1, width * resource.Image.Height / resource.Image.Width);
+		return new Rectangle(frame.X + frame.Width * layer.X / 100 - width / 2, frame.Y + frame.Height * layer.Y / 100 - height / 2, width, height);
+	}
+
+	private static PointF ImageGifRotatedPoint(Rectangle rect, int degrees, float x, float y)
+	{
+		double angle = degrees * Math.PI / 180.0;
+		float dx = x - rect.X - rect.Width / 2f, dy = y - rect.Y - rect.Height / 2f;
+		return new PointF((float)(rect.X + rect.Width / 2f + dx * Math.Cos(angle) - dy * Math.Sin(angle)),
+			(float)(rect.Y + rect.Height / 2f + dx * Math.Sin(angle) + dy * Math.Cos(angle)));
+	}
+
+	private static bool ImageGifHitTest(Rectangle rect, int rotation, Point point)
+	{
+		PointF unrotated = ImageGifRotatedPoint(rect, -rotation, point.X, point.Y);
+		return rect.Contains(Point.Round(unrotated));
+	}
+
+	private static PointF ImageGifResizeHandle(Rectangle rect, int rotation) => ImageGifRotatedPoint(rect, rotation, rect.Right, rect.Bottom);
+	private static PointF ImageGifRotationHandle(Rectangle rect, int rotation) => ImageGifRotatedPoint(rect, rotation, rect.X + rect.Width / 2f, rect.Y - 24);
+	private static bool ImageGifNearHandle(Point point, PointF handle) => Math.Abs(point.X - handle.X) <= 13 && Math.Abs(point.Y - handle.Y) <= 13;
+
+	private void ImageGifPreviewMouseDown(object sender, MouseEventArgs e)
+	{
+		if (_isRunning || e.Button != MouseButtons.Left) return;
+		Rectangle frame = ImagePreviewFrame((Control)sender);
+		if (_imageGifSelectedIndex >= 0 && _imageGifSelectedIndex < _imageGifLayers.Count)
+		{
+			ImageGifLayer selected = _imageGifLayers[_imageGifSelectedIndex];
+			Rectangle bounds = ImageGifPreviewRectangle(selected, frame);
+			if (ImageGifNearHandle(e.Location, ImageGifResizeHandle(bounds, selected.Rotation)) || ImageGifNearHandle(e.Location, ImageGifRotationHandle(bounds, selected.Rotation)))
+			{
+				_imageGifDragMode = ImageGifNearHandle(e.Location, ImageGifRotationHandle(bounds, selected.Rotation)) ? 3 : 2;
+				_imageGifDragging = true;
+				_imageGifDragStart = e.Location;
+				_imageGifDragOriginal = selected.Copy();
+				return;
+			}
+		}
+		for (int i = _imageGifLayers.Count - 1; i >= 0; i--)
+		{
+			Rectangle rect = ImageGifPreviewRectangle(_imageGifLayers[i], frame);
+			if (!frame.Contains(e.Location) || !ImageGifHitTest(rect, _imageGifLayers[i].Rotation, e.Location)) continue;
+			_imageGifSelectedIndex = i;
+			_imageGifLayerList.SelectedIndex = i;
+			_imageSettingsTabs.SelectedIndex = 3;
+			_imageGifDragging = true;
+			_imageGifDragMode = 1;
+			_imageGifDragStart = e.Location;
+			_imageGifDragOriginal = _imageGifLayers[i].Copy();
+			InvalidateImageLivePreview();
+			break;
+		}
+	}
+
+	private void ImageGifPreviewMouseMove(object sender, MouseEventArgs e)
+	{
+		if (!_imageGifDragging || e.Button != MouseButtons.Left || _imageGifSelectedIndex < 0 || _imageGifSelectedIndex >= _imageGifLayers.Count) return;
+		ImageGifLayer layer = _imageGifLayers[_imageGifSelectedIndex];
+		Rectangle frame = ImagePreviewFrame((Control)sender);
+		if (_imageGifDragMode == 1)
+		{
+			layer.X = Math.Max(-200, Math.Min(200, _imageGifDragOriginal.X + (int)Math.Round((e.X - _imageGifDragStart.X) * 100.0 / frame.Width)));
+			layer.Y = Math.Max(-200, Math.Min(200, _imageGifDragOriginal.Y + (int)Math.Round((e.Y - _imageGifDragStart.Y) * 100.0 / frame.Height)));
+		}
+		else
+		{
+			Rectangle original = ImageGifPreviewRectangle(_imageGifDragOriginal, frame);
+			double cx = original.X + original.Width / 2.0, cy = original.Y + original.Height / 2.0;
+			if (_imageGifDragMode == 2)
+			{
+				double start = Math.Sqrt(Math.Pow(_imageGifDragStart.X - cx, 2) + Math.Pow(_imageGifDragStart.Y - cy, 2));
+				double now = Math.Sqrt(Math.Pow(e.X - cx, 2) + Math.Pow(e.Y - cy, 2));
+				layer.Size = Math.Max(1, Math.Min(400, (int)Math.Round(_imageGifDragOriginal.Size * now / Math.Max(1, start))));
+			}
+			else if (_imageGifDragMode == 3)
+			{
+				double start = Math.Atan2(_imageGifDragStart.Y - cy, _imageGifDragStart.X - cx);
+				double now = Math.Atan2(e.Y - cy, e.X - cx);
+				int degrees = _imageGifDragOriginal.Rotation + (int)Math.Round((now - start) * 180.0 / Math.PI);
+				layer.Rotation = ((degrees + 540) % 360) - 180;
+			}
+		}
+		SyncImageGifControls();
+	}
+
+	private void PaintImageVideoLivePreview(object sender, PaintEventArgs e)
+	{
+		PictureBox canvas = sender as PictureBox;
+		if (canvas == null) return;
+		Rectangle frame = ImagePreviewFrame(canvas);
+		e.Graphics.FillRectangle(Brushes.Black, frame);
+		int index = _slideshowImageList.SelectedIndices.Count > 0 ? _slideshowImageList.SelectedIndices[0] : 0;
+		int motionIndex = _imageMotionPool?.SelectedIndex ?? -1;
+		string motionEffect = motionIndex >= 0 ? _imageMotionPool.Items[motionIndex].ToString() : "轻微放大";
+		double motionDuration = Math.Max(1.0, _imageDuration == null ? 3.0 : (double)_imageDuration.Value);
+		double motionTime = Math.Max(0, (DateTime.UtcNow - _imageMotionPreviewStartedUtc).TotalSeconds) % motionDuration;
+		double entryDuration = Math.Min(Math.Max(0.1, _imageTileAnimationDuration == null ? 0.6 : (double)_imageTileAnimationDuration.Value), Math.Max(0.1, motionDuration * 0.35));
+		if (index >= 0 && index < _slideshowImages.Count && File.Exists(_slideshowImages[index]))
+		{
+			try
+			{
+				Image source = GetImageLivePreviewSource(_slideshowImages[index]);
+				if (source != null) DrawImageMotionLivePreview(e.Graphics, source, frame, motionEffect, motionTime, motionDuration, entryDuration);
+			}
+			catch { }
+		}
+		PaintImageParticles(e.Graphics, frame, _imageParticlePreset, _imageParticleDensity, (DateTime.UtcNow.Ticks / (double)TimeSpan.TicksPerSecond) % 4.0);
+		if (_imageUseWatermarks.Checked)
+		{
+			try
+			{
+				GetImageVideoResolution(out int outputWidth, out int outputHeight);
+				float previewScale = (float)frame.Width / outputWidth;
+				WatermarkProfile profile = CaptureWatermarkProfile(true);
+				foreach (WatermarkSettings layer in profile.Layers.Where(item => item.IsText && !string.IsNullOrWhiteSpace(item.Text)))
+				{
+					string face = string.IsNullOrWhiteSpace(layer.FontFamilyName) ? "Microsoft YaHei UI" : layer.FontFamilyName;
+					using (Font font = new Font(face, Math.Max(5f, layer.FontSize * previewScale), (layer.FontBold ? FontStyle.Bold : FontStyle.Regular) | (layer.FontItalic ? FontStyle.Italic : FontStyle.Regular), GraphicsUnit.Pixel))
+					{
+						SizeF size = e.Graphics.MeasureString(layer.Text, font, Math.Max(1, frame.Width * Math.Max(1, layer.TextMaxWidthPercent) / 100));
+						int textW = Math.Min(frame.Width, (int)Math.Ceiling(size.Width));
+						int textH = Math.Min(frame.Height, (int)Math.Ceiling(size.Height));
+						Point point = WatermarkPoint(layer.Position, frame.Width, frame.Height, textW, textH, (int)(layer.OffsetX * previewScale), (int)(layer.OffsetY * previewScale), layer.SafeMarginPercent, layer.AllowOverflow);
+						using (Brush brush = new SolidBrush(Color.FromArgb((int)(Math.Max(0, Math.Min(1, layer.Opacity)) * 255), layer.TextColor)))
+							e.Graphics.DrawString(layer.Text, font, brush, new RectangleF(frame.X + point.X, frame.Y + point.Y, textW, textH));
+					}
+				}
+				foreach (WatermarkImageLibrary library in profile.ImageLibraries)
+				{
+					WatermarkSettings layer = library.Images.FirstOrDefault(item => File.Exists(item.ImagePath));
+					if (layer == null) continue;
+					using (Image logo = Image.FromFile(layer.ImagePath))
+					{
+						int logoW = Math.Max(1, frame.Width * layer.ImageWidthPercent / 100);
+						int logoH = Math.Max(1, logoW * logo.Height / logo.Width);
+						Point point = WatermarkPoint(layer.Position, frame.Width, frame.Height, logoW, logoH, (int)(layer.OffsetX * previewScale), (int)(layer.OffsetY * previewScale));
+						using (var attributes = new System.Drawing.Imaging.ImageAttributes())
+						{
+							var matrix = new System.Drawing.Imaging.ColorMatrix();
+							matrix.Matrix33 = (float)Math.Max(0, Math.Min(1, layer.Opacity));
+							attributes.SetColorMatrix(matrix);
+							e.Graphics.DrawImage(logo, new Rectangle(frame.X + point.X, frame.Y + point.Y, logoW, logoH), 0, 0, logo.Width, logo.Height, GraphicsUnit.Pixel, attributes);
+						}
+					}
+				}
+			}
+			catch { }
+		}
+		for (int i = 0; i < _imageGifLayers.Count; i++)
+		{
+			try
+			{
+				GifPreviewResource resource = GetImageGifPreviewResource(_imageGifLayers[i].Path);
+				if (resource == null) continue;
+				ImageGifLayer layer = _imageGifLayers[i];
+				Rectangle rect = ImageGifPreviewRectangle(layer, frame);
+				var state = e.Graphics.Save();
+				e.Graphics.SetClip(frame);
+				e.Graphics.TranslateTransform(rect.X + rect.Width / 2f, rect.Y + rect.Height / 2f);
+				e.Graphics.RotateTransform(layer.Rotation);
+				e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+				e.Graphics.DrawImage(resource.Image, -rect.Width / 2f, -rect.Height / 2f, rect.Width, rect.Height);
+				e.Graphics.Restore(state);
+				if (i == _imageGifSelectedIndex)
+				{
+					PointF[] corners = { ImageGifRotatedPoint(rect, layer.Rotation, rect.Left, rect.Top), ImageGifRotatedPoint(rect, layer.Rotation, rect.Right, rect.Top), ImageGifRotatedPoint(rect, layer.Rotation, rect.Right, rect.Bottom), ImageGifRotatedPoint(rect, layer.Rotation, rect.Left, rect.Bottom) };
+					using (Pen selected = new Pen(Color.FromArgb(40, 170, 255), 2f) { DashStyle = DashStyle.Dash }) e.Graphics.DrawPolygon(selected, corners);
+					PointF resize = ImageGifResizeHandle(rect, layer.Rotation), rotate = ImageGifRotationHandle(rect, layer.Rotation);
+					using (Brush handle = new SolidBrush(Color.White))
+					using (Pen outline = new Pen(Color.FromArgb(40, 170, 255), 2f))
+					{
+						e.Graphics.FillEllipse(handle, resize.X - 6, resize.Y - 6, 12, 12);
+						e.Graphics.DrawEllipse(outline, resize.X - 6, resize.Y - 6, 12, 12);
+						e.Graphics.FillEllipse(handle, rotate.X - 6, rotate.Y - 6, 12, 12);
+						e.Graphics.DrawEllipse(outline, rotate.X - 6, rotate.Y - 6, 12, 12);
+					}
+				}
+			}
+			catch { }
+		}
+		if (frame.Width > 120 && frame.Height > 50)
+		{
+			Rectangle status = new Rectangle(frame.X + 6, frame.Y + 6, frame.Width - 12, 23);
+			using (Brush backdrop = new SolidBrush(Color.FromArgb(170, 8, 18, 32))) e.Graphics.FillRectangle(backdrop, status);
+			using (Brush ink = new SolidBrush(Color.White))
+			using (Font font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold))
+				e.Graphics.DrawString("▶ " + motionEffect + "  " + motionTime.ToString("0.0", CultureInfo.InvariantCulture) + "/" + motionDuration.ToString("0.0", CultureInfo.InvariantCulture) + "s", font, ink, status);
+		}
+		using (Pen border = new Pen(Color.FromArgb(120, 180, 215))) e.Graphics.DrawRectangle(border, frame);
+	}
+
+	private async void PreviewImageVideo()
+	{
+		if (_isRunning || _slideshowImages.Count == 0) return;
+		string ffmpeg = FindFfmpeg();
+		if (ffmpeg == null) { MessageBox.Show(this, "没有找到 FFmpeg。", "预览不可用"); return; }
+		if (_imageLayoutPool.CheckedIndices.Count == 0 || _imageMotionPool.CheckedIndices.Count == 0)
+		{ MessageBox.Show(this, "请至少勾选一种排版和一种展示律动。", "预览不可用"); return; }
+		List<string> selected = _slideshowImageList.SelectedIndices.Cast<int>().OrderBy(i => i).Select(i => _slideshowImages[i]).Where(File.Exists).ToList();
+		if (selected.Count == 0) selected = _slideshowImages.Where(File.Exists).ToList();
+		if (selected.Count == 0) { MessageBox.Show(this, "图片文件不存在。", "预览不可用"); return; }
+		ImageVideoLayoutPlan plan = CaptureImageVideoLayoutPlan();
+		TransitionPlan transition = CaptureImageTransitionSettings();
+		BgmPlan bgm = CaptureBgmPlan(_imageBgm);
+		WatermarkProfile watermark = CaptureWatermarkProfile(_imageUseWatermarks.Checked);
+		List<ImageGifLayer> gifLayers = _imageGifLayers.Select(item => item.Copy()).ToList();
+		int particlePreset = _imageParticlePreset, particleDensity = _imageParticleDensity;
+		GetImageVideoResolution(out int width, out int height);
+		double duration = Math.Min(8.0, Math.Max(1.0, plan.TargetDurationSeconds));
+		double pageDuration = decimal.ToDouble(_imageDuration.Value);
+		string previewFile = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_ImagePreview_" + Guid.NewGuid().ToString("N") + ".mp4");
+		_imagePreviewButton.Enabled = false;
+		_imageStatusLabel.Text = "正在生成图片成片动态预览…";
+		string failure = null;
+		try
+		{
+			await Task.Run(() =>
+			{
+				try
+				{
+					ImageVideoLayoutPlan previewPlan = CloneImageVideoLayoutPlan(plan);
+					List<string> sequence = BuildImagePageSequence(selected, pageDuration, duration, transition, previewPlan, 0, out var pages, out var actualPageDuration, out var transitionDuration);
+					previewPlan.Pages = pages;
+					previewPlan.TargetDurationSeconds = duration;
+					TransitionPlan previewTransition = transition.Enabled && pages.Count > 1 ? CopyTransitionPlanWithDuration(transition, transitionDuration) : new TransitionPlan { DurationSeconds = 0.0 };
+					int exitCode = RenderImageSlideshow(ffmpeg, sequence, previewFile, actualPageDuration, width, height, previewTransition, previewPlan, delegate(double p) { }, out var renderError);
+					if (exitCode != 0 || !File.Exists(previewFile)) throw new InvalidOperationException(LastUsefulLines(renderError, 10));
+					if (particlePreset > 0 && !ApplyImageParticles(ffmpeg, previewFile, particlePreset, particleDensity, duration, out var particleError)) throw new InvalidOperationException(particleError);
+					if (watermark.Enabled && (watermark.Layers.Count > 0 || watermark.ImageLibraries.Count > 0) && !ApplyWatermarkToSplitScreenOutput(ffmpeg, previewFile, watermark, duration, delegate(double p) { }, out var watermarkError)) throw new InvalidOperationException(watermarkError);
+					if (gifLayers.Count > 0 && !ApplyImageGif(ffmpeg, previewFile, gifLayers, duration, out var gifError)) throw new InvalidOperationException(gifError);
+					if (bgm.Enabled)
+					{
+						string music = SelectBgm(bgm, 0, new Random());
+						if (!ApplyBackgroundMusic(ffmpeg, previewFile, music, bgm.VolumePercent, delegate(double p) { }, out var musicError)) throw new InvalidOperationException(musicError);
+					}
+					if (!ValidateExactDurationOutput(ffmpeg, previewFile, duration, out var validationError)) throw new InvalidOperationException(validationError);
+				}
+				catch (Exception ex) { failure = ex.Message; }
+			});
+			if (failure != null) throw new InvalidOperationException(failure);
+			_imageStatusLabel.Text = "图片成片预览已生成，正在播放。";
+			using (VideoPreviewForm preview = new VideoPreviewForm(previewFile, "图片成片 - 动态效果预览")) preview.ShowDialog(this);
+			_imageStatusLabel.Text = "图片成片预览结束。";
+		}
+		catch (Exception ex)
+		{
+			_imageStatusLabel.Text = "图片成片预览失败。";
+			MessageBox.Show(this, "生成预览失败：\n" + ex.Message, "预览失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+		}
+		finally { _imagePreviewButton.Enabled = true; TryDelete(previewFile); }
 	}
 
 	private void AddWatermarkSourceImagesFromDialog()
@@ -22244,8 +23059,10 @@ internal sealed class MainForm : Form
 			orderby x descending
 			select x)
 		{
+			foreach (var group in _imageCustomGroups) group.Remove(_slideshowImages[item]);
 			_slideshowImages.RemoveAt(item);
 		}
+		_imageCustomGroups.RemoveAll(group => group.Count == 0);
 		UpdateSlideshowImageList();
 	}
 
@@ -24689,12 +25506,25 @@ internal sealed class MainForm : Form
 			return;
 		}
 		BgmPlan bgm = CaptureBgmPlan(_imageBgm);
+		WatermarkProfile imageWatermarks = CaptureWatermarkProfile(_imageUseWatermarks.Checked);
+		List<ImageGifLayer> gifLayers = _imageGifLayers.Select(item => item.Copy()).ToList();
+		int particlePreset = _imageParticlePreset, particleDensity = _imageParticleDensity;
+		List<List<string>> requestedGroups;
+		if (_imageGroupingMode.SelectedIndex == 1)
+			requestedGroups = images.Select(image => new List<string> { image }).ToList();
+		else if (_imageGroupingMode.SelectedIndex == 2)
+		{
+			requestedGroups = _imageCustomGroups.Select(group => group.Where(images.Contains).ToList()).Where(group => group.Count > 0).ToList();
+			var assigned = new HashSet<string>(requestedGroups.SelectMany(group => group), StringComparer.OrdinalIgnoreCase);
+			requestedGroups.AddRange(images.Where(image => !assigned.Contains(image)).Select(image => new List<string> { image }));
+		}
+		else requestedGroups = BuildImageOutputGroups(images, decimal.ToInt32(_imageOutputCount.Value));
 		SetRunningState(running: true);
 		_cancelRequested = false;
 		_imageProgressBar.Value = 0;
 		Task.Factory.StartNew(delegate
 		{
-			RunImageVideoBatch(ffmpeg, images, output, imageDuration, width, height, transition, bgm, layoutPlan);
+			RunImageVideoBatch(ffmpeg, images, output, imageDuration, width, height, transition, bgm, layoutPlan, requestedGroups, imageWatermarks, gifLayers, particlePreset, particleDensity);
 		}, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 	}
 
@@ -24722,7 +25552,7 @@ internal sealed class MainForm : Form
 		}
 	}
 
-	private void RunImageVideoBatch(string ffmpeg, List<string> images, string outputParent, double imageDuration, int width, int height, TransitionPlan transition, BgmPlan bgm, ImageVideoLayoutPlan layoutPlan)
+	private void RunImageVideoBatch(string ffmpeg, List<string> images, string outputParent, double imageDuration, int width, int height, TransitionPlan transition, BgmPlan bgm, ImageVideoLayoutPlan layoutPlan, List<List<string>> requestedGroups, WatermarkProfile imageWatermarks, List<ImageGifLayer> gifLayers, int particlePreset, int particleDensity)
 	{
 		string outputFolder = null;
 		string path = null;
@@ -24733,7 +25563,7 @@ internal sealed class MainForm : Form
 			_latestImageVideoOutputFolder = outputFolder;
 			int outputCount = Math.Max(1, (layoutPlan == null) ? 1 : layoutPlan.OutputCount);
 			double targetDuration = Math.Max(1.0, (layoutPlan == null) ? 30.0 : layoutPlan.TargetDurationSeconds);
-			List<List<string>> outputGroups = BuildImageOutputGroups(images, outputCount);
+			List<List<string>> outputGroups = requestedGroups;
 			Random random = new Random(Guid.NewGuid().GetHashCode());
 			int totalPages = 0;
 			int outputIndex;
@@ -24775,6 +25605,12 @@ internal sealed class MainForm : Form
 				{
 					throw new InvalidOperationException("第 " + (outputIndex + 1) + " 个图片视频生成失败：" + LastUsefulLines(error, 12));
 				}
+				if (particlePreset > 0 && !ApplyImageParticles(ffmpeg, text, particlePreset, particleDensity, targetDuration, out var particleError))
+					throw new InvalidOperationException("第 " + (outputIndex + 1) + " 个成品粒子效果失败：" + particleError);
+				if (imageWatermarks.Enabled && (imageWatermarks.Layers.Count > 0 || imageWatermarks.ImageLibraries.Count > 0) && !ApplyWatermarkToSplitScreenOutput(ffmpeg, text, imageWatermarks, targetDuration, delegate(double p) { }, out var watermarkError))
+					throw new InvalidOperationException("第 " + (outputIndex + 1) + " 个成品加水印失败：" + watermarkError);
+				if (gifLayers.Count > 0 && !ApplyImageGif(ffmpeg, text, gifLayers, targetDuration, out var gifError))
+					throw new InvalidOperationException("第 " + (outputIndex + 1) + " 个成品 GIF 贴图失败：" + gifError);
 				if (bgm.Enabled)
 				{
 					string bgmPath = SelectBgm(bgm, outputIndex, random);
@@ -24829,6 +25665,78 @@ internal sealed class MainForm : Form
 				MessageBox.Show(this, ex3.Message, "图片成片失败", MessageBoxButtons.OK, MessageBoxIcon.Hand);
 			});
 		}
+	}
+
+	private bool ApplyImageParticles(string ffmpeg, string outputPath, int preset, int density, double duration, out string error)
+	{
+		error = null;
+		if (preset <= 0) return true;
+		string tempDir = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_Particles_" + Guid.NewGuid().ToString("N"));
+		string tempVideo = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_Particles_" + Guid.NewGuid().ToString("N") + ".mp4");
+		try
+		{
+			VideoInfo info = Probe(ffmpeg, outputPath);
+			if (!info.HasVideo || info.Width <= 0 || info.Height <= 0) { error = "无法读取粒子效果所需的视频画面。"; return false; }
+			int frameWidth = info.Width >= info.Height ? 480 : 360;
+			int frameHeight = Math.Max(2, (int)Math.Round(frameWidth * (double)info.Height / info.Width));
+			Directory.CreateDirectory(tempDir);
+			for (int index = 0; index < 80; index++)
+			{
+				if (_isRunning && _cancelRequested) { error = "已取消粒子渲染。"; return false; }
+				using (Bitmap bitmap = new Bitmap(frameWidth, frameHeight, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+				using (Graphics graphics = Graphics.FromImage(bitmap))
+				{
+					PaintImageParticles(graphics, new Rectangle(0, 0, frameWidth, frameHeight), preset, density, index / 20.0);
+					bitmap.Save(Path.Combine(tempDir, "particle_" + index.ToString("000") + ".png"), System.Drawing.Imaging.ImageFormat.Png);
+				}
+			}
+			string frames = Path.Combine(tempDir, "particle_%03d.png");
+			string filter = "[1:v]format=rgba,scale=" + info.Width + ":" + info.Height + ":flags=bicubic[particles];[0:v][particles]overlay=0:0:shortest=1:format=auto,format=yuv420p[vout]";
+			string args = "-hide_banner -y -i " + QuoteArg(outputPath) + " -stream_loop -1 -framerate 20 -i " + QuoteArg(frames) + " -filter_complex " + QuoteArg(filter) + " -map [vout] -map 0:a:0? -c:v libx264 -preset fast -crf 17 -pix_fmt yuv420p -c:a copy -t " + FfmpegNumber(duration) + " -movflags +faststart -progress pipe:1 -nostats " + QuoteArg(tempVideo);
+			int result = RunFfmpeg(ffmpeg, args, duration, delegate(double p) { }, out var ffmpegError);
+			if (result != 0) { error = LastUsefulLines(ffmpegError, 12); return false; }
+			if (!ValidateExactDurationOutput(ffmpeg, tempVideo, duration, out error)) return false;
+			File.Copy(tempVideo, outputPath, true);
+			return true;
+		}
+		catch (Exception ex) { error = ex.Message; return false; }
+		finally
+		{
+			TryDelete(tempVideo);
+			try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
+		}
+	}
+
+	private bool ApplyImageGif(string ffmpeg, string outputPath, List<ImageGifLayer> gifLayers, double duration, out string error)
+	{
+		error = null;
+		string temp = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_Gif_" + Guid.NewGuid().ToString("N") + ".mp4");
+		try
+		{
+			foreach (ImageGifLayer layer in gifLayers) if (!File.Exists(layer.Path)) { error = "GIF 文件不存在：" + layer.Path; return false; }
+			VideoInfo info = Probe(ffmpeg, outputPath);
+			if (!info.HasVideo || info.Width <= 0) { error = "无法读取待叠加 GIF 的成品。"; return false; }
+			StringBuilder args = new StringBuilder("-hide_banner -y -i ").Append(QuoteArg(outputPath));
+			foreach (ImageGifLayer layer in gifLayers) args.Append(" -stream_loop -1 -ignore_loop 0 -i ").Append(QuoteArg(layer.Path));
+			List<string> filters = new List<string> { "[0:v]setpts=PTS-STARTPTS[base0]" };
+			for (int i = 0; i < gifLayers.Count; i++)
+			{
+				ImageGifLayer layer = gifLayers[i];
+				int gifWidth = Math.Max(2, (int)Math.Round(info.Width * Math.Max(1, Math.Min(400, layer.Size)) / 100.0) / 2 * 2);
+				string angle = FfmpegNumber(layer.Rotation * Math.PI / 180.0);
+				filters.Add("[" + (i + 1) + ":v]fps=30,scale=" + gifWidth + ":-2:flags=lanczos,format=rgba,rotate=" + angle + ":ow=rotw(" + angle + "):oh=roth(" + angle + "):c=none,setpts=PTS-STARTPTS[sticker" + i + "]");
+				filters.Add("[base" + i + "][sticker" + i + "]overlay=main_w*" + Math.Max(-200, Math.Min(200, layer.X)) + "/100-overlay_w/2:main_h*" + Math.Max(-200, Math.Min(200, layer.Y)) + "/100-overlay_h/2:shortest=1:format=auto[base" + (i + 1) + "]");
+			}
+			filters.Add("[base" + gifLayers.Count + "]format=yuv420p[vout]");
+			args.Append(" -filter_complex ").Append(QuoteArg(string.Join(";", filters))).Append(" -map [vout] -map 0:a:0? -c:v libx264 -preset fast -crf 17 -pix_fmt yuv420p -c:a copy -t ").Append(FfmpegNumber(duration)).Append(" -movflags +faststart -progress pipe:1 -nostats ").Append(QuoteArg(temp));
+			int result = RunFfmpeg(ffmpeg, args.ToString(), duration, delegate(double p) { }, out var ffmpegError);
+			if (result != 0) { error = LastUsefulLines(ffmpegError, 12); return false; }
+			if (!ValidateExactDurationOutput(ffmpeg, temp, duration, out error)) return false;
+			File.Copy(temp, outputPath, true);
+			return true;
+		}
+		catch (Exception ex) { error = ex.Message; return false; }
+		finally { TryDelete(temp); }
 	}
 
 	private static List<List<string>> BuildImageOutputGroups(List<string> images, int outputCount)
@@ -25011,8 +25919,8 @@ internal sealed class MainForm : Form
 				double num6 = Math.Min(Math.Max(0.1, layoutPlan.TileAnimationDuration), Math.Max(0.1, imageDuration * 0.35));
 				double num7 = Math.Min(num6 * 0.75, (double)num5 * 0.1);
 				double value = Math.Max(num7 + num6, imageDuration - num6 - Math.Min(0.35, (double)(num4 - 1 - num5) * 0.04));
-				bool flag3 = !flag2 && text != "直接显示";
-				bool flag4 = !flag2 && text != "直接显示";
+				bool flag3 = !flag2 && text != "直接显示" && text != "向右滑出" && text != "向下沉出";
+				bool flag4 = text == "交错淡入淡出" || text.EndsWith("后淡出", StringComparison.Ordinal) || text == "向右滑出" || text == "向下沉出";
 				stringBuilder2.Append(",format=rgba");
 				if (flag3)
 				{
@@ -25030,14 +25938,31 @@ internal sealed class MainForm : Form
 				list.Add(stringBuilder2.ToString());
 				string text5 = rectangle.X.ToString(CultureInfo.InvariantCulture);
 				string text6 = rectangle.Y.ToString(CultureInfo.InvariantCulture);
+				string entryProgress = "max(0,min(1,(t-" + FfmpegNumber(num7) + ")/" + FfmpegNumber(num6) + "))";
+				string entryEase = "(1-pow(1-" + entryProgress + ",3))";
 				switch (text)
 				{
 				case "从左滑入后淡出":
-					text5 = "if(lt(t," + FfmpegNumber(num7 + num6) + "),-overlay_w+(" + rectangle.X + "+overlay_w)*max(0,min(1,(t-" + FfmpegNumber(num7) + ")/" + FfmpegNumber(num6) + "))," + rectangle.X + ")";
+					text5 = "-overlay_w+(" + rectangle.X + "+overlay_w)*" + entryEase;
 					break;
 				case "上浮进入后淡出":
-					text6 = "if(lt(t," + FfmpegNumber(num7 + num6) + "),main_h+(" + rectangle.Y + "-main_h)*max(0,min(1,(t-" + FfmpegNumber(num7) + ")/" + FfmpegNumber(num6) + "))," + rectangle.Y + ")";
+					text6 = "main_h+(" + rectangle.Y + "-main_h)*" + entryEase;
 					break;
+				case "入场·上扬出现":
+				{
+					int rise = Math.Max(12, Math.Min(rectangle.Height / 6, height / 12));
+					text6 = rectangle.Y + "+" + rise + "*(1-" + entryEase + ")";
+					break;
+				}
+				case "入场·从右滑入":
+					text5 = "main_w+(" + rectangle.X + "-main_w)*" + entryEase;
+					break;
+				case "入场·回弹出现":
+				{
+					int rise = Math.Max(16, Math.Min(rectangle.Height / 5, height / 10));
+					text6 = rectangle.Y + "+" + rise + "*(1-" + entryEase + ")-" + FfmpegNumber(rise * 0.13) + "*sin(PI*" + entryProgress + ")";
+					break;
+				}
 				case "向右滑出":
 					text5 = "if(gte(t," + FfmpegNumber(value) + ")," + rectangle.X + "+(main_w-" + rectangle.X + ")*min(1,(t-" + FfmpegNumber(value) + ")/" + FfmpegNumber(num6) + ")," + rectangle.X + ")";
 					break;
@@ -25110,33 +26035,50 @@ internal sealed class MainForm : Form
 		case "轻微放大":
 		case "呼吸缩放":
 		case "轻柔漂移":
+		case "持续·缓慢拉远":
+		case "持续·平移向左":
+		case "持续·平移向右":
+		case "持续·平移向上":
+		case "持续·平移向下":
+		case "持续·对角漂移":
 			return true;
 		}
 	}
 
 	private static string BuildImagePageMotionFilter(string effect, int width, int height, double duration)
 	{
-		string text = FfmpegNumber(Math.Max(0.2, duration));
-		string text2;
+		string time = FfmpegNumber(Math.Max(0.2, duration));
+		string progress = "max(0,min(1,t/" + time + "))";
+		string eased = "(" + progress + "*" + progress + "*(3-2*" + progress + "))";
+		string xFactor = "0.5", yFactor = "0.5";
 		switch (effect)
 		{
 		case "轻柔漂移":
+		case "持续·对角漂移":
+		case "持续·平移向左":
+		case "持续·平移向右":
+		case "持续·平移向上":
+		case "持续·平移向下":
 		{
-			int num = (int)Math.Ceiling((double)width * 1.06 / 2.0) * 2;
-			int num2 = (int)Math.Ceiling((double)height * 1.06 / 2.0) * 2;
-			return "scale=" + num + ":" + num2 + ":flags=lanczos+accurate_rnd,crop=" + width + ":" + height + ":x='(iw-ow)*(0.5+0.32*sin(2*PI*t/" + text + "))':y='(ih-oh)*(0.5+0.22*cos(2*PI*t/" + text + "))',setsar=1,";
+			int zoomWidth = (int)Math.Ceiling(width * 1.09 / 2.0) * 2;
+			int zoomHeight = (int)Math.Ceiling(height * 1.09 / 2.0) * 2;
+			if (effect == "持续·平移向左") xFactor = eased;
+			else if (effect == "持续·平移向右") xFactor = "1-" + eased;
+			else if (effect == "持续·平移向上") yFactor = eased;
+			else if (effect == "持续·平移向下") yFactor = "1-" + eased;
+			else if (effect == "持续·对角漂移") { xFactor = eased; yFactor = "1-" + eased; }
+			else { xFactor = "0.5+0.20*sin(2*PI*t/" + time + ")"; yFactor = "0.5+0.13*cos(2*PI*t/" + time + ")"; }
+			return "scale=" + zoomWidth + ":" + zoomHeight + ":flags=lanczos+accurate_rnd,crop=" + width + ":" + height + ":x='(iw-ow)*(" + xFactor + ")':y='(ih-oh)*(" + yFactor + ")',setsar=1,";
 		}
-		case "呼吸缩放":
-			text2 = "1.025+0.014*sin(2*PI*t/" + text + ")";
-			break;
-		case "微微律动":
-			text2 = "1.028+0.010*sin(6*PI*t/" + text + ")";
-			break;
-		default:
-			text2 = "1+0.04*min(t/" + text + "\\,1)";
-			break;
 		}
-		return "scale=w='trunc(" + width + "*(" + text2 + ")/2)*2':h='trunc(" + height + "*(" + text2 + ")/2)*2':eval=frame:flags=lanczos+accurate_rnd,crop=" + width + ":" + height + ":x='(iw-ow)/2':y='(ih-oh)/2',setsar=1,";
+		string scaleProgress = "max(0\\,min(1\\,t/" + time + "))";
+		string scaleEased = "(" + scaleProgress + "*" + scaleProgress + "*(3-2*" + scaleProgress + "))";
+		string zoom;
+		if (effect == "呼吸缩放") zoom = "1.035+0.014*sin(2*PI*t/" + time + ")";
+		else if (effect == "微微律动") zoom = "1.035+0.007*sin(4*PI*t/" + time + ")";
+		else if (effect == "持续·缓慢拉远") zoom = "1.085-0.075*" + scaleEased;
+		else zoom = "1.010+0.060*" + scaleEased;
+		return "scale=w='trunc(" + width + "*(" + zoom + ")/2)*2':h='trunc(" + height + "*(" + zoom + ")/2)*2':eval=frame:flags=lanczos+accurate_rnd,crop=" + width + ":" + height + ":x='(iw-ow)/2':y='(ih-oh)/2',setsar=1,";
 	}
 
 	private static List<Rectangle> CreateCollageLayoutRectanglesForKind(int count, int width, int height, int layoutKind)
@@ -29279,6 +30221,15 @@ internal sealed class MainForm : Form
 		_imageTransitionOrder.SelectedIndex = 0;
 		_imageTransitionDuration.Value = 1m;
 		_imageOutputFolder.Text = DefaultOutputFolder("图片成片输出");
+		_imageGroupingMode.SelectedIndex = 0;
+		_imageUseWatermarks.Checked = false;
+		_imageGifPath = "";
+		_imageGifX = 50; _imageGifY = 50; _imageGifSize = 25;
+		_imageGifLayers.Clear(); _imageGifSelectedIndex = -1;
+		RefreshImageGifLayerList();
+		_imageParticlePreset = 0; _imageParticleDensity = 50;
+		if (_imageParticleList != null) _imageParticleList.SelectedIndex = 0;
+		if (_imageParticleDensitySlider != null) _imageParticleDensitySlider.Value = 50;
 		_latestImageVideoOutputFolder = null;
 		ResetBgmParameters(_imageBgm);
 		_imageProgressBar.Value = 0;
@@ -29439,6 +30390,25 @@ internal sealed class MainForm : Form
 			SaveVideoAdjustmentSetting(values, "adjustment.watermark.", CaptureVideoAdjustmentEditor(_watermarkAdjustmentEditor));
 			SaveNumericSetting(values, "imageVideo.duration", _imageDuration);
 			SaveNumericSetting(values, "imageVideo.outputCount", _imageOutputCount);
+			PutSetting(values, "imageVideo.groupingMode", _imageGroupingMode.SelectedIndex);
+			PutSetting(values, "imageVideo.useWatermarks", _imageUseWatermarks.Checked);
+			PutSetting(values, "imageVideo.gifPath", _imageGifPath);
+			PutSetting(values, "imageVideo.gifX", _imageGifX);
+			PutSetting(values, "imageVideo.gifY", _imageGifY);
+			PutSetting(values, "imageVideo.gifSize", _imageGifSize);
+			PutSetting(values, "imageVideo.gifLayerCount", _imageGifLayers.Count);
+			PutSetting(values, "imageVideo.particlePreset", _imageParticlePreset);
+			PutSetting(values, "imageVideo.particleDensity", _imageParticleDensity);
+			PutSetting(values, "imageVideo.gifPlacementVersion", 2);
+			for (int i = 0; i < _imageGifLayers.Count; i++)
+			{
+				string prefix = "imageVideo.gifLayer." + i + ".";
+				PutSetting(values, prefix + "path", _imageGifLayers[i].Path);
+				PutSetting(values, prefix + "x", _imageGifLayers[i].X);
+				PutSetting(values, prefix + "y", _imageGifLayers[i].Y);
+				PutSetting(values, prefix + "size", _imageGifLayers[i].Size);
+				PutSetting(values, prefix + "rotation", _imageGifLayers[i].Rotation);
+			}
 			SaveNumericSetting(values, "imageVideo.targetDuration", _imageTargetDuration);
 			PutSetting(values, "imageVideo.resolution", _imageResolution.SelectedIndex);
 			PutSetting(values, "imageVideo.layout", _imageLayoutPreset.SelectedIndex);
@@ -29698,6 +30668,42 @@ internal sealed class MainForm : Form
 			LoadVideoAdjustmentSetting(values, "adjustment.watermark.", _watermarkAdjustmentEditor);
 			LoadNumericSetting(values, "imageVideo.duration", _imageDuration);
 			LoadNumericSetting(values, "imageVideo.outputCount", _imageOutputCount);
+			LoadComboIndexSetting(values, "imageVideo.groupingMode", _imageGroupingMode);
+			LoadCheckSetting(values, "imageVideo.useWatermarks", _imageUseWatermarks);
+			_imageGifPath = GetSetting(values, "imageVideo.gifPath", "");
+			_imageGifX = Math.Max(0, Math.Min(100, GetIntSetting(values, "imageVideo.gifX", 50)));
+			_imageGifY = Math.Max(0, Math.Min(100, GetIntSetting(values, "imageVideo.gifY", 50)));
+			_imageGifSize = Math.Max(1, Math.Min(100, GetIntSetting(values, "imageVideo.gifSize", 25)));
+			_imageGifLayers.Clear();
+			string savedCount = GetSetting(values, "imageVideo.gifLayerCount", null);
+			if (savedCount == null && _imageGifPath.Length > 0) _imageGifLayers.Add(new ImageGifLayer { Path = _imageGifPath, X = _imageGifX, Y = _imageGifY, Size = _imageGifSize });
+			else
+			{
+				int count = Math.Max(0, Math.Min(64, GetIntSetting(values, "imageVideo.gifLayerCount", 0)));
+				for (int i = 0; i < count; i++)
+				{
+					string prefix = "imageVideo.gifLayer." + i + ".";
+					string path = GetSetting(values, prefix + "path", "");
+					if (path.Length == 0) continue;
+					_imageGifLayers.Add(new ImageGifLayer { Path = path, X = Math.Max(-200, Math.Min(200, GetIntSetting(values, prefix + "x", 50))), Y = Math.Max(-200, Math.Min(200, GetIntSetting(values, prefix + "y", 50))), Size = Math.Max(1, Math.Min(400, GetIntSetting(values, prefix + "size", 25))), Rotation = Math.Max(-180, Math.Min(180, GetIntSetting(values, prefix + "rotation", 0))) });
+				}
+			}
+			if (GetIntSetting(values, "imageVideo.gifPlacementVersion", 1) < 2)
+			{
+				foreach (ImageGifLayer layer in _imageGifLayers)
+				{
+					double width = layer.Size / 100.0, height = width;
+					try { using (Image gif = Image.FromFile(layer.Path)) height = width * gif.Height / gif.Width * 16.0 / 9.0; } catch { }
+					layer.X = (int)Math.Round((1 - width) * layer.X + width * 50);
+					layer.Y = (int)Math.Round((1 - height) * layer.Y + height * 50);
+				}
+			}
+			_imageGifSelectedIndex = _imageGifLayers.Count > 0 ? 0 : -1;
+			RefreshImageGifLayerList();
+			_imageParticlePreset = Math.Max(0, Math.Min(6, GetIntSetting(values, "imageVideo.particlePreset", 0)));
+			_imageParticleDensity = Math.Max(10, Math.Min(100, GetIntSetting(values, "imageVideo.particleDensity", 50)));
+			if (_imageParticleList != null) _imageParticleList.SelectedIndex = _imageParticlePreset;
+			if (_imageParticleDensitySlider != null) _imageParticleDensitySlider.Value = _imageParticleDensity;
 			LoadNumericSetting(values, "imageVideo.targetDuration", _imageTargetDuration);
 			LoadComboIndexSetting(values, "imageVideo.resolution", _imageResolution);
 			LoadComboIndexSetting(values, "imageVideo.layout", _imageLayoutPreset);
