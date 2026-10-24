@@ -35,14 +35,14 @@ namespace VideoBatchMerger.ScriptBatch
 		public static readonly List<SubtitlePreset> Presets = new List<SubtitlePreset>
 		{
 			// ==========================================
-			// 1. 底框样式 (2024 短视频爆款自适应底框)
+			// 1. 底框样式 (短视频自适应底框)
 			// ==========================================
 			new SubtitlePreset
 			{
 				Id = "box_red_badge",
-				Name = "经典红底框_黄字白文 (爆款神父)",
+				Name = "经典红底框_黄字白文",
 				Category = "底框样式",
-				TagText = "爆款推荐 · 词级红框",
+				TagText = "经典底框 · 词级红框",
 				PrimaryColorHex = "&H00FFFFFF", // 基础白字
 				OutlineColorHex = "&H00000000", // 立体黑边
 				BackColorHex = "&H000000D0",    // ASS BGR: #D00000 (红底框)

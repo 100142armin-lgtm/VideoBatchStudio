@@ -939,7 +939,7 @@ namespace VideoBatchMerger.ScriptBatch
 			var subOptRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 4, 0, 2) };
 			subOptRow.Controls.Add(new Label { Text = "字号: ", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(0, 4, 2, 0) });
 			_cboSubtitleSize = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110, BackColor = InputBg, ForeColor = TextPrimary, FlatStyle = FlatStyle.Flat };
-			_cboSubtitleSize.Items.AddRange(new object[] { "68 px (精简小号)", "78 px (常规标配)", "86 px (推荐爆款)", "96 px (醒目加粗)", "108 px (超大视效)" });
+			_cboSubtitleSize.Items.AddRange(new object[] { "68 px (精简小号)", "78 px (常规标配)", "86 px (推荐字号)", "96 px (醒目加粗)", "108 px (超大视效)" });
 			_cboSubtitleSize.SelectedIndexChanged += (_, _) => { SaveSettings(); UpdatePreview(); };
 			subOptRow.Controls.Add(_cboSubtitleSize);
 
@@ -950,7 +950,7 @@ namespace VideoBatchMerger.ScriptBatch
 				"0. 句级自然居中",
 				"1. 逐词高亮跳动",
 				"2. 动感回弹弹出",
-				"3. 逐词红底框高亮 (爆款底框·如同图1)"
+				"3. 逐词红底框高亮"
 			});
 			_cboSubtitleMode.SelectedIndexChanged += (_, _) =>
 			{
@@ -3447,7 +3447,7 @@ namespace VideoBatchMerger.ScriptBatch
 					for (int y = screenY; y < screenY + screenH; y += 30) g.DrawLine(gridPen, screenX, y, screenX + screenW, y);
 				}
 
-				// 2.2 获取当前要预览的文案 (默认采用爆款神父文案)
+				// 2.2 获取当前要预览的文案 (默认采用示例演示文案)
 				string sampleText = "filho precisa desta oração hoje.";
 				if (_panel._grid != null && _panel._grid.SelectedRows.Count > 0 && _panel._grid.SelectedRows[0].Tag is ScriptBatchItem item)
 				{

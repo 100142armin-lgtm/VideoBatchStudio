@@ -27,7 +27,7 @@ namespace VideoBatchMerger.ScriptBatch
 			_settings = settings;
 			_onPresetSelected = onPresetSelected;
 
-			Text = "🎨 动态字幕预设库 (短视频爆款底框 · 卡拉OK高亮 · 特殊动效)";
+			Text = "🎨 动态字幕预设库 (底框样式 · 卡拉OK高亮 · 特殊动效)";
 			Size = new Size(1100, 720);
 			MinimumSize = new Size(950, 600);
 			StartPosition = FormStartPosition.CenterParent;

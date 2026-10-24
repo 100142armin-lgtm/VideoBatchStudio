@@ -385,6 +385,13 @@ namespace VideoBatchMerger.ScriptBatch
 			string outlineColor = string.IsNullOrWhiteSpace(settings.SubtitleStrokeColorHex) ? preset.OutlineColorHex : settings.SubtitleStrokeColorHex;
 			float outlineWidth = settings.SubtitleStrokeWidth > 0 ? settings.SubtitleStrokeWidth : preset.OutlineWidth;
 
+			if (preset.Id == "box_red_badge")
+			{
+				primaryColor = "&H00FFFFFF";
+				outlineColor = "&H00000000";
+				outlineWidth = Math.Max(6f, outlineWidth);
+			}
+
 			int borderStyle = preset.BorderStyle; // 1: 描边阴影, 3: 不透明底框
 			string backColor = borderStyle == 3 ? (string.IsNullOrWhiteSpace(preset.BackColorHex) ? outlineColor : preset.BackColorHex) : "&H80000000";
 
@@ -407,9 +414,15 @@ namespace VideoBatchMerger.ScriptBatch
 			sb.AppendLine("[V4+ Styles]");
 			sb.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
 			sb.AppendLine($"Style: Default,{fontName},{fontSize},{primaryColor},&H000000FF,{outlineColor},{backColor},-1,0,0,0,100,100,0,0,{borderStyle},{outlineWidth:0.0},2,2,{marginL},{marginR},{marginV},1");
+			int boxPadding = (int)Math.Max(10, Math.Round(fontSize * 0.18));
+			string boxBgColor = string.IsNullOrWhiteSpace(preset.BackColorHex) || preset.BackColorHex == "&H80000000" ? "&H000000D0" : preset.BackColorHex;
+			sb.AppendLine($"Style: HighlightBox,{fontName},{fontSize},&H0000FFFF,&H000000FF,{boxBgColor},&H00000000,-1,0,0,0,100,100,0,0,3,{boxPadding},0,2,{marginL},{marginR},{marginV},1");
 			sb.AppendLine();
 			sb.AppendLine("[Events]");
 			sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
+
+			int displayMode = settings.SubtitleDisplayMode;
+			if (preset.DisplayMode == 3) displayMode = 3;
 
 			if (File.Exists(srtPath))
 			{
@@ -434,7 +447,7 @@ namespace VideoBatchMerger.ScriptBatch
 					{
 						if (!string.IsNullOrEmpty(currentStart) && currentText.Length > 0)
 						{
-							EmitAssDialogue(sb, currentStart, currentEnd, currentText.ToString().Trim(), w, fontSize, settings.SubtitleDisplayMode);
+							EmitAssDialogue(sb, currentStart, currentEnd, currentText.ToString().Trim(), w, fontSize, displayMode);
 						}
 						currentStart = "";
 						currentEnd = "";
@@ -449,7 +462,7 @@ namespace VideoBatchMerger.ScriptBatch
 
 				if (!string.IsNullOrEmpty(currentStart) && currentText.Length > 0)
 				{
-					EmitAssDialogue(sb, currentStart, currentEnd, currentText.ToString().Trim(), w, fontSize, settings.SubtitleDisplayMode);
+					EmitAssDialogue(sb, currentStart, currentEnd, currentText.ToString().Trim(), w, fontSize, displayMode);
 				}
 			}
 
@@ -582,8 +595,8 @@ namespace VideoBatchMerger.ScriptBatch
 						if (wi > 0) sbResult.Append(" ");
 						if (wi == hlIdx)
 						{
-							// 黄字 + 饱满红底框 (\1c&H0000FFFF& 亮黄字, \3c&H000000D0& 鲜红边框, \4c&H000000D0& 红阴影)
-							sbResult.Append($"{{\\1c&H0000FFFF&\\3c&H000000D0&\\4c&H000000D0&\\bord10\\shad0}}{words[wi]}{{\\r}}");
+							// 黄字 + 饱满红底框 (HighlightBox 样式：BorderStyle=3 独立矩形框 + 亮黄字)
+							sbResult.Append($"{{\\rHighlightBox}}{words[wi]}{{\\rDefault}}");
 						}
 						else
 						{
