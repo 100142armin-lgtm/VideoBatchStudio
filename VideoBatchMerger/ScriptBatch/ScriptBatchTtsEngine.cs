@@ -272,6 +272,9 @@ namespace VideoBatchMerger.ScriptBatch
 						}
 						await Task.Delay(100, ct);
 					}
+						// HasExited can become true before asynchronous stdout/stderr callbacks finish.
+						// WaitForExit also drains those callbacks, so the worker's final JSON is available.
+						proc.WaitForExit();
 
 					string outStr = outputBuilder.ToString().Trim();
 					string errStr = errorBuilder.ToString().Trim();

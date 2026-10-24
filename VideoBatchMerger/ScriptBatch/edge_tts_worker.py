@@ -227,6 +227,11 @@ async def synthesize(args):
         with open(output_srt, "w", encoding="utf-8") as sf:
             sf.write(srt_content)
 
+        with open(output_srt + ".words.json", "w", encoding="utf-8") as wf:
+            json.dump([{"start": w["offset"] / 10000000.0,
+                        "end": (w["offset"] + w["duration"]) / 10000000.0,
+                        "text": w["text"]} for w in words], wf, ensure_ascii=False)
+
     return {
         "success": True,
         "audio": output_audio,

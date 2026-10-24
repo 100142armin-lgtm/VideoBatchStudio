@@ -2,11 +2,14 @@ name: Build and Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
 
 jobs:
   build:
+    if: startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && github.event.head_commit.message == 'fix: republish v9.4.0 hotfix without version bump')
     runs-on: windows-latest
     permissions:
       id-token: write
@@ -20,7 +23,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Build VideoBatchStudio
         shell: pwsh
@@ -47,7 +50,8 @@ jobs:
 
           # Ensure web_preview HTML & JS canvas assets are in place
           if (Test-Path "web_preview") {
-            Copy-Item -Path "web_preview" -Destination "staging/VideoBatchStudio/web_preview" -Recurse -Force
+            New-Item -ItemType Directory -Force -Path "staging/VideoBatchStudio/web_preview" | Out-Null
+            Copy-Item -Path "web_preview/*" -Destination "staging/VideoBatchStudio/web_preview/" -Recurse -Force
           }
 
           # Clean any sensitive or personal development cache
@@ -122,7 +126,32 @@ jobs:
           subject-path: 'release_assets/*'
 
       - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: release_assets/*
           generate_release_notes: true
+
+      - name: Refresh existing v9.4.0 download files
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload v9.4.0 release_assets/VideoBatchStudio.exe release_assets/VideoBatchStudio_Portable.zip --clobber
+
+          # Confirm both public release assets are the bytes just built by this run.
+          $names = @('VideoBatchStudio.exe', 'VideoBatchStudio_Portable.zip')
+          $matched = $false
+          for ($attempt = 0; $attempt -lt 6; $attempt++) {
+            $release = gh api "repos/${{ github.repository }}/releases/tags/v9.4.0" | ConvertFrom-Json
+            $matched = $true
+            foreach ($name in $names) {
+              $asset = $release.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+              $localHash = (Get-FileHash -Path "release_assets/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+              if (-not $asset -or $asset.digest -ne "sha256:$localHash") { $matched = $false; break }
+            }
+            if ($matched) { break }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $matched) { throw 'Release asset hashes do not match this build.' }

@@ -1823,7 +1823,7 @@ namespace VideoBatchMerger.ScriptBatch
 										 .Where(f => exts.Contains(Path.GetExtension(f)))
 										 .ToList();
 					_footageFiles.AddRange(files);
-					_lblFootageCount.Text = $"已载入 {_footageFiles.Count} 个可用素材 (巡航抽选)";
+					_lblFootageCount.Text = $"已扫描 {_footageFiles.Count} 个素材 (渲染时自动跳过损坏文件)";
 					_lblFootageCount.ForeColor = _footageFiles.Count > 0 ? AccentGreen : AccentYellow;
 					ExtractThumbnailFromFootage();
 					return;
@@ -2092,6 +2092,9 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					["subtitleText"] = sampleText,
 					["subtitleStyleId"] = _settings.SubtitleStyleId,
+					["subtitleDisplayMode"] = _settings.SubtitleDisplayMode == 3 || SubtitlePresetCatalog.GetById(_settings.SubtitleStyleId).DisplayMode == 3 ? 3 : _settings.SubtitleDisplayMode,
+					["subtitleHighlightBgColor"] = ColorTranslator.ToHtml(SubtitlePresetCatalog.GetById(_settings.SubtitleStyleId).PreviewHighlightBgColor),
+					["subtitleHighlightTextColor"] = ColorTranslator.ToHtml(SubtitlePresetCatalog.GetById(_settings.SubtitleStyleId).PreviewHighlightTextColor),
 					["subtitleFontSize"] = _settings.SubtitleFontSize,
 					["subtitleVerticalPercent"] = _settings.SubtitleVerticalPercent,
 					["subtitleOffsetX"] = _settings.SubtitleOffsetX,
@@ -3317,6 +3320,8 @@ namespace VideoBatchMerger.ScriptBatch
 		private sealed class PreviewCanvasBox : Control
 		{
 			private readonly ScriptBatchStudioPanel _panel;
+			private readonly System.Windows.Forms.Timer _subtitlePreviewTimer;
+			private readonly Stopwatch _subtitlePreviewClock = Stopwatch.StartNew();
 			private bool _isDraggingSticker = false;
 			private bool _isRotatingSticker = false;
 			private GifStickerItem _activeSticker = null;
@@ -3326,6 +3331,15 @@ namespace VideoBatchMerger.ScriptBatch
 			{
 				_panel = panel;
 				SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+				_subtitlePreviewTimer = new System.Windows.Forms.Timer { Interval = 100 };
+				_subtitlePreviewTimer.Tick += (_, _) => { if (Visible) Invalidate(); };
+				_subtitlePreviewTimer.Start();
+			}
+
+			protected override void Dispose(bool disposing)
+			{
+				if (disposing) _subtitlePreviewTimer?.Dispose();
+				base.Dispose(disposing);
 			}
 
 			protected override void OnPaint(PaintEventArgs e)
@@ -3479,6 +3493,9 @@ namespace VideoBatchMerger.ScriptBatch
 					string wrapped = ScriptBatchComposer.WrapToShortLines(sampleText, 16);
 					string[] subLines = wrapped.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
 					if (subLines.Length == 0) subLines = new[] { sampleText };
+					int previewWordCount = subLines.Sum(line => line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).Length);
+					int activeWordIndex = previewWordCount > 0 ? (int)((_subtitlePreviewClock.ElapsedMilliseconds / 450) % previewWordCount) : -1;
+					int globalWordIndex = 0;
 
 					float lineH = font.GetHeight(g) * 1.15f;
 					float totalH = subLines.Length * lineH;
@@ -3501,14 +3518,13 @@ namespace VideoBatchMerger.ScriptBatch
 						}
 
 						float wordX = screenX + (screenW - rowW) / 2f + subShiftX;
-						int hlWordIdx = (li == 0 && words.Length >= 2) ? 1 : (li == 0 ? 0 : -1);
 
 						for (int wi = 0; wi < words.Length; wi++)
 						{
 							string word = words[wi];
 							float wW = wordWidths[wi];
 
-							if (wi == hlWordIdx)
+							if (globalWordIndex == activeWordIndex)
 							{
 								float padBoxX = 8f * scale + 4f;
 								float padBoxY = 3f * scale + 2f;
@@ -3545,6 +3561,7 @@ namespace VideoBatchMerger.ScriptBatch
 							}
 
 							wordX += wW + spaceW;
+							globalWordIndex++;
 						}
 
 						curY += lineH;

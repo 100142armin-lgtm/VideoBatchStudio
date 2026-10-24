@@ -9,12 +9,15 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Web.Script.Serialization;
 
 namespace VideoBatchMerger.ScriptBatch
 {
 	public static class ScriptBatchComposer
 	{
 		private static readonly Random s_rand = new Random();
+		private static readonly Dictionary<string, bool> s_footageValidationCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+		private static readonly object s_footageValidationLock = new object();
 
 		public static string FindFfmpegExe()
 		{
@@ -190,8 +193,9 @@ namespace VideoBatchMerger.ScriptBatch
 				if (!renderOk || !File.Exists(finalOutputPath))
 				{
 					item.Status = "失败";
-					item.ErrorMessage = "FFmpeg 视频渲染失败";
+					if (string.IsNullOrWhiteSpace(item.ErrorMessage)) item.ErrorMessage = "FFmpeg 视频渲染失败";
 					item.QcBadge = "🔴 渲染失败";
+					item.QcDetails = item.ErrorMessage;
 					return false;
 				}
 
@@ -420,6 +424,8 @@ namespace VideoBatchMerger.ScriptBatch
 
 			int displayMode = settings.SubtitleDisplayMode;
 			if (preset.DisplayMode == 3) displayMode = 3;
+			var wordTimings = displayMode == 3 ? LoadWordTimings(srtPath + ".words.json") : new List<WordTiming>();
+			int nextWordIndex = 0;
 
 			if (File.Exists(srtPath))
 			{
@@ -444,7 +450,7 @@ namespace VideoBatchMerger.ScriptBatch
 					{
 						if (!string.IsNullOrEmpty(currentStart) && currentText.Length > 0)
 						{
-							EmitAssDialogue(sb, currentStart, currentEnd, currentText.ToString().Trim(), w, fontSize, displayMode);
+							EmitAssCue(sb, currentStart, currentEnd, currentText.ToString().Trim(), w, fontSize, displayMode, wordTimings, ref nextWordIndex);
 						}
 						currentStart = "";
 						currentEnd = "";
@@ -459,11 +465,91 @@ namespace VideoBatchMerger.ScriptBatch
 
 				if (!string.IsNullOrEmpty(currentStart) && currentText.Length > 0)
 				{
-					EmitAssDialogue(sb, currentStart, currentEnd, currentText.ToString().Trim(), w, fontSize, displayMode);
+					EmitAssCue(sb, currentStart, currentEnd, currentText.ToString().Trim(), w, fontSize, displayMode, wordTimings, ref nextWordIndex);
 				}
 			}
 
 			File.WriteAllText(assPath, sb.ToString(), Encoding.UTF8);
+		}
+
+		private sealed class WordTiming
+		{
+			public double start { get; set; }
+			public double end { get; set; }
+			public string text { get; set; }
+		}
+
+		private static List<WordTiming> LoadWordTimings(string path)
+		{
+			try
+			{
+				if (!File.Exists(path)) return new List<WordTiming>();
+				return new JavaScriptSerializer().Deserialize<List<WordTiming>>(File.ReadAllText(path, Encoding.UTF8)) ?? new List<WordTiming>();
+			}
+			catch { return new List<WordTiming>(); }
+		}
+
+		private static void EmitAssCue(StringBuilder sb, string start, string end, string text,
+			int width, int fontSize, int displayMode, List<WordTiming> wordTimings, ref int nextWordIndex)
+		{
+			if (displayMode == 3 && TryEmitTimedHighlight(sb, start, end, text, width, fontSize, wordTimings, ref nextWordIndex)) return;
+			EmitAssDialogue(sb, start, end, text, width, fontSize, displayMode);
+		}
+
+		private static bool TryEmitTimedHighlight(StringBuilder sb, string srtStart, string srtEnd, string text,
+			int width, int fontSize, List<WordTiming> timings, ref int nextWordIndex)
+		{
+			if (timings == null || timings.Count == 0) return false;
+			var tokens = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+			if (tokens.Length == 0) return false;
+			double cueStart = ParseSrtTimeSpan(srtStart).TotalSeconds;
+			double cueEnd = ParseSrtTimeSpan(srtEnd).TotalSeconds;
+			if (cueEnd <= cueStart) return false;
+
+			int first = -1;
+			for (int candidate = nextWordIndex; candidate < Math.Min(timings.Count, nextWordIndex + 5); candidate++)
+			{
+				if (candidate + tokens.Length > timings.Count) break;
+				if (Math.Abs(timings[candidate].start - cueStart) > 0.12) continue;
+				bool matches = true;
+				for (int i = 0; i < tokens.Length; i++)
+				{
+					if (!string.Equals(NormalizeSpokenWord(tokens[i]), NormalizeSpokenWord(timings[candidate + i].text), StringComparison.OrdinalIgnoreCase))
+					{
+						matches = false;
+						break;
+					}
+				}
+				if (matches) { first = candidate; break; }
+			}
+			if (first < 0) return false;
+			nextWordIndex = first + tokens.Length;
+			double effectiveEnd = Math.Max(cueEnd, timings[nextWordIndex - 1].end);
+			double position = cueStart;
+			for (int i = 0; i < tokens.Length; i++)
+			{
+				var timing = timings[first + i];
+				double wordStart = Math.Max(position, timing.start);
+				double wordEnd = Math.Min(effectiveEnd, Math.Max(wordStart, timing.end));
+				AppendHighlightDialogue(sb, position, wordStart, text, width, fontSize, -1);
+				AppendHighlightDialogue(sb, wordStart, wordEnd, text, width, fontSize, i);
+				position = wordEnd;
+			}
+			AppendHighlightDialogue(sb, position, effectiveEnd, text, width, fontSize, -1);
+			return true;
+		}
+
+		private static string NormalizeSpokenWord(string value)
+		{
+			return Regex.Replace(value ?? string.Empty, @"[^\p{L}\p{N}]", string.Empty);
+		}
+
+		private static void AppendHighlightDialogue(StringBuilder sb, double start, double end, string text,
+			int width, int fontSize, int highlightedWordIndex)
+		{
+			if (end - start < 0.009) return;
+			string assText = FormatAssText(text, width, fontSize, 3, highlightedWordIndex);
+			sb.AppendLine($"Dialogue: 0,{FormatAssTimeSpan(TimeSpan.FromSeconds(start))},{FormatAssTimeSpan(TimeSpan.FromSeconds(end))},Default,,0,0,0,,{assText}");
 		}
 
 		/// <summary>
@@ -565,7 +651,7 @@ namespace VideoBatchMerger.ScriptBatch
 			return srtTime.Replace(',', '.');
 		}
 
-		public static string FormatAssText(string text, int canvasW, int fontSize, int displayMode = 0)
+		public static string FormatAssText(string text, int canvasW, int fontSize, int displayMode = 0, int highlightedWordIndex = 1)
 		{
 			text = text.Replace("\r", "").Trim();
 			if (string.IsNullOrEmpty(text)) return text;
@@ -578,6 +664,7 @@ namespace VideoBatchMerger.ScriptBatch
 				string[] lines = wrapped.Split(new[] { "\n" }, StringSplitOptions.RemoveEmptyEntries);
 				var sbResult = new StringBuilder();
 
+				int wordIndex = 0;
 				for (int li = 0; li < Math.Min(2, lines.Length); li++)
 				{
 					if (li > 0) sbResult.Append("\\N");
@@ -585,12 +672,10 @@ namespace VideoBatchMerger.ScriptBatch
 					var words = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
 					if (words.Length == 0) continue;
 
-					// 选取最具感染力的关键词 (如 "filho precisa" 中的 "precisa") 加上饱满红底框高亮
-					int hlIdx = (li == 0 && words.Length >= 2) ? 1 : (li == 0 ? 0 : -1);
 					for (int wi = 0; wi < words.Length; wi++)
 					{
 						if (wi > 0) sbResult.Append(" ");
-						if (wi == hlIdx)
+						if (wordIndex == highlightedWordIndex)
 						{
 							// 黄字 + 饱满红底框 (HighlightBox 样式：BorderStyle=3 独立矩形框 + 亮黄字)
 							sbResult.Append($"{{\\rHighlightBox}}{words[wi]}{{\\rDefault}}");
@@ -599,6 +684,7 @@ namespace VideoBatchMerger.ScriptBatch
 						{
 							sbResult.Append(words[wi]);
 						}
+						wordIndex++;
 					}
 				}
 				return sbResult.ToString();
@@ -655,7 +741,12 @@ namespace VideoBatchMerger.ScriptBatch
 			int h = settings.CanvasHeight;
 
 			// 选择素材片段
-			var selectedClips = PickClipsForDuration(footagePool, totalDur, settings);
+			var selectedClips = await Task.Run(() => PickClipsForDuration(footagePool, totalDur, settings), ct);
+			if (selectedClips.Count == 0 && footagePool != null && footagePool.Count > 0)
+			{
+				item.ErrorMessage = "背景素材目录中没有可解码的视频，请检查素材文件是否完整。";
+				return false;
+			}
 
 			var filterComplex = new StringBuilder();
 			var inputArgs = new StringBuilder();
@@ -801,7 +892,8 @@ namespace VideoBatchMerger.ScriptBatch
 				vcodec = "h264_qsv -global_quality 23";
 			}
 
-			string args = $"{inputArgs} -filter_complex \"{filterComplex}\" -map \"[outv]\" {audioMap} -c:v {vcodec} -c:a aac -b:a 192k -t {totalDur:0.00} -y {QuoteArg(outputPath)}";
+			string args = $"-hide_banner {inputArgs} -filter_complex \"{filterComplex}\" -map \"[outv]\" {audioMap} -c:v {vcodec} -c:a aac -b:a 192k -t {totalDur:0.00} -y {QuoteArg(outputPath)}";
+			var errorLines = new Queue<string>();
 
 			var psi = new ProcessStartInfo
 			{
@@ -822,6 +914,11 @@ namespace VideoBatchMerger.ScriptBatch
 					string line;
 					while ((line = sr.ReadLine()) != null)
 					{
+						if (!string.IsNullOrWhiteSpace(line) && !line.Contains("time="))
+						{
+							errorLines.Enqueue(line.Trim());
+							if (errorLines.Count > 12) errorLines.Dequeue();
+						}
 						if (line.Contains("time="))
 						{
 							var m = Regex.Match(line, @"time=(\d+):(\d+):(\d+\.?\d*)");
@@ -847,7 +944,11 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 
 				await readTask;
-				return proc.ExitCode == 0;
+				if (proc.ExitCode == 0) return true;
+				string detail = string.Join(" | ", errorLines).Trim();
+				if (detail.Length > 900) detail = detail.Substring(detail.Length - 900);
+				item.ErrorMessage = $"FFmpeg 渲染失败 (代码 {proc.ExitCode})" + (detail.Length > 0 ? $": {detail}" : "。请检查素材、GIF 贴纸和编码器设置。");
+				return false;
 			}
 		}
 
@@ -860,7 +961,12 @@ namespace VideoBatchMerger.ScriptBatch
 			double minSlice = Math.Max(2.0, settings.SliceDurationMin);
 			double maxSlice = Math.Max(minSlice + 1.0, settings.SliceDurationMax);
 
-			var availablePool = new List<string>(pool);
+			var availablePool = pool.Where(f =>
+			{
+				try { return new FileInfo(f).Length >= 8192; }
+				catch { return false; }
+			}).ToList();
+			if (availablePool.Count == 0) return list;
 			if (settings.FootageStrategy == 0)
 			{
 				availablePool = availablePool.OrderBy(_ => s_rand.Next()).ToList();
@@ -869,7 +975,14 @@ namespace VideoBatchMerger.ScriptBatch
 			int poolIdx = 0;
 			while (accumulated < targetDur + 0.5)
 			{
-				string path = availablePool[poolIdx % availablePool.Count];
+				int candidateIdx = poolIdx % availablePool.Count;
+				string path = availablePool[candidateIdx];
+				if (!IsUsableFootage(path))
+				{
+					availablePool.RemoveAt(candidateIdx);
+					if (availablePool.Count == 0) break;
+					continue;
+				}
 				poolIdx++;
 
 				double sliceLen = minSlice + s_rand.NextDouble() * (maxSlice - minSlice);
@@ -882,6 +995,37 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 
 			return list;
+		}
+
+		private static bool IsUsableFootage(string path)
+		{
+			try
+			{
+				var file = new FileInfo(path);
+				if (!file.Exists || file.Length < 8192) return false;
+				string cacheKey = path + "|" + file.Length + "|" + file.LastWriteTimeUtc.Ticks;
+				lock (s_footageValidationLock)
+				{
+					if (s_footageValidationCache.TryGetValue(cacheKey, out bool cached)) return cached;
+				}
+
+				var psi = new ProcessStartInfo
+				{
+					FileName = FindFfmpegExe(),
+					Arguments = $"-hide_banner -loglevel quiet -i {QuoteArg(path)} -frames:v 1 -f null NUL",
+					UseShellExecute = false,
+					CreateNoWindow = true
+				};
+				bool usable;
+				using (var probe = Process.Start(psi))
+				{
+					usable = probe.WaitForExit(5000) && probe.ExitCode == 0;
+					if (!probe.HasExited) try { probe.Kill(); } catch { }
+				}
+				lock (s_footageValidationLock) s_footageValidationCache[cacheKey] = usable;
+				return usable;
+			}
+			catch { return false; }
 		}
 
 		private static void RunQualityControlChecks(ScriptBatchItem item, ScriptBatchSettings settings)

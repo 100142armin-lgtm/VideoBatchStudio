@@ -113,6 +113,17 @@ class PreviewStage {
         if (!settings) return;
         Object.assign(this.state, settings);
 
+        if (Number(this.state.subtitleDisplayMode) === 3 && !this._autoStartedHighlight) {
+            this._autoStartedHighlight = true;
+            this.currentTimeMs = 0;
+            this.isPlaying = true;
+            const btn = document.getElementById('btn-play');
+            if (btn) {
+                btn.textContent = '⏸️ 暂停';
+                btn.classList.add('active');
+            }
+        }
+
         // 背景图与水印图载入
         if (settings.bgThumbnailDataUrl && settings.bgThumbnailDataUrl !== this.cachedBgUrl) {
             this.cachedBgUrl = settings.bgThumbnailDataUrl;
@@ -257,7 +268,9 @@ class PreviewStage {
     }
 
     renderSubtitles(ctx, w, h, scale) {
-        const text = this.state.subtitleText || "Senhora que está segurando um telefone, você é abençoada.";
+        const displayMode = Number(this.state.subtitleDisplayMode || 0);
+        const fullText = this.state.subtitleText || "Senhora que está segurando um telefone, você é abençoada.";
+        const text = displayMode === 3 ? fullText.trim().split(/\s+/).slice(0, 4).join(' ') : fullText;
         const styleId = this.state.subtitleStyleId || "焦糖橙底框高亮";
         const preset = (window.findPreset && window.findPreset(styleId)) || (window.VIDEOKIT_PRESETS && window.VIDEOKIT_PRESETS[styleId]) || window.VIDEOKIT_PRESETS["默认白字"] || {};
 
@@ -324,10 +337,38 @@ class PreviewStage {
         ctx.scale(animScale, animScale);
         ctx.translate(-subCenterX, -subCenterY);
 
+        let globalWordIndex = 0;
+        const wordCount = text.trim().split(/\s+/).length;
+        const activeWordIndex = wordCount > 0 ? Math.floor(this.currentTimeMs / 450) % wordCount : -1;
         lines.forEach((line, idx) => {
             const lineY = startY + (idx * lineHeight);
             const metrics = ctx.measureText(line);
             const lineW = metrics.width;
+
+            if (displayMode === 3) {
+                const lineWords = line.trim().split(/\s+/);
+                ctx.textAlign = 'left';
+                const spaceW = ctx.measureText(' ').width;
+                let x = subCenterX - lineW / 2;
+                for (const word of lineWords) {
+                    const wordW = ctx.measureText(word).width;
+                    if (globalWordIndex === activeWordIndex) {
+                        const padX = 10 * scale;
+                        const padY = 5 * scale;
+                        ctx.fillStyle = this.state.subtitleHighlightBgColor || '#D01010';
+                        this.drawRoundedRect(ctx, x - padX, lineY - fontSize / 2 - padY, wordW + 2 * padX, fontSize + 2 * padY, 5 * scale);
+                        ctx.fill();
+                        ctx.fillStyle = this.state.subtitleHighlightTextColor || '#FFD700';
+                    } else {
+                        ctx.fillStyle = preset.color_text || '#FFFFFF';
+                    }
+                    ctx.fillText(word, x, lineY);
+                    x += wordW + spaceW;
+                    globalWordIndex++;
+                }
+                ctx.textAlign = 'center';
+                return;
+            }
 
             // 1) 绘制底框 (BorderStyle == 3 / use_box)
             if (preset.use_box) {
