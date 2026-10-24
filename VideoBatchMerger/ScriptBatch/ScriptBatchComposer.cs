@@ -18,6 +18,51 @@ namespace VideoBatchMerger.ScriptBatch
 		private static readonly Random s_rand = new Random();
 		private static readonly Dictionary<string, bool> s_footageValidationCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 		private static readonly object s_footageValidationLock = new object();
+		private static readonly object s_bgmRandomLock = new object();
+		private static readonly HashSet<string> s_bgmExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+		{
+			".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif"
+		};
+
+		public static bool HasUsableBgmSource(string path)
+		{
+			if (string.IsNullOrWhiteSpace(path)) return false;
+			if (File.Exists(path)) return s_bgmExtensions.Contains(Path.GetExtension(path));
+			if (!Directory.Exists(path)) return false;
+
+			try
+			{
+				return Directory.EnumerateFiles(path, "*", SearchOption.TopDirectoryOnly)
+					.Any(file => s_bgmExtensions.Contains(Path.GetExtension(file)));
+			}
+			catch
+			{
+				return false;
+			}
+		}
+
+		private static string ResolveBgmFile(string path)
+		{
+			if (string.IsNullOrWhiteSpace(path)) return null;
+			if (File.Exists(path)) return s_bgmExtensions.Contains(Path.GetExtension(path)) ? path : null;
+			if (!Directory.Exists(path)) return null;
+
+			try
+			{
+				var files = Directory.EnumerateFiles(path, "*", SearchOption.TopDirectoryOnly)
+					.Where(file => s_bgmExtensions.Contains(Path.GetExtension(file)))
+					.ToArray();
+				if (files.Length == 0) return null;
+				lock (s_bgmRandomLock)
+				{
+					return files[s_rand.Next(files.Length)];
+				}
+			}
+			catch
+			{
+				return null;
+			}
+		}
 
 		public static string FindFfmpegExe()
 		{
@@ -780,13 +825,14 @@ namespace VideoBatchMerger.ScriptBatch
 
 			// 音频与 BGM 处理
 			string audioMap = "-map 0:a";
-			bool hasBgm = !string.IsNullOrWhiteSpace(settings.BgmPath) && File.Exists(settings.BgmPath);
+			string bgmFile = settings.BgmEnabled ? ResolveBgmFile(settings.BgmPath) : null;
+			bool hasBgm = !string.IsNullOrWhiteSpace(bgmFile);
 			int nextInputIdx = selectedClips.Count + 1;
 
 			if (hasBgm)
 			{
 				int bgmInputIdx = nextInputIdx++;
-				inputArgs.Append($"-stream_loop -1 -i {QuoteArg(settings.BgmPath)} ");
+				inputArgs.Append($"-stream_loop -1 -i {QuoteArg(bgmFile)} ");
 				float bgmVol = Math.Max(0.02f, settings.BgmVolumePercent / 100f);
 				double fadeStart = Math.Max(0.5, totalDur - 1.5);
 

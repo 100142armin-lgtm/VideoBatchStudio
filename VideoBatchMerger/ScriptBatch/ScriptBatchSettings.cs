@@ -105,6 +105,7 @@ namespace VideoBatchMerger.ScriptBatch
 		public int WatermarkOffsetY { get; set; } = 40;
 
 		// 背景音乐与素材池
+		public bool BgmEnabled { get; set; } = true;
 		public string BgmPath { get; set; } = string.Empty;
 		public int BgmVolumePercent { get; set; } = 12;
 

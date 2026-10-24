@@ -52,6 +52,7 @@ namespace VideoBatchMerger.ScriptBatch
 		private ComboBox _cboFootageStrategy;
 		private TextBox _txtFootageFolder;
 		private Label _lblFootageCount;
+		private CheckBox _chkBgmEnabled;
 		private TextBox _txtBgmPath;
 		private TrackBar _trkBgmVol;
 		private Label _lblBgmVol;
@@ -998,13 +999,24 @@ namespace VideoBatchMerger.ScriptBatch
 
 			// 4. 背景音乐 (BGM 自动闪避人声) (默认折叠)
 			var bgmFlow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Width = 310 };
+			_chkBgmEnabled = new CheckBox
+			{
+				Text = "启用背景音乐",
+				ForeColor = AccentGreen,
+				AutoSize = true,
+				Checked = _settings.BgmEnabled,
+				Margin = new Padding(0, 2, 0, 4)
+			};
+			_chkBgmEnabled.CheckedChanged += (_, _) => SaveSettings();
+			bgmFlow.Controls.Add(_chkBgmEnabled);
+
 			var bgmRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
-			_txtBgmPath = new TextBox { Width = 225, BackColor = InputBg, ForeColor = TextPrimary, BorderStyle = BorderStyle.FixedSingle };
+			_txtBgmPath = new TextBox { Width = 195, BackColor = InputBg, ForeColor = TextPrimary, BorderStyle = BorderStyle.FixedSingle };
 			_txtBgmPath.TextChanged += (_, _) => SaveSettings();
 			bgmRow.Controls.Add(_txtBgmPath);
 
-			var btnBrowseBgm = CreateButton("浏览...", CardBorder, TextPrimary, 70);
-			btnBrowseBgm.Click += (_, _) => BrowseBgmFile();
+			var btnBrowseBgm = CreateButton("选择文件夹...", CardBorder, TextPrimary, 100);
+			btnBrowseBgm.Click += (_, _) => BrowseBgmFolder();
 			bgmRow.Controls.Add(btnBrowseBgm);
 			bgmFlow.Controls.Add(bgmRow);
 
@@ -1618,6 +1630,7 @@ namespace VideoBatchMerger.ScriptBatch
 				_cboFootageStrategy.SelectedIndex = Math.Min(1, Math.Max(0, _settings.FootageStrategy));
 
 				_txtFootageFolder.Text = _settings.FootageFolderPath ?? "";
+				_chkBgmEnabled.Checked = _settings.BgmEnabled;
 				_txtBgmPath.Text = _settings.BgmPath ?? "";
 				_trkBgmVol.Value = Math.Max(5, Math.Min(40, _settings.BgmVolumePercent));
 				_lblBgmVol.Text = $"{_trkBgmVol.Value}%";
@@ -1726,6 +1739,7 @@ namespace VideoBatchMerger.ScriptBatch
 
 			_settings.FootageStrategy = _cboFootageStrategy.SelectedIndex;
 			_settings.FootageFolderPath = _txtFootageFolder.Text.Trim();
+			_settings.BgmEnabled = _chkBgmEnabled.Checked;
 			_settings.BgmPath = _txtBgmPath.Text.Trim();
 			_settings.BgmVolumePercent = _trkBgmVol.Value;
 
@@ -2611,6 +2625,16 @@ namespace VideoBatchMerger.ScriptBatch
 				return;
 			}
 
+			SaveSettings();
+			if (_settings.BgmEnabled && !string.IsNullOrWhiteSpace(_settings.BgmPath)
+				&& !ScriptBatchComposer.HasUsableBgmSource(_settings.BgmPath))
+			{
+				MessageBox.Show(this,
+					"已启用背景音乐，但所选路径不存在，或文件夹中没有受支持的音频文件。请检查路径并放入 MP3、WAV、M4A、AAC、FLAC、OGG、OPUS、WMA 或 AIFF 文件。",
+					"背景音乐不可用", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
+			}
+
 			string outDir = _txtOutputDir.Text.Trim();
 			if (string.IsNullOrEmpty(outDir))
 			{
@@ -2774,16 +2798,15 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 		}
 
-		private void BrowseBgmFile()
+		private void BrowseBgmFolder()
 		{
-			using var ofd = new OpenFileDialog
+			using var fbd = new FolderBrowserDialog
 			{
-				Title = "选择背景音乐 (MP3/WAV)",
-				Filter = "音频文件 (*.mp3;*.wav;*.m4a)|*.mp3;*.wav;*.m4a|所有文件 (*.*)|*.*"
+				Description = "选择背景音乐文件夹（每条成片会随机选择其中一首）"
 			};
-			if (ofd.ShowDialog(this) == DialogResult.OK)
+			if (fbd.ShowDialog(this) == DialogResult.OK)
 			{
-				_txtBgmPath.Text = ofd.FileName;
+				_txtBgmPath.Text = fbd.SelectedPath;
 			}
 		}
 
