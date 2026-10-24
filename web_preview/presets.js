@@ -3,6 +3,32 @@
  * 适配 1080×1920 竖屏大屏分辨率
  */
 const VIDEOKIT_PRESETS = {
+    "晨曦圣光·暖金立体": {
+        color_text: "#FFFFFF",
+        color_high: "#FFD700",
+        fontsize: 86,
+        bold: true,
+        use_stroke: false,
+        shadow_blur: 10,
+        color_shadow: "#B8860B",
+        pos_y: 0.82,
+        wrap_width_percent: 88,
+        anim_in_type: "holy_glow",
+        anim_in_duration: 0.25
+    },
+    "圣洁经文·无边浮雕": {
+        color_text: "#FFFDF6",
+        color_high: "#FFE899",
+        fontsize: 86,
+        bold: true,
+        use_stroke: false,
+        shadow_blur: 8,
+        color_shadow: "#A08050",
+        pos_y: 0.82,
+        wrap_width_percent: 88,
+        anim_in_type: "fade",
+        anim_in_duration: 0.25
+    },
     "默认白字": {
         color_text: "#FFFFFF",
         color_high: "#FFD700",

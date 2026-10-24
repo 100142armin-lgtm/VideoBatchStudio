@@ -385,15 +385,11 @@ namespace VideoBatchMerger.ScriptBatch
 			string outlineColor = string.IsNullOrWhiteSpace(settings.SubtitleStrokeColorHex) ? preset.OutlineColorHex : settings.SubtitleStrokeColorHex;
 			float outlineWidth = settings.SubtitleStrokeWidth > 0 ? settings.SubtitleStrokeWidth : preset.OutlineWidth;
 
-			if (preset.Id == "box_red_badge")
-			{
-				primaryColor = "&H00FFFFFF";
-				outlineColor = "&H00000000";
-				outlineWidth = Math.Max(6f, outlineWidth);
-			}
-
-			int borderStyle = preset.BorderStyle; // 1: 描边阴影, 3: 不透明底框
-			string backColor = borderStyle == 3 ? (string.IsNullOrWhiteSpace(preset.BackColorHex) ? outlineColor : preset.BackColorHex) : "&H80000000";
+			int borderStyle = preset.BorderStyle; // 1: 描边阴影/纯净立体, 3: 不透明底框
+			float shadowDepth = preset.ShadowDepth > 0 ? preset.ShadowDepth : 3.5f;
+			string backColor = borderStyle == 3
+				? (string.IsNullOrWhiteSpace(preset.BackColorHex) ? outlineColor : preset.BackColorHex)
+				: (string.IsNullOrWhiteSpace(preset.BackColorHex) ? "&H30104080" : preset.BackColorHex);
 
 			int marginV = settings.SubtitleMarginV > 0 ? settings.SubtitleMarginV : 130;
 			if (settings.SubtitleVerticalPercent > 0)
@@ -413,10 +409,11 @@ namespace VideoBatchMerger.ScriptBatch
 			sb.AppendLine();
 			sb.AppendLine("[V4+ Styles]");
 			sb.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
-			sb.AppendLine($"Style: Default,{fontName},{fontSize},{primaryColor},&H000000FF,{outlineColor},{backColor},-1,0,0,0,100,100,0,0,{borderStyle},{outlineWidth:0.0},2,2,{marginL},{marginR},{marginV},1");
+			sb.AppendLine($"Style: Default,{fontName},{fontSize},{primaryColor},&H000000FF,{outlineColor},{backColor},-1,0,0,0,100,100,0,0,{borderStyle},{outlineWidth:0.0},{shadowDepth:0.0},2,{marginL},{marginR},{marginV},1");
 			int boxPadding = (int)Math.Max(10, Math.Round(fontSize * 0.18));
 			string boxBgColor = string.IsNullOrWhiteSpace(preset.BackColorHex) || preset.BackColorHex == "&H80000000" ? "&H000000D0" : preset.BackColorHex;
-			sb.AppendLine($"Style: HighlightBox,{fontName},{fontSize},&H0000FFFF,&H000000FF,{boxBgColor},&H00000000,-1,0,0,0,100,100,0,0,3,{boxPadding},0,2,{marginL},{marginR},{marginV},1");
+			string hlTextColor = string.IsNullOrWhiteSpace(preset.HighlightTextColorHex) ? "&H0000FFFF" : preset.HighlightTextColorHex;
+			sb.AppendLine($"Style: HighlightBox,{fontName},{fontSize},{hlTextColor},&H000000FF,{boxBgColor},&H00000000,-1,0,0,0,100,100,0,0,3,{boxPadding},0,2,{marginL},{marginR},{marginV},1");
 			sb.AppendLine();
 			sb.AppendLine("[Events]");
 			sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");

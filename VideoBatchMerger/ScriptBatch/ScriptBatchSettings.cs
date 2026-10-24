@@ -78,10 +78,10 @@ namespace VideoBatchMerger.ScriptBatch
 		// 字幕样式与排版
 		public string SubtitleFontFamily { get; set; } = "Arial";
 		public int SubtitleFontSize { get; set; } = 86; // 86 px (1080x1920 标配大屏清晰字号)
-		public string SubtitleStyleId { get; set; } = "viral_yellow";
-		public string SubtitleColorHex { get; set; } = "&H0000F2FF"; // ASS BGR: Bright Yellow
-		public string SubtitleStrokeColorHex { get; set; } = "&H00000000"; // Black
-		public float SubtitleStrokeWidth { get; set; } = 3.5f;
+		public string SubtitleStyleId { get; set; } = "sacred_warm_gold";
+		public string SubtitleColorHex { get; set; } = "&H00FFFFFF"; // ASS BGR: Pure White
+		public string SubtitleStrokeColorHex { get; set; } = "&H00155095"; // Warm Golden Rim
+		public float SubtitleStrokeWidth { get; set; } = 1.5f;
 		public int SubtitleMarginV { get; set; } = 130;
 		public int SubtitleVerticalPercent { get; set; } = 82; // 15% (top) ~ 88% (bottom)
 		public int SubtitleOffsetX { get; set; } = 0; // -500 ~ +500 (水平偏移，0为居中)

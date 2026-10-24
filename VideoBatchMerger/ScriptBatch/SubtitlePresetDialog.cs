@@ -77,12 +77,12 @@ namespace VideoBatchMerger.ScriptBatch
 				Padding = new Padding(0, 10, 0, 0)
 			};
 
-			string[] categories = { "全部", "底框样式", "基础字幕", "卡拉OK高亮", "特殊动效" };
+			string[] categories = { "全部", "纯净立体", "底框样式", "卡拉OK高亮", "特殊动效" };
 			foreach (var cat in categories)
 			{
 				var btnCat = new Button
 				{
-					Text = cat == "全部" ? "🌟 全部预设" : (cat == "底框样式" ? "🏷️ 底框样式" : (cat == "基础字幕" ? "📄 基础字幕" : (cat == "卡拉OK高亮" ? "🎤 卡拉OK高亮" : "⚡ 特殊动效"))),
+					Text = cat == "全部" ? "🌟 全部预设" : (cat == "纯净立体" ? "✨ 纯净立体" : (cat == "底框样式" ? "🏷️ 底框样式" : (cat == "卡拉OK高亮" ? "🎤 卡拉OK高亮" : "⚡ 特殊动效"))),
 					Width = 155,
 					Height = 38,
 					FlatStyle = FlatStyle.Flat,
@@ -302,12 +302,20 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 				else
 				{
-					// 绘制描边
-					using var strokeBrush = new SolidBrush(_preset.PreviewStrokeColor);
-					g.DrawString(sampleText, font, strokeBrush, textX + 1.2f, textY + 1.2f);
-					g.DrawString(sampleText, font, strokeBrush, textX - 1.2f, textY - 1.2f);
-					g.DrawString(sampleText, font, strokeBrush, textX + 1.2f, textY - 1.2f);
-					g.DrawString(sampleText, font, strokeBrush, textX - 1.2f, textY + 1.2f);
+					// 绘制纯净 3D 立体落影 (非黑色)
+					if (_preset.PreviewShadowColor != Color.Transparent)
+					{
+						using var shadowBrush = new SolidBrush(_preset.PreviewShadowColor);
+						g.DrawString(sampleText, font, shadowBrush, textX + 1.6f, textY + 1.6f);
+					}
+
+					// 绘制微立体轮廓 (非黑色)
+					if (_preset.OutlineWidth > 0 && _preset.PreviewStrokeColor != Color.Transparent)
+					{
+						using var strokeBrush = new SolidBrush(_preset.PreviewStrokeColor);
+						g.DrawString(sampleText, font, strokeBrush, textX + 0.8f, textY + 0.8f);
+						g.DrawString(sampleText, font, strokeBrush, textX - 0.8f, textY - 0.8f);
+					}
 				}
 
 				using var textBrush = new SolidBrush(_preset.PreviewTextColor);

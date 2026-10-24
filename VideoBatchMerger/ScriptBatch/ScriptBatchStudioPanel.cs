@@ -3513,22 +3513,34 @@ namespace VideoBatchMerger.ScriptBatch
 								float padBoxX = 8f * scale + 4f;
 								float padBoxY = 3f * scale + 2f;
 								var boxRect = new RectangleF(wordX - padBoxX, curY - padBoxY, wW + padBoxX * 2, lineH + padBoxY * 2);
-								using var redBrush = new SolidBrush(Color.FromArgb(208, 0, 0));
+								using var bgBrush = new SolidBrush(preset.PreviewHighlightBgColor);
 								using var boxPath = GetRoundedRectPath(boxRect, Math.Max(3f, 6f * scale));
-								g.FillPath(redBrush, boxPath);
+								g.FillPath(bgBrush, boxPath);
 
-								using var yelBrush = new SolidBrush(Color.FromArgb(255, 255, 0));
-								g.DrawString(word, font, yelBrush, wordX, curY);
+								using var hlBrush = new SolidBrush(preset.PreviewHighlightTextColor);
+								g.DrawString(word, font, hlBrush, wordX, curY);
 							}
 							else
 							{
-								float strokeW = Math.Max(2f, 6f * scale);
-								using var strokePen = new Pen(Color.Black, strokeW) { LineJoin = LineJoin.Round };
-								using var path = new GraphicsPath();
-								path.AddString(word, font.FontFamily, (int)font.Style, font.Size, new PointF(wordX, curY), StringFormat.GenericDefault);
-								g.DrawPath(strokePen, path);
+								// 绘制立体光影 (去黑化：暖色3D立体落影 + 纯净白字)
+								if (preset.PreviewShadowColor != Color.Transparent)
+								{
+									float shX = Math.Max(1.5f, preset.ShadowDepth * scale * 1.0f);
+									float shY = Math.Max(1.5f, preset.ShadowDepth * scale * 1.0f);
+									using var shadowBrush = new SolidBrush(preset.PreviewShadowColor);
+									g.DrawString(word, font, shadowBrush, wordX + shX, curY + shY);
+								}
 
-								using var whiteBrush = new SolidBrush(Color.White);
+								if (preset.OutlineWidth > 0 && preset.PreviewStrokeColor != Color.Transparent)
+								{
+									float strokeW = Math.Max(1f, preset.OutlineWidth * scale);
+									using var strokePen = new Pen(preset.PreviewStrokeColor, strokeW) { LineJoin = LineJoin.Round };
+									using var path = new GraphicsPath();
+									path.AddString(word, font.FontFamily, (int)font.Style, font.Size, new PointF(wordX, curY), StringFormat.GenericDefault);
+									g.DrawPath(strokePen, path);
+								}
+
+								using var whiteBrush = new SolidBrush(preset.PreviewTextColor);
 								g.DrawString(word, font, whiteBrush, wordX, curY);
 							}
 
@@ -3562,28 +3574,41 @@ namespace VideoBatchMerger.ScriptBatch
 						using var boxBrush = new SolidBrush(preset.PreviewBoxColor);
 						using var boxPath = GetRoundedRectPath(boxRect, Math.Max(3f, 6f * scale));
 						g.FillPath(boxBrush, boxPath);
+
+						using var textBrush = new SolidBrush(preset.PreviewTextColor);
+						g.DrawString(sampleText, font, textBrush, subRect, subFormat);
 					}
 					else
 					{
-						Color strokeColor = preset.PreviewStrokeColor;
-						float strokeWidth = Math.Max(1.5f, preset.OutlineWidth * scale);
+						// 绘制纯净 3D 立体落影 (非黑色)
+						if (preset.PreviewShadowColor != Color.Transparent)
+						{
+							float shX = Math.Max(1.5f, preset.ShadowDepth * scale * 1.0f);
+							float shY = Math.Max(1.5f, preset.ShadowDepth * scale * 1.0f);
+							var shadowRect = new RectangleF(textX + shX, textY + shY, textSize.Width, textSize.Height);
+							using var shadowBrush = new SolidBrush(preset.PreviewShadowColor);
+							g.DrawString(sampleText, font, shadowBrush, shadowRect, subFormat);
+						}
 
-						using var path = new GraphicsPath();
-						path.AddString(
-							sampleText,
-							font.FontFamily,
-							(int)font.Style,
-							font.Size,
-							subRect,
-							subFormat
-						);
+						// 绘制微立体轮廓 (非黑色)
+						if (preset.OutlineWidth > 0 && preset.PreviewStrokeColor != Color.Transparent)
+						{
+							float strokeWidth = Math.Max(1f, preset.OutlineWidth * scale);
+							using var path = new GraphicsPath();
+							path.AddString(
+								sampleText,
+								font.FontFamily,
+								(int)font.Style,
+								font.Size,
+								subRect,
+								subFormat
+							);
 
-						using var strokePen = new Pen(strokeColor, strokeWidth) { LineJoin = LineJoin.Round };
-						g.DrawPath(strokePen, path);
-					}
+							using var strokePen = new Pen(preset.PreviewStrokeColor, strokeWidth) { LineJoin = LineJoin.Round };
+							g.DrawPath(strokePen, path);
+						}
 
-					using (var textBrush = new SolidBrush(preset.PreviewTextColor))
-					{
+						using var textBrush = new SolidBrush(preset.PreviewTextColor);
 						g.DrawString(sampleText, font, textBrush, subRect, subFormat);
 					}
 				}

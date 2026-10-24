@@ -9,25 +9,28 @@ namespace VideoBatchMerger.ScriptBatch
 	{
 		public string Id { get; set; }
 		public string Name { get; set; }
-		public string Category { get; set; } // "全部", "底框样式", "基础字幕", "卡拉OK高亮", "特殊动效"
+		public string Category { get; set; } // "全部", "纯净立体", "底框样式", "卡拉OK高亮", "特殊动效"
 		public string TagText { get; set; }
 
 		public string PrimaryColorHex { get; set; }   // ASS BGR format
 		public string OutlineColorHex { get; set; }
 		public string BackColorHex { get; set; }
-		public int BorderStyle { get; set; } = 1;      // 1: 描边阴影, 3: 不透明底框 (Box)
-		public float OutlineWidth { get; set; } = 3.5f;
-		public int ShadowDepth { get; set; } = 2;
-		public int FontSize { get; set; } = 48;
+		public string HighlightTextColorHex { get; set; } = "&H0000FFFF";
+		public int BorderStyle { get; set; } = 1;      // 1: 描边阴影/立体, 3: 不透明底框 (Box)
+		public float OutlineWidth { get; set; } = 1.5f;
+		public float ShadowDepth { get; set; } = 3.5f;
+		public int FontSize { get; set; } = 86;
 		public int DisplayMode { get; set; } = 0;      // 0: 句级自然居中, 1: 逐词卡拉OK高亮, 2: 动感回弹弹出, 3: 逐词红底框高亮
 
-		// GDI+ 预览绘制颜色辅助
-		public Color PreviewTextColor { get; set; }
-		public Color PreviewStrokeColor { get; set; }
+		// GDI+ 预览绘制颜色辅助 (全面剔除纯黑与暗黑描边)
+		public Color PreviewTextColor { get; set; } = Color.White;
+		public Color PreviewStrokeColor { get; set; } = Color.Transparent;
+		public Color PreviewShadowColor { get; set; } = Color.FromArgb(128, 64, 16);
 		public Color PreviewBoxColor { get; set; } = Color.Transparent;
-		public Color PreviewHighlightBgColor { get; set; } = Color.FromArgb(208, 0, 0);
-		public Color PreviewHighlightTextColor { get; set; } = Color.FromArgb(255, 255, 0);
+		public Color PreviewHighlightBgColor { get; set; } = Color.FromArgb(136, 24, 24);
+		public Color PreviewHighlightTextColor { get; set; } = Color.FromArgb(255, 215, 0);
 		public bool HasBox => BorderStyle == 3 && PreviewBoxColor != Color.Transparent;
+		public bool IsPure3D => BorderStyle == 1 && ShadowDepth >= 2f;
 	}
 
 	public static class SubtitlePresetCatalog
@@ -35,33 +38,132 @@ namespace VideoBatchMerger.ScriptBatch
 		public static readonly List<SubtitlePreset> Presets = new List<SubtitlePreset>
 		{
 			// ==========================================
-			// 1. 底框样式 (短视频自适应底框)
+			// 1. 纯净立体 (专为信仰赛道定制 · 0黑边 · 圣光与浮雕质感)
 			// ==========================================
 			new SubtitlePreset
 			{
-				Id = "box_red_badge",
-				Name = "经典红底框_黄字白文",
-				Category = "底框样式",
-				TagText = "经典底框 · 词级红框",
-				PrimaryColorHex = "&H00FFFFFF", // 基础白字
-				OutlineColorHex = "&H00000000", // 立体黑边
-				BackColorHex = "&H000000D0",    // ASS BGR: #D00000 (红底框)
+				Id = "sacred_warm_gold",
+				Name = "晨曦圣光·暖金立体",
+				Category = "纯净立体",
+				TagText = "纯净立体 · 暖金圣光",
+				PrimaryColorHex = "&H00FFFFFF", // 纯白字
+				OutlineColorHex = "&H00155095", // 暖琥珀微立体缘 (ASS BGR: 955015)
+				BackColorHex = "&H30104080",    // 暖金3D立体落影
 				BorderStyle = 1,
-				OutlineWidth = 7.5f,
-				ShadowDepth = 2,
+				OutlineWidth = 1.5f,
+				ShadowDepth = 4.0f,
 				FontSize = 86,
-				DisplayMode = 3, // 3: 逐词红底框高亮
+				DisplayMode = 0,
 				PreviewTextColor = Color.White,
-				PreviewStrokeColor = Color.Black,
+				PreviewStrokeColor = Color.FromArgb(149, 80, 21),
+				PreviewShadowColor = Color.FromArgb(128, 64, 16)
+			},
+			new SubtitlePreset
+			{
+				Id = "sacred_embossed_white",
+				Name = "圣洁经文·无边浮雕",
+				Category = "纯净立体",
+				TagText = "纯净立体 · 圣洁浮雕",
+				PrimaryColorHex = "&H00F8FDFF", // 象牙圣洁白
+				OutlineColorHex = "&H00F8FDFF", // 0描边，同色融入
+				BackColorHex = "&H30103565",    // 浅焦糖3D微浮雕厚度
+				BorderStyle = 1,
+				OutlineWidth = 0f,              // 彻底无描边
+				ShadowDepth = 4.5f,
+				FontSize = 86,
+				DisplayMode = 0,
+				PreviewTextColor = Color.FromArgb(255, 253, 248),
+				PreviewStrokeColor = Color.Transparent,
+				PreviewShadowColor = Color.FromArgb(101, 53, 16)
+			},
+			new SubtitlePreset
+			{
+				Id = "box_royal_crimson",
+				Name = "皇家救赎·酒红与金",
+				Category = "纯净立体",
+				TagText = "纯净立体 · 皇家酒红金",
+				PrimaryColorHex = "&H00FFFFFF", // 主句纯白立体字 (无黑边)
+				OutlineColorHex = "&H00155095", // 暖金微立体
+				BackColorHex = "&H00181888",    // 庄严皇家酒红底框 (ASS BGR: 881818)
+				HighlightTextColorHex = "&H0000D7FF", // 圣洁亮金字
+				BorderStyle = 1,
+				OutlineWidth = 1.2f,
+				ShadowDepth = 3.5f,
+				FontSize = 86,
+				DisplayMode = 3,                // 词级红底框高亮
+				PreviewTextColor = Color.White,
+				PreviewStrokeColor = Color.FromArgb(149, 80, 21),
+				PreviewShadowColor = Color.FromArgb(128, 64, 16),
+				PreviewHighlightBgColor = Color.FromArgb(136, 24, 24),
+				PreviewHighlightTextColor = Color.FromArgb(255, 215, 0)
+			},
+			new SubtitlePreset
+			{
+				Id = "box_red_badge",
+				Name = "经典红底框·立体纯白",
+				Category = "纯净立体",
+				TagText = "纯净立体 · 词级红框",
+				PrimaryColorHex = "&H00FFFFFF", // 基础纯白
+				OutlineColorHex = "&H00155095", // 暖金立体微边缘 (彻底告别黑边)
+				BackColorHex = "&H000000D0",    // 经典饱满红框
+				HighlightTextColorHex = "&H0000FFFF", // 亮黄字
+				BorderStyle = 1,
+				OutlineWidth = 1.2f,
+				ShadowDepth = 3.5f,
+				FontSize = 86,
+				DisplayMode = 3,
+				PreviewTextColor = Color.White,
+				PreviewStrokeColor = Color.FromArgb(149, 80, 21),
+				PreviewShadowColor = Color.FromArgb(128, 64, 16),
 				PreviewHighlightBgColor = Color.FromArgb(208, 0, 0),
 				PreviewHighlightTextColor = Color.FromArgb(255, 255, 0)
 			},
 			new SubtitlePreset
 			{
+				Id = "sacred_soft_glow",
+				Name = "天使晨光·柔光金辉",
+				Category = "纯净立体",
+				TagText = "纯净立体 · 晨曦金辉",
+				PrimaryColorHex = "&H008DF4FF", // 暖阳亮金字 (ASS BGR: FFF48D)
+				OutlineColorHex = "&H000050A0", // 焦糖金色微边缘
+				BackColorHex = "&H30002060",    // 浓琥珀3D落影
+				BorderStyle = 1,
+				OutlineWidth = 1.5f,
+				ShadowDepth = 3.8f,
+				FontSize = 86,
+				DisplayMode = 0,
+				PreviewTextColor = Color.FromArgb(255, 244, 141),
+				PreviewStrokeColor = Color.FromArgb(160, 80, 0),
+				PreviewShadowColor = Color.FromArgb(96, 32, 0)
+			},
+			new SubtitlePreset
+			{
+				Id = "sacred_ethereal_sky",
+				Name = "柔光天籁·晨雾淡蓝",
+				Category = "纯净立体",
+				TagText = "纯净立体 · 天籁空灵",
+				PrimaryColorHex = "&H00FFFFFF", // 纯白字
+				OutlineColorHex = "&H00D09040", // 天空晴蓝微边缘 (ASS BGR: 4090D0)
+				BackColorHex = "&H30805020",    // 空灵蔚蓝立体落影
+				BorderStyle = 1,
+				OutlineWidth = 1.5f,
+				ShadowDepth = 3.5f,
+				FontSize = 86,
+				DisplayMode = 0,
+				PreviewTextColor = Color.White,
+				PreviewStrokeColor = Color.FromArgb(64, 144, 208),
+				PreviewShadowColor = Color.FromArgb(32, 80, 128)
+			},
+
+			// ==========================================
+			// 2. 底框样式 (保留现有非黑色系底框)
+			// ==========================================
+			new SubtitlePreset
+			{
 				Id = "box_caramel_orange",
 				Name = "焦糖橙_黄高亮",
 				Category = "底框样式",
-				TagText = "底框样式 · 悬浮播放",
+				TagText = "底框样式 · 温暖悬浮",
 				PrimaryColorHex = "&H0000F5FF", // 黄字
 				OutlineColorHex = "&H000055D4", // 橙底框
 				BackColorHex = "&H000055D4",
@@ -78,7 +180,7 @@ namespace VideoBatchMerger.ScriptBatch
 				Id = "box_ocean_blue",
 				Name = "深海蓝_黄高亮",
 				Category = "底框样式",
-				TagText = "底框样式 · 科技高级",
+				TagText = "底框样式 · 宁静深海",
 				PrimaryColorHex = "&H0000F2FF", // 亮黄字
 				OutlineColorHex = "&H00C04000", // 深海蓝框 (ASS BGR: 0040C0)
 				BackColorHex = "&H00C04000",
@@ -92,44 +194,10 @@ namespace VideoBatchMerger.ScriptBatch
 			},
 			new SubtitlePreset
 			{
-				Id = "box_neon_green_black",
-				Name = "荧光绿底框_黑字",
-				Category = "底框样式",
-				TagText = "底框样式 · 极度吸睛",
-				PrimaryColorHex = "&H00000000", // 纯黑字
-				OutlineColorHex = "&H0032FF00", // 荧光绿 (BGR: 00FF32)
-				BackColorHex = "&H0032FF00",
-				BorderStyle = 3,
-				OutlineWidth = 9f,
-				ShadowDepth = 0,
-				FontSize = 86,
-				PreviewTextColor = Color.Black,
-				PreviewStrokeColor = Color.FromArgb(0, 255, 50),
-				PreviewBoxColor = Color.FromArgb(240, 0, 255, 50)
-			},
-			new SubtitlePreset
-			{
-				Id = "box_card_news",
-				Name = "黑底白字 (新闻)",
-				Category = "底框样式",
-				TagText = "底框样式 · 权威纪实",
-				PrimaryColorHex = "&H00FFFFFF", // 白字
-				OutlineColorHex = "&H00181818", // 纯黑底框
-				BackColorHex = "&H00181818",
-				BorderStyle = 3,
-				OutlineWidth = 8f,
-				ShadowDepth = 0,
-				FontSize = 82,
-				PreviewTextColor = Color.White,
-				PreviewStrokeColor = Color.FromArgb(24, 24, 24),
-				PreviewBoxColor = Color.FromArgb(220, 24, 24, 24)
-			},
-			new SubtitlePreset
-			{
 				Id = "box_neon_pink_blue",
 				Name = "霓虹蓝粉渐变框",
 				Category = "底框样式",
-				TagText = "底框样式 · 潮流时尚",
+				TagText = "底框样式 · 唯美氛围",
 				PrimaryColorHex = "&H00FFFFFF",
 				OutlineColorHex = "&H00C00080",
 				BackColorHex = "&H00C00080",
@@ -146,7 +214,7 @@ namespace VideoBatchMerger.ScriptBatch
 				Id = "box_dark_purple",
 				Name = "暗夜紫_黄高亮",
 				Category = "底框样式",
-				TagText = "底框样式 · 沉稳神秘",
+				TagText = "底框样式 · 庄重雅致",
 				PrimaryColorHex = "&H0000F0FF",
 				OutlineColorHex = "&H00600030",
 				BackColorHex = "&H00600030",
@@ -160,197 +228,65 @@ namespace VideoBatchMerger.ScriptBatch
 			},
 
 			// ==========================================
-			// 2. 基础字幕 (经典极简 · 百搭耐看)
+			// 3. 卡拉OK高亮 (纯净立体律动)
 			// ==========================================
 			new SubtitlePreset
 			{
-				Id = "viral_yellow",
-				Name = "黄字黑边 (经典爆款)",
-				Category = "基础字幕",
-				TagText = "基础字幕 · 流量标配",
-				PrimaryColorHex = "&H0000F5FF", // 醒目黄
-				OutlineColorHex = "&H00000000", // 纯黑边
-				BackColorHex = "&H80000000",
+				Id = "karaoke_sacred_gold",
+				Name = "晨曦金光·逐词流动",
+				Category = "卡拉OK高亮",
+				TagText = "卡拉OK高亮 · 金光律动",
+				PrimaryColorHex = "&H00FFFFFF", // 白底立体
+				OutlineColorHex = "&H00155095",
+				BackColorHex = "&H30104080",
 				BorderStyle = 1,
-				OutlineWidth = 5.5f,
-				ShadowDepth = 2,
+				OutlineWidth = 1.5f,
+				ShadowDepth = 3.5f,
 				FontSize = 86,
-				PreviewTextColor = Color.FromArgb(255, 245, 0),
-				PreviewStrokeColor = Color.Black
-			},
-			new SubtitlePreset
-			{
-				Id = "white_stroke",
-				Name = "默认白字 (立体黑边)",
-				Category = "基础字幕",
-				TagText = "基础字幕 · 极简百搭",
-				PrimaryColorHex = "&H00FFFFFF", // 纯白
-				OutlineColorHex = "&H00000000",
-				BackColorHex = "&H80000000",
-				BorderStyle = 1,
-				OutlineWidth = 4.5f,
-				ShadowDepth = 2,
-				FontSize = 78,
-				PreviewTextColor = Color.White,
-				PreviewStrokeColor = Color.Black
-			},
-			new SubtitlePreset
-			{
-				Id = "mint_green",
-				Name = "荧光薄荷绿 (清新黑边)",
-				Category = "基础字幕",
-				TagText = "基础字幕 · 活力清新",
-				PrimaryColorHex = "&H0070FF80", // 翠绿
-				OutlineColorHex = "&H00000000",
-				BackColorHex = "&H80000000",
-				BorderStyle = 1,
-				OutlineWidth = 4.8f,
-				ShadowDepth = 2,
-				FontSize = 82,
-				PreviewTextColor = Color.FromArgb(128, 255, 112),
-				PreviewStrokeColor = Color.Black
-			},
-			new SubtitlePreset
-			{
-				Id = "luxury_gold",
-				Name = "重金大字 (强对比排版)",
-				Category = "基础字幕",
-				TagText = "基础字幕 · 庄重大气",
-				PrimaryColorHex = "&H0050D0FF", // 香槟金
-				OutlineColorHex = "&H00000000",
-				BackColorHex = "&HA0000000",
-				BorderStyle = 1,
-				OutlineWidth = 6.0f,
-				ShadowDepth = 3,
-				FontSize = 90,
-				PreviewTextColor = Color.FromArgb(255, 208, 80),
-				PreviewStrokeColor = Color.Black
-			},
-			new SubtitlePreset
-			{
-				Id = "cyber_cyan",
-				Name = "极简纯文+电光青高亮",
-				Category = "基础字幕",
-				TagText = "基础字幕 · 科技未来",
-				PrimaryColorHex = "&H00FFFF00", // 电光青 (BGR: 00FFFF)
-				OutlineColorHex = "&H00000000",
-				BackColorHex = "&H80000000",
-				BorderStyle = 1,
-				OutlineWidth = 4.8f,
-				ShadowDepth = 2,
-				FontSize = 84,
-				PreviewTextColor = Color.FromArgb(0, 255, 255),
-				PreviewStrokeColor = Color.Black
+				DisplayMode = 1,
+				PreviewTextColor = Color.FromArgb(255, 215, 0),
+				PreviewStrokeColor = Color.FromArgb(149, 80, 21),
+				PreviewShadowColor = Color.FromArgb(128, 64, 16)
 			},
 
 			// ==========================================
-			// 3. 卡拉OK高亮 (逐词律动 · 抓眼球)
+			// 4. 特殊动效 (无黑边立体动效)
 			// ==========================================
 			new SubtitlePreset
 			{
-				Id = "hormozi_style",
-				Name = "Hormozi 风格字幕",
-				Category = "卡拉OK高亮",
-				TagText = "卡拉OK高亮 · 海外千万播放",
-				PrimaryColorHex = "&H0000F2FF", // 鲜明黄
-				OutlineColorHex = "&H00000000",
-				BackColorHex = "&H80000000",
-				BorderStyle = 1,
-				OutlineWidth = 7.0f,
-				ShadowDepth = 2,
-				FontSize = 94,
-				DisplayMode = 1, // 逐词高亮跳动
-				PreviewTextColor = Color.FromArgb(255, 242, 0),
-				PreviewStrokeColor = Color.Black
-			},
-			new SubtitlePreset
-			{
-				Id = "karaoke_blue",
-				Name = "黑边_电蓝高亮",
-				Category = "卡拉OK高亮",
-				TagText = "卡拉OK高亮 · 悬浮播放",
-				PrimaryColorHex = "&H00FFA020", // 电蓝 (BGR: 20A0FF)
-				OutlineColorHex = "&H00000000",
-				BackColorHex = "&H80000000",
-				BorderStyle = 1,
-				OutlineWidth = 5.2f,
-				ShadowDepth = 2,
-				FontSize = 86,
-				DisplayMode = 1,
-				PreviewTextColor = Color.FromArgb(32, 160, 255),
-				PreviewStrokeColor = Color.Black
-			},
-			new SubtitlePreset
-			{
-				Id = "karaoke_pink",
-				Name = "黑边_粉红高亮",
-				Category = "卡拉OK高亮",
-				TagText = "卡拉OK高亮 · 悬浮播放",
-				PrimaryColorHex = "&H00C040FF", // 粉红 (BGR: FF40C0)
-				OutlineColorHex = "&H00000000",
-				BackColorHex = "&H80000000",
-				BorderStyle = 1,
-				OutlineWidth = 5.2f,
-				ShadowDepth = 2,
-				FontSize = 86,
-				DisplayMode = 1,
-				PreviewTextColor = Color.FromArgb(255, 64, 192),
-				PreviewStrokeColor = Color.Black
-			},
-			new SubtitlePreset
-			{
-				Id = "karaoke_mint",
-				Name = "黑边_薄荷高亮",
-				Category = "卡拉OK高亮",
-				TagText = "卡拉OK高亮 · 悬浮播放",
-				PrimaryColorHex = "&H00A0FF70", // 薄荷
-				OutlineColorHex = "&H00000000",
-				BackColorHex = "&H80000000",
-				BorderStyle = 1,
-				OutlineWidth = 5.2f,
-				ShadowDepth = 2,
-				FontSize = 86,
-				DisplayMode = 1,
-				PreviewTextColor = Color.FromArgb(112, 255, 160),
-				PreviewStrokeColor = Color.Black
-			},
-
-			// ==========================================
-			// 4. 特殊动效 (缩放弹出 · 逐字动画)
-			// ==========================================
-			new SubtitlePreset
-			{
-				Id = "pop_bounce",
-				Name = "逐词弹出 (动感回弹)",
+				Id = "pop_bounce_sacred",
+				Name = "圣光跃动·立体弹出",
 				Category = "特殊动效",
-				TagText = "逐词动态 · 悬浮播放",
-				PrimaryColorHex = "&H0000F5FF",
-				OutlineColorHex = "&H00000000",
-				BackColorHex = "&H80000000",
-				BorderStyle = 1,
-				OutlineWidth = 5.5f,
-				ShadowDepth = 2,
-				FontSize = 86,
-				DisplayMode = 2, // 动感弹出
-				PreviewTextColor = Color.FromArgb(255, 245, 0),
-				PreviewStrokeColor = Color.Black
-			},
-			new SubtitlePreset
-			{
-				Id = "typewriter",
-				Name = "打字机模式",
-				Category = "特殊动效",
-				TagText = "特殊动画 · 悬浮播放",
+				TagText = "动态弹出 · 纯净立体",
 				PrimaryColorHex = "&H00FFFFFF",
-				OutlineColorHex = "&H00000000",
-				BackColorHex = "&H80000000",
+				OutlineColorHex = "&H00155095",
+				BackColorHex = "&H30104080",
 				BorderStyle = 1,
-				OutlineWidth = 4.8f,
-				ShadowDepth = 2,
-				FontSize = 82,
+				OutlineWidth = 1.5f,
+				ShadowDepth = 3.5f,
+				FontSize = 86,
+				DisplayMode = 2,
+				PreviewTextColor = Color.White,
+				PreviewStrokeColor = Color.FromArgb(149, 80, 21),
+				PreviewShadowColor = Color.FromArgb(128, 64, 16)
+			},
+			new SubtitlePreset
+			{
+				Id = "typewriter_sacred",
+				Name = "经文显现·打字机立体",
+				Category = "特殊动效",
+				TagText = "打字机 · 圣洁文字",
+				PrimaryColorHex = "&H00FFFFFF",
+				OutlineColorHex = "&H00155095",
+				BackColorHex = "&H30104080",
+				BorderStyle = 1,
+				OutlineWidth = 1.5f,
+				ShadowDepth = 3.5f,
+				FontSize = 86,
 				DisplayMode = 1,
 				PreviewTextColor = Color.White,
-				PreviewStrokeColor = Color.Black
+				PreviewStrokeColor = Color.FromArgb(149, 80, 21),
+				PreviewShadowColor = Color.FromArgb(128, 64, 16)
 			}
 		};
 
