@@ -61,6 +61,7 @@ namespace VideoBatchMerger.ScriptBatch
 		private ComboBox _cboSubtitleStyle;
 		private ComboBox _cboSubtitleSize;
 		private ComboBox _cboSubtitleMode;
+		private CheckBox _chkSubtitleScrollPanel;
 		private TrackBar _trkSubtitlePos;
 		private Label _lblSubtitlePos;
 		private TrackBar _trkSubtitleX;
@@ -105,6 +106,14 @@ namespace VideoBatchMerger.ScriptBatch
 		private Label _lblStickerOpacity;
 		private NumericUpDown _numStickerStart;
 		private NumericUpDown _numStickerDuration;
+		private ComboBox _cboStickerMotion;
+		private Panel _pnlStickerMotionParams;
+		private TrackBar _trkStickerEndX;
+		private TrackBar _trkStickerEndY;
+		private Label _lblStickerEndX;
+		private Label _lblStickerEndY;
+		private NumericUpDown _numStickerMoveDuration;
+		private bool _isSyncingStickerDetails;
 		private CheckBox _chkStickerLoop;
 		private readonly Dictionary<string, Image> _stickerImageCache = new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
 
@@ -931,6 +940,7 @@ namespace VideoBatchMerger.ScriptBatch
 					_settings.SubtitleStrokeWidth = sel.OutlineWidth;
 					_settings.SubtitleBorderStyle = sel.BorderStyle;
 					_settings.SubtitleDisplayMode = sel.DisplayMode;
+					if (_cboSubtitleMode != null) _cboSubtitleMode.SelectedIndex = Math.Min(4, Math.Max(0, sel.DisplayMode));
 					_settings.Save();
 					UpdatePreview();
 				}
@@ -951,16 +961,29 @@ namespace VideoBatchMerger.ScriptBatch
 				"0. 句级自然居中",
 				"1. 逐词高亮跳动",
 				"2. 动感回弹弹出",
-				"3. 逐词红底框高亮"
+				"3. 逐词红底框高亮",
+				"4. 随语音逐行上滚"
 			});
 			_cboSubtitleMode.SelectedIndexChanged += (_, _) =>
 			{
 				_settings.SubtitleDisplayMode = _cboSubtitleMode.SelectedIndex;
+				if (_chkSubtitleScrollPanel != null) _chkSubtitleScrollPanel.Visible = _settings.SubtitleDisplayMode == 4;
 				SaveSettings();
 				UpdatePreview();
 			};
 			subOptRow.Controls.Add(_cboSubtitleMode);
 			subFlow.Controls.Add(subOptRow);
+			_chkSubtitleScrollPanel = new CheckBox
+			{
+				Text = "上滚字幕显示半透明底板",
+				Checked = _settings.SubtitleScrollPanelEnabled,
+				ForeColor = TextPrimary,
+				AutoSize = true,
+				Visible = _settings.SubtitleDisplayMode == 4,
+				Margin = new Padding(0, 2, 0, 4)
+			};
+			_chkSubtitleScrollPanel.CheckedChanged += (_, _) => { SaveSettings(); UpdatePreview(); };
+			subFlow.Controls.Add(_chkSubtitleScrollPanel);
 
 			flow.Controls.Add(CreateCollapsibleCard("🎨 字幕视觉模板与排版", subFlow, true));
 
@@ -1654,7 +1677,9 @@ namespace VideoBatchMerger.ScriptBatch
 					108 => 4,
 					_ => 2
 				};
-				_cboSubtitleMode.SelectedIndex = Math.Min(3, Math.Max(0, _settings.SubtitleDisplayMode));
+				_cboSubtitleMode.SelectedIndex = Math.Min(4, Math.Max(0, _settings.SubtitleDisplayMode));
+				_chkSubtitleScrollPanel.Checked = _settings.SubtitleScrollPanelEnabled;
+				_chkSubtitleScrollPanel.Visible = _settings.SubtitleDisplayMode == 4;
 				_trkSubtitlePos.Value = Math.Max(15, Math.Min(88, _settings.SubtitleVerticalPercent));
 				_trkSubtitleX.Value = Math.Max(-350, Math.Min(350, _settings.SubtitleOffsetX));
 
@@ -1763,6 +1788,7 @@ namespace VideoBatchMerger.ScriptBatch
 				_ => 86
 			};
 			_settings.SubtitleDisplayMode = _cboSubtitleMode.SelectedIndex;
+			_settings.SubtitleScrollPanelEnabled = _chkSubtitleScrollPanel.Checked;
 			_settings.SubtitleVerticalPercent = _trkSubtitlePos.Value;
 			_settings.SubtitleOffsetX = _trkSubtitleX.Value;
 
@@ -1882,6 +1908,12 @@ namespace VideoBatchMerger.ScriptBatch
 
 		private void UpdatePreview()
 		{
+			if (_previewCanvas != null && _webViewPreview != null && _isWebViewReady)
+			{
+				bool useCanvas = _settings.SubtitleDisplayMode == 4 || (_settings.GifStickers != null && _settings.GifStickers.Any(s => s.Enabled));
+				_previewCanvas.Visible = useCanvas;
+				_webViewPreview.Visible = !useCanvas;
+			}
 			_previewCanvas?.Invalidate();
 			_previewCanvas?.Update();
 
@@ -1971,15 +2003,12 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					BeginInvoke(new Action(() =>
 					{
-						_webViewPreview.Visible = true;
-						if (_previewCanvas != null) _previewCanvas.Visible = false;
 						UpdatePreview();
 					}));
 				}
 				else
 				{
-					_webViewPreview.Visible = true;
-					if (_previewCanvas != null) _previewCanvas.Visible = false;
+					UpdatePreview();
 				}
 			}
 		}
@@ -2106,7 +2135,8 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					["subtitleText"] = sampleText,
 					["subtitleStyleId"] = _settings.SubtitleStyleId,
-					["subtitleDisplayMode"] = _settings.SubtitleDisplayMode == 3 || SubtitlePresetCatalog.GetById(_settings.SubtitleStyleId).DisplayMode == 3 ? 3 : _settings.SubtitleDisplayMode,
+					["subtitleDisplayMode"] = _settings.SubtitleDisplayMode == 4 ? 4 : (_settings.SubtitleDisplayMode == 3 || SubtitlePresetCatalog.GetById(_settings.SubtitleStyleId).DisplayMode == 3 ? 3 : _settings.SubtitleDisplayMode),
+					["subtitleScrollPanelEnabled"] = _settings.SubtitleScrollPanelEnabled,
 					["subtitleHighlightBgColor"] = ColorTranslator.ToHtml(SubtitlePresetCatalog.GetById(_settings.SubtitleStyleId).PreviewHighlightBgColor),
 					["subtitleHighlightTextColor"] = ColorTranslator.ToHtml(SubtitlePresetCatalog.GetById(_settings.SubtitleStyleId).PreviewHighlightTextColor),
 					["subtitleFontSize"] = _settings.SubtitleFontSize,
@@ -2970,7 +3000,7 @@ namespace VideoBatchMerger.ScriptBatch
 			// 2. 位置 X / Y
 			_lblStickerX = new Label { Text = "↔️ 水平位置 (X): 50%", ForeColor = TextPrimary, Font = new Font("Microsoft YaHei UI", 8.2f, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
 			dFlow.Controls.Add(_lblStickerX);
-			_trkStickerX = new TrackBar { Minimum = 0, Maximum = 100, Value = 50, Width = 310, Height = 26, TickStyle = TickStyle.None };
+			_trkStickerX = new TrackBar { Minimum = -30, Maximum = 130, Value = 50, Width = 310, Height = 26, TickStyle = TickStyle.None };
 			WireLiveTrackBar(_trkStickerX, val =>
 			{
 				if (_selectedSticker == null) return;
@@ -2981,7 +3011,7 @@ namespace VideoBatchMerger.ScriptBatch
 
 			_lblStickerY = new Label { Text = "↕️ 垂直位置 (Y): 50%", ForeColor = TextPrimary, Font = new Font("Microsoft YaHei UI", 8.2f, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
 			dFlow.Controls.Add(_lblStickerY);
-			_trkStickerY = new TrackBar { Minimum = 0, Maximum = 100, Value = 50, Width = 310, Height = 26, TickStyle = TickStyle.None };
+			_trkStickerY = new TrackBar { Minimum = -30, Maximum = 130, Value = 50, Width = 310, Height = 26, TickStyle = TickStyle.None };
 			WireLiveTrackBar(_trkStickerY, val =>
 			{
 				if (_selectedSticker == null) return;
@@ -3107,6 +3137,68 @@ namespace VideoBatchMerger.ScriptBatch
 
 			dFlow.Controls.Add(new Label { Text = "💡 持续时长设为 0 表示全程显示直到视频结束。", ForeColor = TextMuted, Font = new Font("Microsoft YaHei UI", 7.5f), AutoSize = true, Margin = new Padding(0, 0, 0, 4) });
 
+			// 贴纸帧动画和整张贴纸的运动轨迹分开控制。
+			var motionRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 6, 0, 3) };
+			motionRow.Controls.Add(new Label { Text = "飞行轨迹:", ForeColor = TextPrimary, AutoSize = true, Margin = new Padding(0, 5, 3, 0) });
+			_cboStickerMotion = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200, BackColor = InputBg, ForeColor = TextPrimary, FlatStyle = FlatStyle.Flat };
+			_cboStickerMotion.Items.AddRange(new object[] { "固定位置", "从下向上飞", "从左向右飞", "从右向左飞", "自定义起终点" });
+			_cboStickerMotion.SelectedIndexChanged += (_, _) =>
+			{
+				if (_isSyncingStickerDetails || _selectedSticker == null) return;
+				int style = _cboStickerMotion.SelectedIndex;
+				_selectedSticker.MotionStyle = style;
+				if (style == 1) { _selectedSticker.XPercent = 50; _selectedSticker.YPercent = 108; _selectedSticker.EndXPercent = 50; _selectedSticker.EndYPercent = 20; _selectedSticker.MotionDurationSec = 3; }
+				if (style == 2) { _selectedSticker.XPercent = -20; _selectedSticker.YPercent = 45; _selectedSticker.EndXPercent = 120; _selectedSticker.EndYPercent = 35; _selectedSticker.MotionDurationSec = 4; }
+				if (style == 3) { _selectedSticker.XPercent = 120; _selectedSticker.YPercent = 45; _selectedSticker.EndXPercent = -20; _selectedSticker.EndYPercent = 35; _selectedSticker.MotionDurationSec = 4; }
+				SyncStickerDetailsFromModel();
+				SaveSettings();
+				RefreshStickerList();
+				_previewCanvas?.PlaySelectedStickerMotion();
+			};
+			motionRow.Controls.Add(_cboStickerMotion);
+			dFlow.Controls.Add(motionRow);
+
+			_pnlStickerMotionParams = new Panel { AutoSize = true, Width = 310, Margin = new Padding(0, 0, 0, 6) };
+			var motionFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+			_lblStickerEndX = new Label { Text = "终点 X: 50%", ForeColor = TextPrimary, AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
+			motionFlow.Controls.Add(_lblStickerEndX);
+			_trkStickerEndX = new TrackBar { Minimum = -30, Maximum = 130, Value = 50, Width = 310, Height = 26, TickStyle = TickStyle.None };
+			WireLiveTrackBar(_trkStickerEndX, val =>
+			{
+				if (_isSyncingStickerDetails || _selectedSticker == null) return;
+				_selectedSticker.EndXPercent = val;
+				_lblStickerEndX.Text = $"终点 X: {val}%";
+			}, () => { SaveSettings(); RefreshStickerList(); });
+			motionFlow.Controls.Add(_trkStickerEndX);
+			_lblStickerEndY = new Label { Text = "终点 Y: 20%", ForeColor = TextPrimary, AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
+			motionFlow.Controls.Add(_lblStickerEndY);
+			_trkStickerEndY = new TrackBar { Minimum = -30, Maximum = 130, Value = 20, Width = 310, Height = 26, TickStyle = TickStyle.None };
+			WireLiveTrackBar(_trkStickerEndY, val =>
+			{
+				if (_isSyncingStickerDetails || _selectedSticker == null) return;
+				_selectedSticker.EndYPercent = val;
+				_lblStickerEndY.Text = $"终点 Y: {val}%";
+			}, () => { SaveSettings(); RefreshStickerList(); });
+			motionFlow.Controls.Add(_trkStickerEndY);
+			var moveTimeRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+			moveTimeRow.Controls.Add(new Label { Text = "飞行用时(秒):", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(0, 5, 2, 0) });
+			_numStickerMoveDuration = new NumericUpDown { DecimalPlaces = 1, Increment = 0.5m, Minimum = 0.1m, Maximum = 999, Value = 3, Width = 65, BackColor = InputBg, ForeColor = TextPrimary };
+			_numStickerMoveDuration.ValueChanged += (_, _) =>
+			{
+				if (_isSyncingStickerDetails || _selectedSticker == null) return;
+				_selectedSticker.MotionDurationSec = (double)_numStickerMoveDuration.Value;
+				SaveSettings();
+				RefreshStickerList();
+			};
+			moveTimeRow.Controls.Add(_numStickerMoveDuration);
+			var btnReplayMotion = CreateButton("▶ 重播飞行", AccentBlue, Color.White, 96);
+			btnReplayMotion.Click += (_, _) => _previewCanvas?.PlaySelectedStickerMotion();
+			moveTimeRow.Controls.Add(btnReplayMotion);
+			motionFlow.Controls.Add(moveTimeRow);
+			motionFlow.Controls.Add(new Label { Text = "预览区拖动贴纸设起点；终点用上方滑块微调。", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(0, 2, 0, 0) });
+			_pnlStickerMotionParams.Controls.Add(motionFlow);
+			dFlow.Controls.Add(_pnlStickerMotionParams);
+
 			// 6. 不透明度与循环播放
 			var opRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 2, 0, 0) };
 			_lblStickerOpacity = new Label { Text = "🌓 不透明度: 100%", ForeColor = TextPrimary, Font = new Font("Microsoft YaHei UI", 8.2f, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 4, 6, 0) };
@@ -3176,20 +3268,35 @@ namespace VideoBatchMerger.ScriptBatch
 				return;
 			}
 			_pnlStickerDetails.Visible = true;
-			_txtStickerPath.Text = _selectedSticker.FilePath;
-			_trkStickerX.Value = Math.Max(0, Math.Min(100, (int)Math.Round(_selectedSticker.XPercent)));
-			_lblStickerX.Text = $"↔️ 水平位置 (X): {_trkStickerX.Value}%";
-			_trkStickerY.Value = Math.Max(0, Math.Min(100, (int)Math.Round(_selectedSticker.YPercent)));
-			_lblStickerY.Text = $"↕️ 垂直位置 (Y): {_trkStickerY.Value}%";
-			_trkStickerScale.Value = Math.Max(5, Math.Min(90, (int)Math.Round(_selectedSticker.ScalePercent)));
-			_lblStickerScale.Text = $"🔍 缩放大小: {_trkStickerScale.Value}%";
-			_trkStickerRotate.Value = Math.Max(-180, Math.Min(180, (int)Math.Round(_selectedSticker.RotationAngle)));
-			_lblStickerRotate.Text = $"🔄 旋转角度: {_trkStickerRotate.Value}°";
-			_numStickerStart.Value = (decimal)Math.Max(0, _selectedSticker.StartTimeSec);
-			_numStickerDuration.Value = (decimal)Math.Max(0, _selectedSticker.DurationSec);
-			_trkStickerOpacity.Value = Math.Max(10, Math.Min(100, _selectedSticker.OpacityPercent));
-			_lblStickerOpacity.Text = $"🌓 不透明度: {_trkStickerOpacity.Value}%";
-			_chkStickerLoop.Checked = _selectedSticker.Loop;
+			_isSyncingStickerDetails = true;
+			try
+			{
+				_txtStickerPath.Text = _selectedSticker.FilePath;
+				_trkStickerX.Value = Math.Max(-30, Math.Min(130, (int)Math.Round(_selectedSticker.XPercent)));
+				_lblStickerX.Text = $"↔️ 起点 X: {_trkStickerX.Value}%";
+				_trkStickerY.Value = Math.Max(-30, Math.Min(130, (int)Math.Round(_selectedSticker.YPercent)));
+				_lblStickerY.Text = $"↕️ 起点 Y: {_trkStickerY.Value}%";
+				_trkStickerScale.Value = Math.Max(5, Math.Min(90, (int)Math.Round(_selectedSticker.ScalePercent)));
+				_lblStickerScale.Text = $"🔍 缩放大小: {_trkStickerScale.Value}%";
+				_trkStickerRotate.Value = Math.Max(-180, Math.Min(180, (int)Math.Round(_selectedSticker.RotationAngle)));
+				_lblStickerRotate.Text = $"🔄 旋转角度: {_trkStickerRotate.Value}°";
+				_numStickerStart.Value = Math.Max(_numStickerStart.Minimum, Math.Min(_numStickerStart.Maximum, (decimal)Math.Max(0, _selectedSticker.StartTimeSec)));
+				_numStickerDuration.Value = Math.Max(_numStickerDuration.Minimum, Math.Min(_numStickerDuration.Maximum, (decimal)Math.Max(0, _selectedSticker.DurationSec)));
+				_trkStickerOpacity.Value = Math.Max(10, Math.Min(100, _selectedSticker.OpacityPercent));
+				_lblStickerOpacity.Text = $"🌓 不透明度: {_trkStickerOpacity.Value}%";
+				_chkStickerLoop.Checked = _selectedSticker.Loop;
+				_cboStickerMotion.SelectedIndex = Math.Max(0, Math.Min(4, _selectedSticker.MotionStyle));
+				_pnlStickerMotionParams.Visible = _selectedSticker.MotionStyle != 0;
+				_trkStickerEndX.Value = Math.Max(-30, Math.Min(130, (int)Math.Round(_selectedSticker.EndXPercent)));
+				_lblStickerEndX.Text = $"终点 X: {_trkStickerEndX.Value}%";
+				_trkStickerEndY.Value = Math.Max(-30, Math.Min(130, (int)Math.Round(_selectedSticker.EndYPercent)));
+				_lblStickerEndY.Text = $"终点 Y: {_trkStickerEndY.Value}%";
+				_numStickerMoveDuration.Value = Math.Max(_numStickerMoveDuration.Minimum, Math.Min(_numStickerMoveDuration.Maximum, (decimal)Math.Max(0.1, _selectedSticker.MotionDurationSec)));
+			}
+			finally
+			{
+				_isSyncingStickerDetails = false;
+			}
 		}
 
 		private static Label CreateSectionHeader(string text)
@@ -3345,6 +3452,8 @@ namespace VideoBatchMerger.ScriptBatch
 			private readonly ScriptBatchStudioPanel _panel;
 			private readonly System.Windows.Forms.Timer _subtitlePreviewTimer;
 			private readonly Stopwatch _subtitlePreviewClock = Stopwatch.StartNew();
+			private readonly Stopwatch _motionPreviewClock = new Stopwatch();
+			private bool _isMotionPreviewPlaying;
 			private bool _isDraggingSticker = false;
 			private bool _isRotatingSticker = false;
 			private GifStickerItem _activeSticker = null;
@@ -3355,8 +3464,68 @@ namespace VideoBatchMerger.ScriptBatch
 				_panel = panel;
 				SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
 				_subtitlePreviewTimer = new System.Windows.Forms.Timer { Interval = 100 };
-				_subtitlePreviewTimer.Tick += (_, _) => { if (Visible) Invalidate(); };
+				_subtitlePreviewTimer.Tick += (_, _) =>
+				{
+					if (_isMotionPreviewPlaying && _panel._selectedSticker != null
+						&& _motionPreviewClock.Elapsed.TotalSeconds > _panel._selectedSticker.MotionDurationSec + 1.0)
+						_isMotionPreviewPlaying = false;
+					if (Visible) Invalidate();
+				};
 				_subtitlePreviewTimer.Start();
+			}
+
+			public void PlaySelectedStickerMotion()
+			{
+				if (_panel._selectedSticker == null || _panel._selectedSticker.MotionStyle == 0) return;
+				_isMotionPreviewPlaying = true;
+				_motionPreviewClock.Restart();
+				Invalidate();
+			}
+
+			private void GetPreviewStickerPosition(GifStickerItem sticker, out float xPercent, out float yPercent)
+			{
+				if (_isMotionPreviewPlaying && sticker == _panel._selectedSticker)
+					GifStickerMotion.Evaluate(sticker, sticker.StartTimeSec + _motionPreviewClock.Elapsed.TotalSeconds, out xPercent, out yPercent);
+				else
+				{
+					xPercent = sticker.XPercent;
+					yPercent = sticker.YPercent;
+				}
+			}
+
+			private void DrawScrollingSubtitlePreview(Graphics g, string text, SubtitlePreset preset, Font font,
+				int screenX, int screenY, int screenW, int screenH, float baseline, float shiftX)
+			{
+				var lines = ScriptBatchComposer.SplitScrollText(text, 22).Take(40).ToList();
+				if (lines.Count == 0) return;
+				float lineHeight = font.GetHeight(g) * 1.24f;
+				if (_panel._settings.SubtitleScrollPanelEnabled)
+				{
+					var panel = new RectangleF(screenX + screenW * 0.045f + shiftX,
+						baseline - 6.5f * lineHeight, screenW * 0.91f, 7.5f * lineHeight);
+					using var panelBrush = new SolidBrush(Color.FromArgb(95, 32, 32, 32));
+					g.FillRectangle(panelBrush, panel);
+				}
+				double cycleSeconds = lines.Count * 0.85 + 1.0;
+				double previewSeconds = _subtitlePreviewClock.Elapsed.TotalSeconds % cycleSeconds;
+				int current = Math.Min(lines.Count - 1, (int)(previewSeconds / 0.85));
+				float progress = (float)Math.Min(1.0, Math.Max(0.0, (previewSeconds - current * 0.85) / 0.36));
+				using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+				for (int i = Math.Max(0, current - 6); i <= current; i++)
+				{
+					float y = baseline - (current - i) * lineHeight - progress * lineHeight + (i == current ? lineHeight : 0);
+					int alpha = i == current - 6 ? 140 : 255;
+					var rect = new RectangleF(screenX + screenW * 0.045f + shiftX,
+							y - lineHeight / 2f, screenW * 0.91f, lineHeight);
+					if (preset.PreviewShadowColor != Color.Transparent)
+					{
+						using var shadowBrush = new SolidBrush(Color.FromArgb(Math.Min(alpha, preset.PreviewShadowColor.A), preset.PreviewShadowColor));
+						g.DrawString(lines[i], font, shadowBrush,
+							new RectangleF(rect.X + 2, rect.Y + 2, rect.Width, rect.Height), format);
+					}
+					using var brush = new SolidBrush(Color.FromArgb(alpha, preset.PreviewTextColor));
+					g.DrawString(lines[i], font, brush, rect, format);
+				}
 			}
 
 			protected override void Dispose(bool disposing)
@@ -3490,14 +3659,16 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					if (!string.IsNullOrWhiteSpace(item.ScriptText))
 					{
-						sampleText = item.ScriptText.Split(new[] { '\r', '\n', '.' }, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+						sampleText = _panel._settings.SubtitleDisplayMode == 4
+							? item.ScriptText.Trim()
+							: item.ScriptText.Split(new[] { '\r', '\n', '.' }, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
 					}
 				}
 
 				// 2.3 绘制字幕文字与底框 (支持预设库样式与 XY 偏移)
 				var preset = SubtitlePresetCatalog.GetById(_panel._settings.SubtitleStyleId);
 				int displayMode = _panel._settings.SubtitleDisplayMode;
-				if (preset.DisplayMode == 3) displayMode = 3;
+				if (displayMode != 4 && preset.DisplayMode == 3) displayMode = 3;
 
 				float posPercent = _panel._settings.SubtitleVerticalPercent / 100f;
 				float subCenterY = screenY + (screenH * posPercent);
@@ -3511,7 +3682,11 @@ namespace VideoBatchMerger.ScriptBatch
 				string fontName = string.IsNullOrWhiteSpace(_panel._settings.SubtitleFontFamily) ? "Arial" : _panel._settings.SubtitleFontFamily;
 				using var font = new Font(fontName, previewFontSize, FontStyle.Bold, GraphicsUnit.Pixel);
 
-				if (displayMode == 3) // 逐词红底框高亮 (图1效果：短句排版，红底框+黄字，白字粗黑边)
+				if (displayMode == 4)
+				{
+					DrawScrollingSubtitlePreview(g, sampleText, preset, font, screenX, screenY, screenW, screenH, subCenterY, subShiftX);
+				}
+				else if (displayMode == 3) // 逐词红底框高亮 (图1效果：短句排版，红底框+黄字，白字粗黑边)
 				{
 					string wrapped = ScriptBatchComposer.WrapToShortLines(sampleText, 16);
 					string[] subLines = wrapped.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -3742,8 +3917,15 @@ namespace VideoBatchMerger.ScriptBatch
 
 						float targetW = screenW * (stk.ScalePercent / 100f);
 						float targetH = targetW * (img.Height / (float)img.Width);
-						float centerX = screenX + (screenW * (stk.XPercent / 100f));
-						float centerY = screenY + (screenH * (stk.YPercent / 100f));
+						GetPreviewStickerPosition(stk, out float stickerX, out float stickerY);
+						float centerX = screenX + (screenW * (stickerX / 100f));
+						float centerY = screenY + (screenH * (stickerY / 100f));
+						if (stk == _panel._selectedSticker && stk.MotionStyle != 0 && !_isMotionPreviewPlaying)
+						{
+						using var pathPen = new Pen(Color.FromArgb(145, 59, 130, 246), 1.4f) { DashStyle = DashStyle.Dash };
+						g.DrawLine(pathPen, centerX, centerY,
+							screenX + screenW * stk.EndXPercent / 100f, screenY + screenH * stk.EndYPercent / 100f);
+						}
 
 						var state = g.Save();
 						g.TranslateTransform(centerX, centerY);
@@ -3863,8 +4045,9 @@ namespace VideoBatchMerger.ScriptBatch
 					{
 						float targetW = _lastScreenRect.Width * (selStk.ScalePercent / 100f);
 						float targetH = targetW * (selImg.Height / (float)selImg.Width);
-						float centerX = _lastScreenRect.X + (_lastScreenRect.Width * (selStk.XPercent / 100f));
-						float centerY = _lastScreenRect.Y + (_lastScreenRect.Height * (selStk.YPercent / 100f));
+						GetPreviewStickerPosition(selStk, out float selectedX, out float selectedY);
+						float centerX = _lastScreenRect.X + (_lastScreenRect.Width * (selectedX / 100f));
+						float centerY = _lastScreenRect.Y + (_lastScreenRect.Height * (selectedY / 100f));
 
 						float dx = e.X - centerX;
 						float dy = e.Y - centerY;
@@ -3896,8 +4079,9 @@ namespace VideoBatchMerger.ScriptBatch
 
 						float targetW = _lastScreenRect.Width * (stk.ScalePercent / 100f);
 						float targetH = targetW * (img.Height / (float)img.Width);
-						float centerX = _lastScreenRect.X + (_lastScreenRect.Width * (stk.XPercent / 100f));
-						float centerY = _lastScreenRect.Y + (_lastScreenRect.Height * (stk.YPercent / 100f));
+						GetPreviewStickerPosition(stk, out float stickerX, out float stickerY);
+						float centerX = _lastScreenRect.X + (_lastScreenRect.Width * (stickerX / 100f));
+						float centerY = _lastScreenRect.Y + (_lastScreenRect.Height * (stickerY / 100f));
 
 						float dx = e.X - centerX;
 						float dy = e.Y - centerY;
@@ -3927,8 +4111,9 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					float newX = (e.X - _lastScreenRect.X) / (float)_lastScreenRect.Width * 100f;
 					float newY = (e.Y - _lastScreenRect.Y) / (float)_lastScreenRect.Height * 100f;
-					_activeSticker.XPercent = (float)Math.Round(Math.Max(0f, Math.Min(100f, newX)));
-					_activeSticker.YPercent = (float)Math.Round(Math.Max(0f, Math.Min(100f, newY)));
+					_isMotionPreviewPlaying = false;
+					_activeSticker.XPercent = (float)Math.Round(Math.Max(-30f, Math.Min(130f, newX)));
+					_activeSticker.YPercent = (float)Math.Round(Math.Max(-30f, Math.Min(130f, newY)));
 					_panel.SyncStickerDetailsFromModel();
 					Invalidate();
 					return;
@@ -3957,8 +4142,9 @@ namespace VideoBatchMerger.ScriptBatch
 					{
 						float targetW = _lastScreenRect.Width * (selStk.ScalePercent / 100f);
 						float targetH = targetW * (selImg.Height / (float)selImg.Width);
-						float centerX = _lastScreenRect.X + (_lastScreenRect.Width * (selStk.XPercent / 100f));
-						float centerY = _lastScreenRect.Y + (_lastScreenRect.Height * (selStk.YPercent / 100f));
+						GetPreviewStickerPosition(selStk, out float selectedX, out float selectedY);
+						float centerX = _lastScreenRect.X + (_lastScreenRect.Width * (selectedX / 100f));
+						float centerY = _lastScreenRect.Y + (_lastScreenRect.Height * (selectedY / 100f));
 
 						float dx = e.X - centerX;
 						float dy = e.Y - centerY;

@@ -280,33 +280,19 @@ internal sealed class UpdateNotificationForm : Form
 				string sourceFolder = Path.GetDirectoryName(exeFound);
 				string currentAppDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
 
-				string updaterBat = Path.Combine(Path.GetTempPath(), $"vbs_updater_{DateTime.Now.Ticks}.bat");
-				string batScript =
-					"@echo off\r\n" +
-					"chcp 65001 >nul\r\n" +
-					"title 正在升级 VideoBatchStudio...\r\n" +
-					"timeout /t 2 /nobreak >nul\r\n" +
-					$"robocopy \"{sourceFolder}\" \"{currentAppDir}\" /E /IS /IT /XF \"*keys.json\" \"*settings.json\" \"*.key\" /XD \"auditions\" /R:2 /W:1 >nul\r\n" +
-					"if %ERRORLEVEL% GEQ 8 (\r\n" +
-					$"    xcopy /y /e /h /r \"{sourceFolder}\\*\" \"{currentAppDir}\\\" >nul\r\n" +
-					")\r\n" +
-					$"start \"\" \"{currentAppDir}\\VideoBatchStudio.exe\"\r\n" +
-					"timeout /t 2 /nobreak >nul\r\n" +
-					$"rd /s /q \"{tempExtractDir}\" 2>nul\r\n" +
-					$"del \"{tempZip}\" 2>nul\r\n" +
-					"del \"%~f0\" 2>nul\r\n" +
-					"exit\r\n";
+				ApplyUpdateFilesInPlace(sourceFolder, currentAppDir);
+				TryCleanFiles(tempZip, tempExtractDir);
 
-				File.WriteAllText(updaterBat, batScript, new UTF8Encoding(false));
-
-				var psi = new ProcessStartInfo
+				string targetExe = Path.Combine(currentAppDir, "VideoBatchStudio.exe");
+				if (File.Exists(targetExe))
 				{
-					FileName = "cmd.exe",
-					Arguments = $"/c \"{updaterBat}\"",
-					CreateNoWindow = true,
-					UseShellExecute = false
-				};
-				Process.Start(psi);
+					Process.Start(new ProcessStartInfo
+					{
+						FileName = targetExe,
+						WorkingDirectory = currentAppDir,
+						UseShellExecute = true
+					});
+				}
 			});
 
 			_lblStatus.Text = "🎉 升级成功！正在自动重启软件...";
@@ -343,6 +329,54 @@ internal sealed class UpdateNotificationForm : Form
 		if (!Uri.TryCreate(value, UriKind.Absolute, out Uri uri) || uri.Scheme != Uri.UriSchemeHttps) return false;
 		string host = uri.Host.TrimEnd('.').ToLowerInvariant();
 		return host == "github.com" || host == "ghfast.top" || host == "ghproxy.net" || host == "objects.githubusercontent.com";
+	}
+
+	private static void ApplyUpdateFilesInPlace(string sourceFolder, string targetFolder)
+	{
+		string srcRoot = Path.GetFullPath(sourceFolder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+		string dstRoot = Path.GetFullPath(targetFolder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+		foreach (string srcFile in Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories))
+		{
+			string relPath = srcFile.Substring(srcRoot.Length);
+			if (relPath.StartsWith("auditions" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+				relPath.StartsWith("auditions/", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			string fileName = Path.GetFileName(relPath);
+			if (fileName.EndsWith("keys.json", StringComparison.OrdinalIgnoreCase) ||
+				fileName.EndsWith("settings.json", StringComparison.OrdinalIgnoreCase) ||
+				fileName.EndsWith(".key", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			string destFile = Path.GetFullPath(Path.Combine(dstRoot, relPath));
+			if (!destFile.StartsWith(dstRoot, StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			string destDir = Path.GetDirectoryName(destFile);
+			if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
+
+			try
+			{
+				File.Copy(srcFile, destFile, true);
+			}
+			catch (IOException)
+			{
+				string backupPath = destFile + ".old_update";
+				try
+				{
+					if (File.Exists(backupPath)) File.Delete(backupPath);
+					File.Move(destFile, backupPath);
+					File.Copy(srcFile, destFile, true);
+				}
+				catch { }
+			}
+		}
 	}
 
 	private static void ExtractZipSafely(string zipPath, string destination)

@@ -30,12 +30,32 @@ namespace VideoBatchMerger.ScriptBatch
 		public bool Loop { get; set; } = true; // 是否循环播放
 		public double StartTimeSec { get; set; } = 0.0; // 出现起始时间 (秒，0.0 为开头即出现)
 		public double DurationSec { get; set; } = 0.0; // 持续显示时间 (秒，0.0 为全程显示)
+		public int MotionStyle { get; set; } = 0; // 0: 固定, 1: 向上飞, 2: 向右飞, 3: 向左飞, 4: 自定义
+		public float EndXPercent { get; set; } = 50f;
+		public float EndYPercent { get; set; } = 20f;
+		public double MotionDurationSec { get; set; } = 3.0;
 
 		public override string ToString()
 		{
 			string status = Enabled ? "✅" : "⏸️";
 			string timeStr = DurationSec > 0.05 ? $"{StartTimeSec:0.#}s~{StartTimeSec + DurationSec:0.#}s" : $"{StartTimeSec:0.#}s~全程";
-			return $"{status} {Name} ({XPercent:0}%, {YPercent:0}%) 大小:{ScalePercent:0}% 旋转:{RotationAngle:0}° [{timeStr}]";
+			string motion = MotionStyle == 0 ? "固定" : $"飞行 {MotionDurationSec:0.#}s";
+			return $"{status} {Name} ({XPercent:0}%, {YPercent:0}%) {motion} 大小:{ScalePercent:0}% 旋转:{RotationAngle:0}° [{timeStr}]";
+		}
+	}
+
+	public static class GifStickerMotion
+	{
+		public static void Evaluate(GifStickerItem sticker, double videoTimeSeconds, out float xPercent, out float yPercent)
+		{
+			xPercent = sticker.XPercent;
+			yPercent = sticker.YPercent;
+			if (sticker.MotionStyle == 0) return;
+			double duration = Math.Max(0.1, sticker.MotionDurationSec);
+			double progress = Math.Max(0.0, Math.Min(1.0, (videoTimeSeconds - sticker.StartTimeSec) / duration));
+			double eased = progress * progress * (3.0 - 2.0 * progress);
+			xPercent += (float)((sticker.EndXPercent - sticker.XPercent) * eased);
+			yPercent += (float)((sticker.EndYPercent - sticker.YPercent) * eased);
 		}
 	}
 
@@ -88,7 +108,8 @@ namespace VideoBatchMerger.ScriptBatch
 		public double LayoutLeftRatio { get; set; } = 0.38; // 文案成片三栏布局：左栏占总宽比例 (可拖拽记忆)
 		public double LayoutRightRatio { get; set; } = 0.28; // 文案成片三栏布局：右栏占总宽比例 (可拖拽记忆)
 		public int SubtitleBorderStyle { get; set; } = 1; // 1: 描边阴影, 3: 不透明底框 (Box)
-		public int SubtitleDisplayMode { get; set; } = 0; // 0: 句级自然居中, 1: 词级逐词弹跳, 2: 动感回弹弹出
+		public int SubtitleDisplayMode { get; set; } = 0; // 0: 居中, 1: 逐词, 2: 回弹, 3: 红底框逐词, 4: 随语音逐行上滚
+		public bool SubtitleScrollPanelEnabled { get; set; } = true;
 
 		// 视频加水印系统 (文字水印 & 图片水印)
 		public bool WatermarkEnabled { get; set; } = false;

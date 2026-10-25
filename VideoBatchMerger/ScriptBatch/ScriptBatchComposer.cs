@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -81,6 +82,39 @@ namespace VideoBatchMerger.ScriptBatch
 			if (File.Exists(devPath)) return devPath;
 
 			return "ffmpeg.exe";
+		}
+
+		private static double ProbeAudioDurationSeconds(string audioPath)
+		{
+			if (string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath)) return 0.0;
+			try
+			{
+				var psi = new ProcessStartInfo
+				{
+					FileName = FindFfmpegExe(),
+					Arguments = "-hide_banner -i " + QuoteArg(audioPath),
+					RedirectStandardError = true,
+					UseShellExecute = false,
+					CreateNoWindow = true
+				};
+				using (var proc = new Process { StartInfo = psi })
+				{
+					proc.Start();
+					var errorTask = proc.StandardError.ReadToEndAsync();
+					if (!proc.WaitForExit(8000))
+					{
+						try { proc.Kill(); } catch { }
+						return 0.0;
+					}
+					string info = errorTask.GetAwaiter().GetResult();
+					var match = Regex.Match(info, @"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", RegexOptions.CultureInvariant);
+					if (!match.Success) return 0.0;
+					return int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) * 3600.0
+						+ int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture) * 60.0
+						+ double.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture);
+				}
+			}
+			catch { return 0.0; }
 		}
 
 		public static async Task<bool> ProcessItemAsync(
@@ -184,7 +218,8 @@ namespace VideoBatchMerger.ScriptBatch
 
 				item.AudioPath = ttsResult.AudioPath;
 				item.SrtPath = ttsResult.SrtPath;
-				item.DurationSeconds = Math.Max(1.0, ttsResult.DurationSeconds);
+				// Word-boundary subtitles can end before the last encoded audio samples.
+				item.DurationSeconds = Math.Max(1.0, Math.Max(ttsResult.DurationSeconds, ProbeAudioDurationSeconds(item.AudioPath)));
 
 				progressCallback?.Invoke(40, "语音生成完毕，正在排版高精字幕与水印...");
 
@@ -468,9 +503,10 @@ namespace VideoBatchMerger.ScriptBatch
 			sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
 
 			int displayMode = settings.SubtitleDisplayMode;
-			if (preset.DisplayMode == 3) displayMode = 3;
+			if (displayMode != 4 && preset.DisplayMode == 3) displayMode = 3;
 			var wordTimings = displayMode == 3 ? LoadWordTimings(srtPath + ".words.json") : new List<WordTiming>();
 			int nextWordIndex = 0;
+			var cues = new List<ScrollCue>();
 
 			if (File.Exists(srtPath))
 			{
@@ -495,7 +531,7 @@ namespace VideoBatchMerger.ScriptBatch
 					{
 						if (!string.IsNullOrEmpty(currentStart) && currentText.Length > 0)
 						{
-							EmitAssCue(sb, currentStart, currentEnd, currentText.ToString().Trim(), w, fontSize, displayMode, wordTimings, ref nextWordIndex);
+							cues.Add(new ScrollCue { Start = ParseSrtTimeSpan(currentStart).TotalSeconds, End = ParseSrtTimeSpan(currentEnd).TotalSeconds, Text = currentText.ToString().Trim() });
 						}
 						currentStart = "";
 						currentEnd = "";
@@ -510,11 +546,114 @@ namespace VideoBatchMerger.ScriptBatch
 
 				if (!string.IsNullOrEmpty(currentStart) && currentText.Length > 0)
 				{
-					EmitAssCue(sb, currentStart, currentEnd, currentText.ToString().Trim(), w, fontSize, displayMode, wordTimings, ref nextWordIndex);
+					cues.Add(new ScrollCue { Start = ParseSrtTimeSpan(currentStart).TotalSeconds, End = ParseSrtTimeSpan(currentEnd).TotalSeconds, Text = currentText.ToString().Trim() });
+				}
+			}
+
+			if (displayMode == 4)
+			{
+				EmitScrollingSubtitles(sb, cues, settings, w, h, fontSize);
+			}
+			else
+			{
+				foreach (var cue in cues)
+				{
+					EmitAssCue(sb, FormatAssTimeSpan(TimeSpan.FromSeconds(cue.Start)), FormatAssTimeSpan(TimeSpan.FromSeconds(cue.End)), cue.Text,
+						w, fontSize, displayMode, wordTimings, ref nextWordIndex);
 				}
 			}
 
 			File.WriteAllText(assPath, sb.ToString(), Encoding.UTF8);
+		}
+
+		private sealed class ScrollCue
+		{
+			public double Start { get; set; }
+			public double End { get; set; }
+			public string Text { get; set; }
+		}
+
+		private static void EmitScrollingSubtitles(StringBuilder sb, List<ScrollCue> cues,
+			ScriptBatchSettings settings, int canvasW, int canvasH, int fontSize)
+		{
+			var lines = new List<ScrollCue>();
+			int maxChars = Math.Max(12, Math.Min(28, (int)(canvasW / (fontSize * 0.57))));
+			foreach (var cue in cues)
+			{
+				if (string.IsNullOrWhiteSpace(cue.Text) || cue.End <= cue.Start) continue;
+				var split = SplitScrollText(cue.Text, maxChars);
+				for (int part = 0; part < split.Count; part++)
+				{
+					double start = cue.Start + (cue.End - cue.Start) * part / split.Count;
+					double end = cue.Start + (cue.End - cue.Start) * (part + 1) / split.Count;
+					lines.Add(new ScrollCue { Start = start, End = end, Text = split[part] });
+				}
+			}
+			if (lines.Count == 0) return;
+
+			const int maxVisible = 7;
+			int lineHeight = (int)Math.Round(fontSize * 1.24);
+			int baseline = (int)Math.Round(canvasH * Math.Max(0.35, Math.Min(0.88, settings.SubtitleVerticalPercent / 100.0)));
+			int centerX = canvasW / 2 + settings.SubtitleOffsetX;
+			double lastEnd = lines[lines.Count - 1].End + 1.5;
+			if (settings.SubtitleScrollPanelEnabled)
+			{
+				int panelWidth = (int)(canvasW * 0.91);
+				int panelHeight = maxVisible * lineHeight + lineHeight / 2;
+				int panelLeft = (canvasW - panelWidth) / 2 + settings.SubtitleOffsetX;
+				int panelTop = baseline - (maxVisible - 1) * lineHeight - lineHeight / 2;
+				string panel = $"{{\\an7\\pos({panelLeft},{panelTop})\\p1\\1a&H9A&\\1c&H202020&\\bord0\\shad0}}m 0 0 l {panelWidth} 0 {panelWidth} {panelHeight} 0 {panelHeight}{{\\p0}}";
+				sb.AppendLine($"Dialogue: 0,{FormatAssTimeSpan(TimeSpan.FromSeconds(lines[0].Start))},{FormatAssTimeSpan(TimeSpan.FromSeconds(lastEnd))},Default,,0,0,0,,{panel}");
+			}
+
+			for (int lineIndex = 0; lineIndex < lines.Count; lineIndex++)
+			{
+				string cleanText = (lines[lineIndex].Text ?? string.Empty).Replace("\\", "").Replace("{", "(").Replace("}", ")");
+				for (int step = lineIndex; step < Math.Min(lines.Count, lineIndex + maxVisible); step++)
+				{
+					double segmentStart = lines[step].Start;
+					double segmentEnd = step + 1 < lines.Count ? lines[step + 1].Start : lastEnd;
+					if (segmentEnd <= segmentStart + 0.02) continue;
+					double travelSeconds = Math.Min(0.36, Math.Max(0.08, (segmentEnd - segmentStart) * 0.42));
+					double moveEnd = Math.Min(segmentEnd, segmentStart + travelSeconds);
+					int fromY = baseline - (step - lineIndex - 1) * lineHeight;
+					int toY = baseline - (step - lineIndex) * lineHeight;
+					if (step == lineIndex) fromY = baseline + lineHeight;
+					string moved = $"{{\\an5\\move({centerX},{fromY},{centerX},{toY},0,{(int)(travelSeconds * 1000)})\\fad(80,0)}}{cleanText}";
+					sb.AppendLine($"Dialogue: 0,{FormatAssTimeSpan(TimeSpan.FromSeconds(segmentStart))},{FormatAssTimeSpan(TimeSpan.FromSeconds(moveEnd))},Default,,0,0,0,,{moved}");
+					if (segmentEnd - moveEnd > 0.02)
+					{
+						string fade = step == lineIndex + maxVisible - 1 ? "\\fad(0,180)" : string.Empty;
+						string held = $"{{\\an5\\pos({centerX},{toY}){fade}}}{cleanText}";
+						sb.AppendLine($"Dialogue: 0,{FormatAssTimeSpan(TimeSpan.FromSeconds(moveEnd))},{FormatAssTimeSpan(TimeSpan.FromSeconds(segmentEnd))},Default,,0,0,0,,{held}");
+					}
+				}
+			}
+		}
+
+		internal static List<string> SplitScrollText(string text, int maxChars)
+		{
+			var result = new List<string>();
+			var words = (text ?? string.Empty).Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+			if (words.Length <= 1)
+			{
+				for (int i = 0; i < text.Length; i += maxChars)
+					result.Add(text.Substring(i, Math.Min(maxChars, text.Length - i)));
+				return result;
+			}
+			var current = new StringBuilder();
+			foreach (string word in words)
+			{
+				if (current.Length > 0 && current.Length + word.Length + 1 > maxChars)
+				{
+					result.Add(current.ToString());
+					current.Clear();
+				}
+				if (current.Length > 0) current.Append(' ');
+				current.Append(word);
+			}
+			if (current.Length > 0) result.Add(current.ToString());
+			return result;
 		}
 
 		private sealed class WordTiming
@@ -781,7 +920,11 @@ namespace VideoBatchMerger.ScriptBatch
 			CancellationToken ct)
 		{
 			string ffmpeg = FindFfmpegExe();
-			double totalDur = Math.Max(1.0, item.DurationSeconds);
+			const double endingHoldSeconds = 2.0;
+			// Probe again for cached items whose DurationSeconds came only from SRT.
+			double voiceDur = Math.Max(item.DurationSeconds, ProbeAudioDurationSeconds(item.AudioPath));
+			double totalDur = Math.Max(1.0, voiceDur) + endingHoldSeconds;
+			string totalDurText = totalDur.ToString("0.00", CultureInfo.InvariantCulture);
 			int w = settings.CanvasWidth;
 			int h = settings.CanvasHeight;
 
@@ -824,10 +967,11 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 
 			// 音频与 BGM 处理
-			string audioMap = "-map 0:a";
+			string audioMap = "-map \"[outa]\"";
 			string bgmFile = settings.BgmEnabled ? ResolveBgmFile(settings.BgmPath) : null;
 			bool hasBgm = !string.IsNullOrWhiteSpace(bgmFile);
 			int nextInputIdx = selectedClips.Count + 1;
+			filterComplex.Append($"[0:a]apad=whole_dur={totalDurText}[voice];");
 
 			if (hasBgm)
 			{
@@ -836,9 +980,12 @@ namespace VideoBatchMerger.ScriptBatch
 				float bgmVol = Math.Max(0.02f, settings.BgmVolumePercent / 100f);
 				double fadeStart = Math.Max(0.5, totalDur - 1.5);
 
-				string bgmFilter = $"[0:a]volume=1.0[voice];[{bgmInputIdx}:a]volume={bgmVol:0.00},afade=t=out:st={fadeStart:0.00}:d=1.5[bgm];[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[outa]";
+				string bgmFilter = $"[{bgmInputIdx}:a]volume={bgmVol.ToString("0.00", CultureInfo.InvariantCulture)},afade=t=out:st={fadeStart.ToString("0.00", CultureInfo.InvariantCulture)}:d=1.5[bgm];[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[outa]";
 				filterComplex.Append($"{bgmFilter};");
-				audioMap = "-map \"[outa]\"";
+			}
+			else
+			{
+				filterComplex.Append("[voice]anull[outa];");
 			}
 
 			// 压制 ASS 字幕 与 水印叠加
@@ -905,21 +1052,34 @@ namespace VideoBatchMerger.ScriptBatch
 					string enableTiming = string.Empty;
 					double start = Math.Max(0.0, stk.StartTimeSec);
 					double dur = stk.DurationSec;
+					string startText = start.ToString("0.###", CultureInfo.InvariantCulture);
 					if (dur > 0.05)
 					{
 						double end = start + dur;
-						enableTiming = $":enable='between(t,{start:0.00},{end:0.00})'";
+						enableTiming = $":enable='between(t,{startText},{end.ToString("0.###", CultureInfo.InvariantCulture)})'";
 					}
 					else if (start > 0.05)
 					{
-						enableTiming = $":enable='gte(t,{start:0.00})'";
+						enableTiming = $":enable='gte(t,{startText})'";
 					}
 
 					int centerX = (int)Math.Round(w * (stk.XPercent / 100.0));
 					int centerY = (int)Math.Round(h * (stk.YPercent / 100.0));
+					string xPosition = $"{centerX}-w/2";
+					string yPosition = $"{centerY}-h/2";
+					if (stk.MotionStyle != 0)
+					{
+						int endX = (int)Math.Round(w * (stk.EndXPercent / 100.0));
+						int endY = (int)Math.Round(h * (stk.EndYPercent / 100.0));
+						string motionDuration = Math.Max(0.1, stk.MotionDurationSec).ToString("0.###", CultureInfo.InvariantCulture);
+						string progress = $"min(max((t-{startText})/{motionDuration},0),1)";
+						string eased = $"({progress})*({progress})*(3-2*({progress}))";
+						xPosition = $"{centerX}+({endX - centerX})*({eased})-w/2";
+						yPosition = $"{centerY}+({endY - centerY})*({eased})-h/2";
+					}
 
 					string nextV = $"v_stk_{stkIdx}";
-					filterComplex.Append($"[{currentV}][{stkLabel}]overlay=x='{centerX}-w/2':y='{centerY}-h/2'{enableTiming}:shortest=0[{nextV}];");
+					filterComplex.Append($"[{currentV}][{stkLabel}]overlay=x='{xPosition}':y='{yPosition}'{enableTiming}:eval=frame:shortest=0[{nextV}];");
 					currentV = nextV;
 					stkIdx++;
 				}
@@ -938,7 +1098,7 @@ namespace VideoBatchMerger.ScriptBatch
 				vcodec = "h264_qsv -global_quality 23";
 			}
 
-			string args = $"-hide_banner {inputArgs} -filter_complex \"{filterComplex}\" -map \"[outv]\" {audioMap} -c:v {vcodec} -c:a aac -b:a 192k -t {totalDur:0.00} -y {QuoteArg(outputPath)}";
+			string args = $"-hide_banner {inputArgs} -filter_complex \"{filterComplex}\" -map \"[outv]\" {audioMap} -c:v {vcodec} -c:a aac -b:a 192k -t {totalDurText} -y {QuoteArg(outputPath)}";
 			var errorLines = new Queue<string>();
 
 			var psi = new ProcessStartInfo

@@ -11,6 +11,9 @@
     <LangVersion>14.0</LangVersion>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
     <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+    <Optimize>False</Optimize>
+    <DebugType>none</DebugType>
+    <DebugSymbols>False</DebugSymbols>
   </PropertyGroup>
   <PropertyGroup>
     <ApplicationIcon>app.ico</ApplicationIcon>

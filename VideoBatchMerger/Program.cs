@@ -9,6 +9,7 @@ internal static class Program
 	[STAThread]
 	private static void Main()
 	{
+		CleanupOldUpdateFiles();
 		Application.EnableVisualStyles();
 		Application.SetCompatibleTextRenderingDefault(defaultValue: false);
 
@@ -33,6 +34,18 @@ internal static class Program
 		{
 			ShowError(ex);
 		}
+	}
+
+	private static void CleanupOldUpdateFiles()
+	{
+		try
+		{
+			foreach (string oldFile in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory, "*.old_update", SearchOption.AllDirectories))
+			{
+				try { File.Delete(oldFile); } catch { }
+			}
+		}
+		catch { }
 	}
 
 	private static void ShowError(Exception ex)
