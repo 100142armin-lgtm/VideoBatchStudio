@@ -43,6 +43,13 @@ jobs:
           Copy-Item -Path "bin/Release/net48/*" -Destination "staging/VideoBatchStudio/" -Recurse -Force
           Copy-Item -Path "bin/Release/net48/VideoBatchStudio.exe" -Destination "release_assets/VideoBatchStudio.exe" -Force
 
+          # Ensure both win-x64 and win-x86 WebView2Loader.dll are present (prevent 0x8007000B BadImageFormatException)
+          $wv64 = Get-ChildItem -Path "$env:USERPROFILE\.nuget\packages\microsoft.web.webview2" -Filter "WebView2Loader.dll" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "win-x64\\native\\" } | Select-Object -First 1
+          if ($wv64) {
+            New-Item -ItemType Directory -Force -Path "staging/VideoBatchStudio/runtimes/win-x64/native" | Out-Null
+            Copy-Item -Path $wv64.FullName -Destination "staging/VideoBatchStudio/runtimes/win-x64/native/WebView2Loader.dll" -Force
+          }
+
           # Copy python worker for free Edge-TTS
           if (Test-Path "VideoBatchMerger/ScriptBatch/edge_tts_worker.py") {
             Copy-Item -Path "VideoBatchMerger/ScriptBatch/edge_tts_worker.py" -Destination "staging/VideoBatchStudio/edge_tts_worker.py" -Force

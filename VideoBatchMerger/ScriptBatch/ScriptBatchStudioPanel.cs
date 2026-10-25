@@ -485,40 +485,37 @@ namespace VideoBatchMerger.ScriptBatch
 			};
 			_previewHeaderPanel = headerPanel;
 
-			var rightHeaderFlow = new FlowLayoutPanel
+			var rightHeaderPanel = new Panel
 			{
 				Dock = DockStyle.Right,
-				AutoSize = true,
-				WrapContents = false,
-				FlowDirection = FlowDirection.LeftToRight,
-				Margin = new Padding(0),
-				Padding = new Padding(0, 1, 0, 0)
+				Width = 316,
+				Height = 30
 			};
 
 			_cboPreviewDuration = new ComboBox
 			{
 				DropDownStyle = ComboBoxStyle.DropDownList,
+				Location = new Point(0, 3),
 				Width = 72,
 				BackColor = InputBg,
 				ForeColor = TextPrimary,
-				Font = new Font("Microsoft YaHei UI", 8.2f),
-				Margin = new Padding(0, 2, 5, 0)
+				Font = new Font("Microsoft YaHei UI", 8.2f)
 			};
 			_cboPreviewDuration.Items.AddRange(new object[] { "5 秒", "8 秒", "10 秒", "完整视频" });
 			_cboPreviewDuration.SelectedIndexChanged += (_, _) => SaveSettings();
-			rightHeaderFlow.Controls.Add(_cboPreviewDuration);
+			rightHeaderPanel.Controls.Add(_cboPreviewDuration);
 
-			_btnPlayPreview = CreateButton("▶ 实机播放", AccentGreen, Color.White, 106);
+			_btnPlayPreview = CreateButton("▶ 实机播放", AccentGreen, Color.White, 110);
+			_btnPlayPreview.Location = new Point(78, 1);
 			_btnPlayPreview.Height = 28;
 			_btnPlayPreview.Font = new Font("Microsoft YaHei UI", 8.2f, FontStyle.Bold);
-			_btnPlayPreview.Margin = new Padding(0, 0, 6, 0);
 			_btnPlayPreview.Click += async (_, _) => await StartOrStopVideoPreviewAsync();
-			rightHeaderFlow.Controls.Add(_btnPlayPreview);
+			rightHeaderPanel.Controls.Add(_btnPlayPreview);
 
-			_btnPresetLibrary = CreateButton("🎨 字幕预设库", AccentOrange, Color.White, 118);
+			_btnPresetLibrary = CreateButton("🎨 字幕预设库", AccentOrange, Color.White, 122);
+			_btnPresetLibrary.Location = new Point(194, 1);
 			_btnPresetLibrary.Height = 28;
 			_btnPresetLibrary.Font = new Font("Microsoft YaHei UI", 8.2f, FontStyle.Bold);
-			_btnPresetLibrary.Margin = new Padding(0);
 			_btnPresetLibrary.Click += (_, _) =>
 			{
 				using var dlg = new SubtitlePresetDialog(_settings, () =>
@@ -528,7 +525,7 @@ namespace VideoBatchMerger.ScriptBatch
 				});
 				dlg.ShowDialog(this);
 			};
-			rightHeaderFlow.Controls.Add(_btnPresetLibrary);
+			rightHeaderPanel.Controls.Add(_btnPresetLibrary);
 
 			var lblTitle = new Label
 			{
@@ -541,7 +538,7 @@ namespace VideoBatchMerger.ScriptBatch
 				TextAlign = ContentAlignment.MiddleLeft
 			};
 			headerPanel.Controls.Add(lblTitle);
-			headerPanel.Controls.Add(rightHeaderFlow);
+			headerPanel.Controls.Add(rightHeaderPanel);
 
 			// 底部控件区：字幕位置微调 + 实时命名预览 (高度 74px，双行精准对齐，绝不换行遮挡)
 			var bottomContainer = new Panel
@@ -715,6 +712,7 @@ namespace VideoBatchMerger.ScriptBatch
 
 			try
 			{
+				EnsureWebView2LoaderArchitecture();
 				_webViewPreview = new Microsoft.Web.WebView2.WinForms.WebView2
 				{
 					Dock = DockStyle.Fill,
@@ -2018,16 +2016,64 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 		}
 
+		private static bool s_webViewLoaderConfigured;
+		private Task<CoreWebView2Environment> _sharedWebViewEnvTask;
+		private bool _isWebViewInitializing;
+
+		private static void EnsureWebView2LoaderArchitecture()
+		{
+			if (s_webViewLoaderConfigured) return;
+			try
+			{
+				string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+				string archFolder = Environment.Is64BitProcess ? "win-x64" : "win-x86";
+				string candidateDir = Path.Combine(baseDir, "runtimes", archFolder, "native");
+				if (File.Exists(Path.Combine(candidateDir, "WebView2Loader.dll")))
+				{
+					CoreWebView2Environment.SetLoaderDllFolderPath(candidateDir);
+					s_webViewLoaderConfigured = true;
+					return;
+				}
+				string nugetDir = Path.Combine(
+					Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+					@".nuget\packages\microsoft.web.webview2\1.0.4258.31\runtimes",
+					archFolder,
+					"native");
+				if (File.Exists(Path.Combine(nugetDir, "WebView2Loader.dll")))
+				{
+					CoreWebView2Environment.SetLoaderDllFolderPath(nugetDir);
+					s_webViewLoaderConfigured = true;
+				}
+			}
+			catch { }
+		}
+
+		private Task<CoreWebView2Environment> GetOrCreateWebViewEnvironmentAsync()
+		{
+			if (_sharedWebViewEnvTask != null && !_sharedWebViewEnvTask.IsFaulted && !_sharedWebViewEnvTask.IsCanceled)
+			{
+				return _sharedWebViewEnvTask;
+			}
+			EnsureWebView2LoaderArchitecture();
+			string userDataFolder = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_WebView2");
+			var options = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required");
+			_sharedWebViewEnvTask = CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
+			return _sharedWebViewEnvTask;
+		}
+
 		private async void InitializeWebViewAsync()
 		{
-			if (_webViewPreview == null || _isWebViewReady) return;
+			if (_webViewPreview == null || _isWebViewReady || _isWebViewInitializing) return;
 			if (!IsHandleCreated) return;
+			_isWebViewInitializing = true;
 
 			try
 			{
-				string userDataFolder = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_WebView2");
-				var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
-				await _webViewPreview.EnsureCoreWebView2Async(env);
+				var env = await GetOrCreateWebViewEnvironmentAsync();
+				if (_webViewPreview.CoreWebView2 == null)
+				{
+					await _webViewPreview.EnsureCoreWebView2Async(env);
+				}
 
 				_webViewPreview.CoreWebView2.Settings.IsStatusBarEnabled = false;
 				_webViewPreview.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
@@ -2054,6 +2100,10 @@ namespace VideoBatchMerger.ScriptBatch
 			catch (Exception ex)
 			{
 				Debug.WriteLine("WebView2 init failed: " + ex);
+			}
+			finally
+			{
+				_isWebViewInitializing = false;
 			}
 		}
 
@@ -3008,25 +3058,53 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 				if (_videoPreviewView == null || _videoPreviewView.IsDisposed)
 					throw new InvalidOperationException("手机视频播放控件不可用。");
-				var playbackEnvironment = await CoreWebView2Environment.CreateAsync(
-					null, Path.Combine(Path.GetTempPath(), "VideoBatchStudio_WebView2"));
-				await _videoPreviewView.EnsureCoreWebView2Async(playbackEnvironment);
-				string htmlPath = Path.Combine(previewDir, $"preview_{previewId}.html");
-				string videoUrl = new Uri(videoPath).AbsoluteUri;
-				string html = "<!doctype html><meta charset=\"utf-8\"><style>html,body{margin:0;width:100%;height:100%;background:#070a12;overflow:hidden;display:flex;align-items:center;justify-content:center}video{width:100%;height:100%;object-fit:contain}</style>"
-					+ "<video src=\"" + videoUrl + "\" autoplay controls playsinline></video>";
-				File.WriteAllText(htmlPath, html, Encoding.UTF8);
-				_lastPreviewVideoPath = videoPath;
-				_lastPreviewHtmlPath = htmlPath;
-				_videoPreviewView.Source = new Uri(htmlPath);
-				_videoPreviewView.Visible = true;
-				_videoPreviewView.BringToFront();
-				_previewHeaderPanel?.SendToBack();
-				_previewBottomContainer?.SendToBack();
-				_isPreviewPlaying = true;
-				_btnPlayPreview.Text = "■ 关闭预览";
-				_btnPlayPreview.BackColor = Color.FromArgb(220, 38, 38);
-				_lblStatusText.Text = "正在手机面板播放实际合成画面；修改参数后可重新生成预览。";
+				try
+				{
+					string htmlFileName = $"preview_{previewId}.html";
+					string videoFileName = Path.GetFileName(videoPath);
+					string htmlPath = Path.Combine(previewDir, htmlFileName);
+					string html = "<!doctype html><html><head><meta charset=\"utf-8\">"
+						+ "<style>html,body{margin:0;padding:6px;width:100%;height:100%;box-sizing:border-box;background:#070a12;overflow:hidden;display:flex;align-items:center;justify-content:center}"
+						+ ".phone-shell{height:100%;aspect-ratio:9/16;max-width:100%;background:#000;border-radius:24px;border:3px solid #334155;box-shadow:0 12px 32px rgba(0,0,0,0.65);overflow:hidden;display:flex;align-items:center;justify-content:center}"
+						+ "video{width:100%;height:100%;object-fit:contain;background:#000}</style></head><body>"
+						+ "<div class=\"phone-shell\"><video src=\"https://preview.local/" + videoFileName + "\" autoplay controls playsinline></video></div></body></html>";
+					File.WriteAllText(htmlPath, html, Encoding.UTF8);
+					_lastPreviewVideoPath = videoPath;
+					_lastPreviewHtmlPath = htmlPath;
+
+					_videoPreviewView.Visible = true;
+					_videoPreviewView.BringToFront();
+					_previewHeaderPanel?.SendToBack();
+					_previewBottomContainer?.SendToBack();
+					if (!_videoPreviewView.IsHandleCreated)
+					{
+						_videoPreviewView.CreateControl();
+					}
+
+					var playbackEnvironment = await GetOrCreateWebViewEnvironmentAsync();
+					if (_videoPreviewView.CoreWebView2 == null)
+					{
+						await _videoPreviewView.EnsureCoreWebView2Async(playbackEnvironment);
+						_videoPreviewView.CoreWebView2.Settings.IsStatusBarEnabled = false;
+						_videoPreviewView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+					}
+					_videoPreviewView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+						"preview.local", previewDir, CoreWebView2HostResourceAccessKind.Allow);
+					_videoPreviewView.CoreWebView2.Navigate("https://preview.local/" + htmlFileName);
+
+					_isPreviewPlaying = true;
+					_btnPlayPreview.Text = "■ 关闭预览";
+					_btnPlayPreview.BackColor = Color.FromArgb(220, 38, 38);
+					_lblStatusText.Text = "正在手机面板内直接播放合成视频；点击顶部【■ 关闭预览】可返回画布编辑。";
+				}
+				catch (Exception wvEx)
+				{
+					Debug.WriteLine("In-panel WebView2 video playback error: " + wvEx);
+					_videoPreviewView.Visible = false;
+					_lastPreviewVideoPath = videoPath;
+					Process.Start(new ProcessStartInfo(videoPath) { UseShellExecute = true });
+					_lblStatusText.Text = "预览视频已合成并调用系统播放器打开。";
+				}
 			}
 			catch (OperationCanceledException)
 			{
