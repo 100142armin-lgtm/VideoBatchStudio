@@ -22254,7 +22254,11 @@ internal sealed class MainForm : Form
 		if (_imageGifLayerList == null) return;
 		_imageGifLayerList.BeginUpdate();
 		_imageGifLayerList.Items.Clear();
-		for (int i = 0; i < _imageGifLayers.Count; i++) _imageGifLayerList.Items.Add((i + 1) + ". " + Path.GetFileName(_imageGifLayers[i].Path));
+		for (int i = 0; i < _imageGifLayers.Count; i++)
+		{
+			ImageGifLayer layer = _imageGifLayers[i];
+			_imageGifLayerList.Items.Add((i + 1) + ". " + (File.Exists(layer.Path) ? "" : "[文件缺失] ") + Path.GetFileName(layer.Path));
+		}
 		_imageGifLayerList.EndUpdate();
 		_imageGifSelectedIndex = Math.Min(_imageGifSelectedIndex, _imageGifLayers.Count - 1);
 		_imageGifLayerList.SelectedIndex = _imageGifSelectedIndex;
@@ -22307,6 +22311,22 @@ internal sealed class MainForm : Form
 			}
 		};
 		panel.Controls.Add(browse);
+		Button replace = MakeButton("替换选中", 104);
+		replace.Location = new Point(12, 344);
+		replace.Click += delegate
+		{
+			if (_isRunning || _imageGifSelectedIndex < 0 || _imageGifSelectedIndex >= _imageGifLayers.Count) return;
+			using (OpenFileDialog file = new OpenFileDialog { Filter = "GIF 动画|*.gif", Title = "替换选中的 GIF 贴图" })
+			{
+				string oldDirectory = Path.GetDirectoryName(_imageGifLayers[_imageGifSelectedIndex].Path);
+				if (!string.IsNullOrWhiteSpace(oldDirectory) && Directory.Exists(oldDirectory)) file.InitialDirectory = oldDirectory;
+				if (file.ShowDialog(this) != DialogResult.OK) return;
+				_imageGifLayers[_imageGifSelectedIndex].Path = file.FileName;
+				RefreshImageGifLayerList();
+				SaveUserSettings();
+			}
+		};
+		panel.Controls.Add(replace);
 		Button clear = MakeButton("删除选中", 104);
 		clear.Location = new Point(128, 304);
 		clear.Click += delegate
@@ -22316,7 +22336,7 @@ internal sealed class MainForm : Form
 			RefreshImageGifLayerList();
 		};
 		panel.Controls.Add(clear);
-		panel.Controls.Add(new Label { Left = 12, Top = 350, Width = 225, Height = 48, Text = "列表顺序即叠加顺序；后面的 GIF 显示在上层。", ForeColor = muted });
+		panel.Controls.Add(new Label { Left = 12, Top = 390, Width = 225, Height = 48, Text = "列表顺序即叠加顺序；后面的 GIF 显示在上层。", ForeColor = muted });
 		string[] names = { "横向中心", "纵向中心", "贴图大小", "旋转角度" };
 		NumericUpDown[] controls = new NumericUpDown[4];
 		for (int i = 0; i < 4; i++)
@@ -22790,7 +22810,7 @@ internal sealed class MainForm : Form
 		TransitionPlan transition = CaptureImageTransitionSettings();
 		BgmPlan bgm = CaptureBgmPlan(_imageBgm);
 		WatermarkProfile watermark = CaptureWatermarkProfile(_imageUseWatermarks.Checked);
-		List<ImageGifLayer> gifLayers = _imageGifLayers.Select(item => item.Copy()).ToList();
+		List<ImageGifLayer> gifLayers = _imageGifLayers.Where(item => File.Exists(item.Path)).Select(item => item.Copy()).ToList();
 		int particlePreset = _imageParticlePreset, particleDensity = _imageParticleDensity;
 		GetImageVideoResolution(out int width, out int height);
 		double duration = Math.Min(8.0, Math.Max(1.0, plan.TargetDurationSeconds));
@@ -25508,6 +25528,25 @@ internal sealed class MainForm : Form
 		BgmPlan bgm = CaptureBgmPlan(_imageBgm);
 		WatermarkProfile imageWatermarks = CaptureWatermarkProfile(_imageUseWatermarks.Checked);
 		List<ImageGifLayer> gifLayers = _imageGifLayers.Select(item => item.Copy()).ToList();
+		List<ImageGifLayer> missingGifLayers = gifLayers.Where(layer => !File.Exists(layer.Path)).ToList();
+		if (missingGifLayers.Count > 0)
+		{
+			RefreshImageGifLayerList();
+			string missingNames = string.Join("\n", missingGifLayers.Take(5).Select(layer => "• " + layer.Path));
+			if (missingGifLayers.Count > 5) missingNames += "\n…还有 " + (missingGifLayers.Count - 5) + " 个";
+			DialogResult choice = MessageBox.Show(this,
+				"以下 GIF 文件已经移动或删除：\n\n" + missingNames +
+				"\n\n选择“是”将跳过这些 GIF，继续生成视频；选择“否”可返回 GIF 图层页替换文件。",
+				"GIF 文件缺失", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+			if (choice != DialogResult.Yes)
+			{
+				_imageGifSelectedIndex = _imageGifLayers.FindIndex(layer => !File.Exists(layer.Path));
+				_imageSettingsTabs.SelectedIndex = 3;
+				RefreshImageGifLayerList();
+				return;
+			}
+			gifLayers.RemoveAll(layer => !File.Exists(layer.Path));
+		}
 		int particlePreset = _imageParticlePreset, particleDensity = _imageParticleDensity;
 		List<List<string>> requestedGroups;
 		if (_imageGroupingMode.SelectedIndex == 1)

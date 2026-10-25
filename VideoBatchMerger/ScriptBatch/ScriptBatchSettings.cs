@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Web.Script.Serialization;
 
@@ -95,21 +97,37 @@ namespace VideoBatchMerger.ScriptBatch
 		public double SliceDurationMax { get; set; } = 5.0;
 		public int FootageStrategy { get; set; } = 0; // 0: 随机去重, 1: 顺序轮询
 
-		// 字幕样式与排版
-		public string SubtitleFontFamily { get; set; } = "Arial";
-		public int SubtitleFontSize { get; set; } = 86; // 86 px (1080x1920 标配大屏清晰字号)
-		public string SubtitleStyleId { get; set; } = "sacred_warm_gold";
-		public string SubtitleColorHex { get; set; } = "&H00FFFFFF"; // ASS BGR: Pure White
-		public string SubtitleStrokeColorHex { get; set; } = "&H00155095"; // Warm Golden Rim
-		public float SubtitleStrokeWidth { get; set; } = 1.5f;
+		// 字幕样式与排版 (全自由定制 + 永久记忆)
+		public string SubtitleFontFamily { get; set; } = "Arial Rounded MT Bold";
+		public int SubtitleFontSize { get; set; } = 86; // 36 ~ 140 px 连续可调
+		public string SubtitleStyleId { get; set; } = "viral_blue_red_yellow";
+		public string SubtitleColorHex { get; set; } = "#FFFFFF"; // 主文字颜色 (#RRGGBB 或 &H00BBGGRR)
+		public int SubtitleTextOpacity { get; set; } = 100; // 主文字不透明度 20% ~ 100%
+		public string SubtitleStrokeColorHex { get; set; } = "#0A1172"; // 描边颜色
+		public float SubtitleStrokeWidth { get; set; } = 6.0f; // 描边粗细 0 ~ 12 px
+		public string SubtitleShadowColorHex { get; set; } = "#050838"; // 阴影/外发光颜色
+		public float SubtitleShadowDepth { get; set; } = 3.0f; // 立体阴影距离 0 ~ 10
+		public int SubtitleGlowBlur { get; set; } = 0; // 外发光柔和度 0 ~ 15
+
+		// 逐词高亮与底框参数 (Mode 1 & Mode 3)
+		public string SubtitleHighlightTextColorHex { get; set; } = "#FFFF00"; // 高亮词文字颜色
+		public bool SubtitleHighlightBoxEnabled { get; set; } = true; // 是否启用逐词底框
+		public string SubtitleHighlightBoxColorHex { get; set; } = "#D60000"; // 逐词底框颜色
+		public int SubtitleHighlightBoxOpacity { get; set; } = 96; // 逐词底框不透明度 20% ~ 100%
+
+		// 背景大底板 / 整句底框参数 (Mode 4 上滚底板 & BorderStyle=3 整句胶囊框)
+		public int SubtitleBorderStyle { get; set; } = 1; // 1: 描边立体, 3: 整句胶囊底框 (Box)
+		public int SubtitleDisplayMode { get; set; } = 3; // 0: 居中, 1: 逐词高亮, 2: 回弹弹出, 3: 逐词底框高亮, 4: 随语音逐行上滚
+		public bool SubtitleScrollPanelEnabled { get; set; } = true; // 上滚字幕半透明底板开关
+		public string SubtitleScrollPanelColorHex { get; set; } = "#EAE6DF"; // 背景大底板/整句底框颜色
+		public int SubtitleScrollPanelOpacity { get; set; } = 62; // 背景大底板/整句底框不透明度 10% ~ 95%
+
 		public int SubtitleMarginV { get; set; } = 130;
 		public int SubtitleVerticalPercent { get; set; } = 82; // 15% (top) ~ 88% (bottom)
 		public int SubtitleOffsetX { get; set; } = 0; // -500 ~ +500 (水平偏移，0为居中)
 		public double LayoutLeftRatio { get; set; } = 0.38; // 文案成片三栏布局：左栏占总宽比例 (可拖拽记忆)
 		public double LayoutRightRatio { get; set; } = 0.28; // 文案成片三栏布局：右栏占总宽比例 (可拖拽记忆)
-		public int SubtitleBorderStyle { get; set; } = 1; // 1: 描边阴影, 3: 不透明底框 (Box)
-		public int SubtitleDisplayMode { get; set; } = 0; // 0: 居中, 1: 逐词, 2: 回弹, 3: 红底框逐词, 4: 随语音逐行上滚
-		public bool SubtitleScrollPanelEnabled { get; set; } = true;
+		public int PreviewDurationSeconds { get; set; } = 5; // 0: 完整视频，或 5/8/10 秒
 
 		// 视频加水印系统 (文字水印 & 图片水印)
 		public bool WatermarkEnabled { get; set; } = false;
@@ -136,6 +154,96 @@ namespace VideoBatchMerger.ScriptBatch
 		public string FootageFolderPath { get; set; } = string.Empty;
 		public string OutputFolderPath { get; set; } = string.Empty;
 		public string HardwareEncoder { get; set; } = "auto"; // auto, nvenc, qsv, cpu
+
+		/// <summary>
+		/// 兼容解析 #RRGGBB 与 ASS &H00BBGGRR 颜色字符串为 GDI+ Color
+		/// </summary>
+		public static Color ParseToColor(string hexOrAss, Color fallback)
+		{
+			if (string.IsNullOrWhiteSpace(hexOrAss)) return fallback;
+			try
+			{
+				string s = hexOrAss.Trim();
+				if (s.StartsWith("&H", StringComparison.OrdinalIgnoreCase))
+				{
+					s = s.Substring(2).TrimEnd('&');
+					if (s.Length == 8)
+					{
+						int b = int.Parse(s.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						int g = int.Parse(s.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						int r = int.Parse(s.Substring(6, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						return Color.FromArgb(255, r, g, b);
+					}
+					if (s.Length == 6)
+					{
+						int b = int.Parse(s.Substring(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						int g = int.Parse(s.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						int r = int.Parse(s.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						return Color.FromArgb(255, r, g, b);
+					}
+				}
+				else
+				{
+					s = s.TrimStart('#');
+					if (s.Length == 6)
+					{
+						int r = int.Parse(s.Substring(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						int g = int.Parse(s.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						int b = int.Parse(s.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						return Color.FromArgb(255, r, g, b);
+					}
+					if (s.Length == 8)
+					{
+						int r = int.Parse(s.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						int g = int.Parse(s.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						int b = int.Parse(s.Substring(6, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+						return Color.FromArgb(255, r, g, b);
+					}
+				}
+			}
+			catch { }
+			return fallback;
+		}
+
+		public static string ToHtmlHex(Color c)
+		{
+			return $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+		}
+
+		public static string NormalizeToHtmlHex(string hexOrAss, Color fallback)
+		{
+			return ToHtmlHex(ParseToColor(hexOrAss, fallback));
+		}
+
+		/// <summary>
+		/// 转换为 ASS Style 定义中的 &HAABBGGRR 格式 (AA: 00=完全不透明, FF=完全透明)
+		/// </summary>
+		public static string ToAssStyleColor(string hexOrAss, Color fallback, int opacityPercent = 100)
+		{
+			Color c = ParseToColor(hexOrAss, fallback);
+			int clamped = Math.Max(0, Math.Min(100, opacityPercent));
+			int assAlpha = (int)Math.Round((100 - clamped) * 2.55);
+			return $"&H{assAlpha:X2}{c.B:X2}{c.G:X2}{c.R:X2}";
+		}
+
+		/// <summary>
+		/// 转换为 ASS 行内覆盖标签中的 &HBBGGRR& 格式
+		/// </summary>
+		public static string ToAssInlineBgr(string hexOrAss, Color fallback)
+		{
+			Color c = ParseToColor(hexOrAss, fallback);
+			return $"&H{c.B:X2}{c.G:X2}{c.R:X2}&";
+		}
+
+		/// <summary>
+		/// 转换为 ASS 行内透明度标签中的 &HAA& 格式 (AA: 00=不透明, FF=全透明)
+		/// </summary>
+		public static string ToAssInlineAlpha(int opacityPercent)
+		{
+			int clamped = Math.Max(0, Math.Min(100, opacityPercent));
+			int assAlpha = (int)Math.Round((100 - clamped) * 2.55);
+			return $"&H{assAlpha:X2}&";
+		}
 
 		public static ScriptBatchSettings Load()
 		{
@@ -179,7 +287,11 @@ namespace VideoBatchMerger.ScriptBatch
 						if (loaded.SubtitleVerticalPercent <= 0) loaded.SubtitleVerticalPercent = 82;
 						if (string.IsNullOrWhiteSpace(loaded.ProducerName)) loaded.ProducerName = "陆恒";
 						if (string.IsNullOrWhiteSpace(loaded.TtsEngine)) loaded.TtsEngine = "edge_tts";
-						if (loaded.SubtitleFontSize <= 60) loaded.SubtitleFontSize = 86;
+						if (loaded.SubtitleFontSize < 24) loaded.SubtitleFontSize = 86;
+						if (loaded.SubtitleTextOpacity <= 0) loaded.SubtitleTextOpacity = 100;
+						if (loaded.SubtitleHighlightBoxOpacity <= 0) loaded.SubtitleHighlightBoxOpacity = 95;
+						if (loaded.SubtitleScrollPanelOpacity <= 0) loaded.SubtitleScrollPanelOpacity = 62;
+						if (string.IsNullOrWhiteSpace(loaded.SubtitleFontFamily)) loaded.SubtitleFontFamily = "Arial Rounded MT Bold";
 						return loaded;
 					}
 				}

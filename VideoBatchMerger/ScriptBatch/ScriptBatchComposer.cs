@@ -20,6 +20,8 @@ namespace VideoBatchMerger.ScriptBatch
 		private static readonly Dictionary<string, bool> s_footageValidationCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 		private static readonly object s_footageValidationLock = new object();
 		private static readonly object s_bgmRandomLock = new object();
+		private static bool? s_nvencUsable;
+		private static readonly object s_nvencLock = new object();
 		private static readonly HashSet<string> s_bgmExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 		{
 			".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif"
@@ -123,103 +125,138 @@ namespace VideoBatchMerger.ScriptBatch
 			List<string> footagePool,
 			string outputDir,
 			Action<int, string> progressCallback,
-			CancellationToken ct)
+			CancellationToken ct,
+			double previewDurationSeconds = 0,
+			string previewOutputPath = null)
 		{
 			string tempDir = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_ScriptBatch", $"task_{item.Id}_{DateTime.Now.Ticks}");
 			Directory.CreateDirectory(tempDir);
 
 			try
 			{
-				// 1. TTS 语音生成与原生字幕
-				TtsResult ttsResult;
-				string voice = string.IsNullOrWhiteSpace(item.VoiceKey) ? (string.Equals(settings.TtsEngine, "elevenlabs", StringComparison.OrdinalIgnoreCase) ? settings.ElevenLabsVoice : settings.DefaultVoice) : item.VoiceKey;
-				bool isLocalClone = (voice != null && (voice.StartsWith("local:") || voice.EndsWith(".pth") || voice.EndsWith(".wav") || voice.EndsWith(".mp3")))
-				                    || string.Equals(settings.TtsEngine, "local_xtts", StringComparison.OrdinalIgnoreCase);
-				bool isElevenLabs = string.Equals(settings.TtsEngine, "elevenlabs", StringComparison.OrdinalIgnoreCase) && !isLocalClone;
-
-				if (isLocalClone)
+				// 1. TTS 语音生成与原生字幕 (若预览缓存中已有匹配的音频与字幕，直接秒级复用)
+				if (!string.IsNullOrEmpty(item.AudioPath) && File.Exists(item.AudioPath) &&
+				    !string.IsNullOrEmpty(item.SrtPath) && File.Exists(item.SrtPath))
 				{
-					progressCallback?.Invoke(15, "正在调用本地 RTX 5060 离线大模型生成声音克隆...");
-					item.Status = "本地独显克隆合成中";
-
-					string speakerRef = voice;
-					if (settings.ClonedVoices != null && settings.ClonedVoices.Count > 0)
-					{
-						var match = settings.ClonedVoices.FirstOrDefault(v =>
-							string.Equals(v.VoiceId, voice, StringComparison.OrdinalIgnoreCase) ||
-							string.Equals(v.Name, voice, StringComparison.OrdinalIgnoreCase) ||
-							(!string.IsNullOrEmpty(v.VoiceId) && voice.Contains(v.VoiceId)) ||
-							(!string.IsNullOrEmpty(v.Name) && voice.Contains(v.Name)));
-
-						if (match != null)
-						{
-							if (!string.IsNullOrEmpty(match.LatentPath) && File.Exists(match.LatentPath))
-								speakerRef = match.LatentPath;
-							else if (!string.IsNullOrEmpty(match.ReferenceAudioPath) && File.Exists(match.ReferenceAudioPath))
-								speakerRef = match.ReferenceAudioPath;
-						}
-					}
-
-					ttsResult = await LocalCloneEngine.SynthesizeAsync(
-						item.ScriptText,
-						speakerRef,
-						tempDir,
-						item.Id,
-						ct
-					);
-				}
-				else if (isElevenLabs)
-				{
-					progressCallback?.Invoke(15, "正在调用 ElevenLabs 官方多密钥池合成高保真语音...");
-					item.Status = "ElevenLabs 语音合成中";
-
-					if (voice == "CustomVoice" && !string.IsNullOrWhiteSpace(settings.ElevenLabsCustomVoiceId))
-					{
-						voice = settings.ElevenLabsCustomVoiceId.Trim();
-					}
-
-					ttsResult = await ElevenLabsEngine.SynthesizeWithFailoverAsync(
-						item.ScriptText,
-						voice,
-						tempDir,
-						item.Id,
-						ct
-					);
+					progressCallback?.Invoke(35, "已复用缓存配音与词级字幕，正在极速重排画面...");
+					item.DurationSeconds = Math.Max(1.0, ProbeAudioDurationSeconds(item.AudioPath));
 				}
 				else
 				{
-					progressCallback?.Invoke(15, "正在合成 Edge 神经网络声音...");
-					item.Status = "生成语音中";
+					TtsResult ttsResult;
+					string voice = string.IsNullOrWhiteSpace(item.VoiceKey) ? (string.Equals(settings.TtsEngine, "elevenlabs", StringComparison.OrdinalIgnoreCase) ? settings.ElevenLabsVoice : settings.DefaultVoice) : item.VoiceKey;
+					bool isLocalClone = (voice != null && (voice.StartsWith("local:") || voice.EndsWith(".pth") || voice.EndsWith(".wav") || voice.EndsWith(".mp3")))
+					                    || string.Equals(settings.TtsEngine, "local_xtts", StringComparison.OrdinalIgnoreCase);
+					bool isElevenLabs = string.Equals(settings.TtsEngine, "elevenlabs", StringComparison.OrdinalIgnoreCase) && !isLocalClone;
 
-					string edgeVoice = string.IsNullOrWhiteSpace(item.VoiceKey) ? settings.DefaultVoice : item.VoiceKey;
-					// 统一强制开启 WordBoundary 词级高精切分，实现短视频黄金节奏字幕与毫秒级音字同步
-					string boundary = "WordBoundary";
+					if (isLocalClone)
+					{
+						progressCallback?.Invoke(15, "正在调用本地 RTX 5060 离线大模型生成声音克隆...");
+						item.Status = "本地独显克隆合成中";
 
-					ttsResult = await ScriptBatchTtsEngine.SynthesizeAsync(
-						item.ScriptText,
-						edgeVoice,
-						settings.SpeechRate,
-						settings.SpeechPitch,
-						boundary,
-						tempDir,
-						item.Id,
-						ct
-					);
+						string speakerRef = voice;
+						if (settings.ClonedVoices != null && settings.ClonedVoices.Count > 0)
+						{
+							var match = settings.ClonedVoices.FirstOrDefault(v =>
+								string.Equals(v.VoiceId, voice, StringComparison.OrdinalIgnoreCase) ||
+								string.Equals(v.Name, voice, StringComparison.OrdinalIgnoreCase) ||
+								(!string.IsNullOrEmpty(v.VoiceId) && voice.Contains(v.VoiceId)) ||
+								(!string.IsNullOrEmpty(v.Name) && voice.Contains(v.Name)));
+
+							if (match != null)
+							{
+								if (!string.IsNullOrEmpty(match.LatentPath) && File.Exists(match.LatentPath))
+									speakerRef = match.LatentPath;
+								else if (!string.IsNullOrEmpty(match.ReferenceAudioPath) && File.Exists(match.ReferenceAudioPath))
+									speakerRef = match.ReferenceAudioPath;
+							}
+						}
+
+						ttsResult = await LocalCloneEngine.SynthesizeAsync(
+							item.ScriptText,
+							speakerRef,
+							tempDir,
+							item.Id,
+							ct
+						);
+					}
+					else if (isElevenLabs)
+					{
+						progressCallback?.Invoke(15, "正在调用 ElevenLabs 官方多密钥池合成高保真语音...");
+						item.Status = "ElevenLabs 语音合成中";
+
+						if (voice == "CustomVoice" && !string.IsNullOrWhiteSpace(settings.ElevenLabsCustomVoiceId))
+						{
+							voice = settings.ElevenLabsCustomVoiceId.Trim();
+						}
+
+						ttsResult = await ElevenLabsEngine.SynthesizeWithFailoverAsync(
+							item.ScriptText,
+							voice,
+							tempDir,
+							item.Id,
+							ct
+						);
+					}
+					else
+					{
+						progressCallback?.Invoke(15, "正在合成 Edge 神经网络声音...");
+						item.Status = "生成语音中";
+
+						string edgeVoice = string.IsNullOrWhiteSpace(item.VoiceKey) ? settings.DefaultVoice : item.VoiceKey;
+						// 统一强制开启 WordBoundary 词级高精切分，实现短视频黄金节奏字幕与毫秒级音字同步
+						string boundary = "WordBoundary";
+
+						ttsResult = await ScriptBatchTtsEngine.SynthesizeAsync(
+							item.ScriptText,
+							edgeVoice,
+							settings.SpeechRate,
+							settings.SpeechPitch,
+							boundary,
+							tempDir,
+							item.Id,
+							ct
+						);
+					}
+
+					if (!ttsResult.Success || string.IsNullOrEmpty(ttsResult.AudioPath) || !File.Exists(ttsResult.AudioPath))
+					{
+						item.Status = "失败";
+						item.ErrorMessage = $"TTS 语音合成失败: {ttsResult.ErrorMessage}";
+						item.QcBadge = "🔴 语音失败";
+						item.QcDetails = item.ErrorMessage;
+						return false;
+					}
+
+					item.AudioPath = ttsResult.AudioPath;
+					item.SrtPath = ttsResult.SrtPath;
+					if (previewOutputPath != null && !string.IsNullOrWhiteSpace(outputDir))
+					{
+						try
+						{
+							Directory.CreateDirectory(outputDir);
+							string ext = Path.GetExtension(item.AudioPath);
+							if (string.IsNullOrWhiteSpace(ext)) ext = ".mp3";
+							string cachedAudio = Path.Combine(outputDir, $"cached_tts_{item.Id}{ext}");
+							string cachedSrt = Path.Combine(outputDir, $"cached_tts_{item.Id}.srt");
+							File.Copy(item.AudioPath, cachedAudio, true);
+							if (!string.IsNullOrEmpty(item.SrtPath) && File.Exists(item.SrtPath))
+							{
+								File.Copy(item.SrtPath, cachedSrt, true);
+								string wordsJson = item.SrtPath + ".words.json";
+								if (File.Exists(wordsJson))
+								{
+									File.Copy(wordsJson, cachedSrt + ".words.json", true);
+								}
+								item.SrtPath = cachedSrt;
+							}
+							item.AudioPath = cachedAudio;
+						}
+						catch { }
+					}
+					// Word-boundary subtitles can end before the last encoded audio samples.
+					item.DurationSeconds = Math.Max(1.0, Math.Max(ttsResult.DurationSeconds, ProbeAudioDurationSeconds(item.AudioPath)));
 				}
-
-				if (!ttsResult.Success || string.IsNullOrEmpty(ttsResult.AudioPath) || !File.Exists(ttsResult.AudioPath))
-				{
-					item.Status = "失败";
-					item.ErrorMessage = $"TTS 语音合成失败: {ttsResult.ErrorMessage}";
-					item.QcBadge = "🔴 语音失败";
-					item.QcDetails = item.ErrorMessage;
-					return false;
-				}
-
-				item.AudioPath = ttsResult.AudioPath;
-				item.SrtPath = ttsResult.SrtPath;
-				// Word-boundary subtitles can end before the last encoded audio samples.
-				item.DurationSeconds = Math.Max(1.0, Math.Max(ttsResult.DurationSeconds, ProbeAudioDurationSeconds(item.AudioPath)));
 
 				progressCallback?.Invoke(40, "语音生成完毕，正在排版高精字幕与水印...");
 
@@ -246,11 +283,11 @@ namespace VideoBatchMerger.ScriptBatch
 					: SanitizeFileName(item.DisplayTitle);
 
 				string outVideoName = baseFileName + ".mp4";
-				string finalOutputPath = Path.Combine(outputDir, outVideoName);
+				string finalOutputPath = previewOutputPath ?? Path.Combine(outputDir, outVideoName);
 
 				// 确保文件名不重名冲突
 				int fileIndex = 1;
-				while (File.Exists(finalOutputPath))
+				while (previewOutputPath == null && File.Exists(finalOutputPath))
 				{
 					outVideoName = $"{baseFileName}_{fileIndex}.mp4";
 					finalOutputPath = Path.Combine(outputDir, outVideoName);
@@ -267,7 +304,8 @@ namespace VideoBatchMerger.ScriptBatch
 					watermarkPngPath,
 					finalOutputPath,
 					progressCallback,
-					ct
+					ct,
+					previewDurationSeconds
 				);
 
 				if (!renderOk || !File.Exists(finalOutputPath))
@@ -277,6 +315,13 @@ namespace VideoBatchMerger.ScriptBatch
 					item.QcBadge = "🔴 渲染失败";
 					item.QcDetails = item.ErrorMessage;
 					return false;
+				}
+
+				if (previewOutputPath != null)
+				{
+					item.Status = "预览就绪";
+					progressCallback?.Invoke(100, "预览视频已合成");
+					return true;
 				}
 
 				// 6. 四重雷达全自动质检
@@ -465,15 +510,16 @@ namespace VideoBatchMerger.ScriptBatch
 			string fontName = string.IsNullOrWhiteSpace(settings.SubtitleFontFamily) ? "Arial" : settings.SubtitleFontFamily;
 
 			var preset = SubtitlePresetCatalog.GetById(settings.SubtitleStyleId);
-			string primaryColor = string.IsNullOrWhiteSpace(settings.SubtitleColorHex) ? preset.PrimaryColorHex : settings.SubtitleColorHex;
-			string outlineColor = string.IsNullOrWhiteSpace(settings.SubtitleStrokeColorHex) ? preset.OutlineColorHex : settings.SubtitleStrokeColorHex;
-			float outlineWidth = settings.SubtitleStrokeWidth > 0 ? settings.SubtitleStrokeWidth : preset.OutlineWidth;
-
-			int borderStyle = preset.BorderStyle; // 1: 描边阴影/纯净立体, 3: 不透明底框
-			float shadowDepth = preset.ShadowDepth > 0 ? preset.ShadowDepth : 3.5f;
-			string backColor = borderStyle == 3
-				? (string.IsNullOrWhiteSpace(preset.BackColorHex) ? outlineColor : preset.BackColorHex)
-				: (string.IsNullOrWhiteSpace(preset.BackColorHex) ? "&H30104080" : preset.BackColorHex);
+			string primaryColor = ScriptBatchSettings.ToAssStyleColor(settings.SubtitleColorHex, Color.White, settings.SubtitleTextOpacity);
+			string outlineColor = ScriptBatchSettings.ToAssStyleColor(
+				settings.SubtitleBorderStyle == 3 ? settings.SubtitleScrollPanelColorHex : settings.SubtitleStrokeColorHex,
+				Color.FromArgb(112, 92, 65),
+				settings.SubtitleBorderStyle == 3 ? settings.SubtitleScrollPanelOpacity : 100);
+			float outlineWidth = Math.Max(0, settings.SubtitleStrokeWidth);
+			int borderStyle = settings.SubtitleBorderStyle;
+			float shadowDepth = Math.Max(0, settings.SubtitleShadowDepth);
+			if (borderStyle == 3) outlineWidth = Math.Max(10, (float)Math.Round(fontSize * 0.18));
+			string backColor = ScriptBatchSettings.ToAssStyleColor(settings.SubtitleShadowColorHex, Color.FromArgb(147, 120, 79));
 
 			int marginV = settings.SubtitleMarginV > 0 ? settings.SubtitleMarginV : 130;
 			if (settings.SubtitleVerticalPercent > 0)
@@ -493,18 +539,21 @@ namespace VideoBatchMerger.ScriptBatch
 			sb.AppendLine();
 			sb.AppendLine("[V4+ Styles]");
 			sb.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
-			sb.AppendLine($"Style: Default,{fontName},{fontSize},{primaryColor},&H000000FF,{outlineColor},{backColor},-1,0,0,0,100,100,0,0,{borderStyle},{outlineWidth:0.0},{shadowDepth:0.0},2,{marginL},{marginR},{marginV},1");
+			sb.AppendLine($"Style: Default,{fontName},{fontSize},{primaryColor},&H000000FF,{outlineColor},{backColor},-1,0,0,0,100,100,0,0,{borderStyle},{outlineWidth.ToString("0.0", CultureInfo.InvariantCulture)},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
 			int boxPadding = (int)Math.Max(10, Math.Round(fontSize * 0.18));
-			string boxBgColor = string.IsNullOrWhiteSpace(preset.BackColorHex) || preset.BackColorHex == "&H80000000" ? "&H000000D0" : preset.BackColorHex;
-			string hlTextColor = string.IsNullOrWhiteSpace(preset.HighlightTextColorHex) ? "&H0000FFFF" : preset.HighlightTextColorHex;
-			sb.AppendLine($"Style: HighlightBox,{fontName},{fontSize},{hlTextColor},&H000000FF,{boxBgColor},&H00000000,-1,0,0,0,100,100,0,0,3,{boxPadding},0,2,{marginL},{marginR},{marginV},1");
+			string boxBgColor = ScriptBatchSettings.ToAssStyleColor(settings.SubtitleHighlightBoxColorHex, Color.FromArgb(214, 0, 0), settings.SubtitleHighlightBoxOpacity);
+			string hlTextColor = ScriptBatchSettings.ToAssStyleColor(settings.SubtitleHighlightTextColorHex, Color.Yellow, settings.SubtitleTextOpacity);
+			int highlightStyle = settings.SubtitleHighlightBoxEnabled ? 3 : 1;
+			string highlightOutline = settings.SubtitleHighlightBoxEnabled ? boxBgColor : ScriptBatchSettings.ToAssStyleColor(settings.SubtitleStrokeColorHex, Color.FromArgb(112, 92, 65));
+			string highlightWidth = settings.SubtitleHighlightBoxEnabled ? boxPadding.ToString(CultureInfo.InvariantCulture) : outlineWidth.ToString("0.0", CultureInfo.InvariantCulture);
+			sb.AppendLine($"Style: HighlightBox,{fontName},{fontSize},{hlTextColor},&H000000FF,{highlightOutline},{backColor},-1,0,0,0,100,100,0,0,{highlightStyle},{highlightWidth},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
+			sb.AppendLine($"Style: HighlightText,{fontName},{fontSize},{hlTextColor},&H000000FF,{ScriptBatchSettings.ToAssStyleColor(settings.SubtitleStrokeColorHex, Color.FromArgb(112, 92, 65))},{backColor},-1,0,0,0,100,100,0,0,1,{settings.SubtitleStrokeWidth.ToString("0.0", CultureInfo.InvariantCulture)},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
 			sb.AppendLine();
 			sb.AppendLine("[Events]");
 			sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
 
 			int displayMode = settings.SubtitleDisplayMode;
-			if (displayMode != 4 && preset.DisplayMode == 3) displayMode = 3;
-			var wordTimings = displayMode == 3 ? LoadWordTimings(srtPath + ".words.json") : new List<WordTiming>();
+			var wordTimings = displayMode == 1 || displayMode == 3 || displayMode == 5 ? LoadWordTimings(srtPath + ".words.json") : new List<WordTiming>();
 			int nextWordIndex = 0;
 			var cues = new List<ScrollCue>();
 
@@ -550,7 +599,11 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 			}
 
-			if (displayMode == 4)
+			if (displayMode == 5)
+			{
+				EmitBrightPhraseSubtitles(sb, cues, wordTimings, settings, w, fontSize);
+			}
+			else if (displayMode == 4)
 			{
 				EmitScrollingSubtitles(sb, cues, settings, w, h, fontSize);
 			}
@@ -563,7 +616,89 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 			}
 
-			File.WriteAllText(assPath, sb.ToString(), Encoding.UTF8);
+			string assOutput = sb.ToString();
+			if (settings.SubtitleGlowBlur > 0)
+			{
+				var assLines = assOutput.Split('\n');
+				for (int lineIndex = 0; lineIndex < assLines.Length; lineIndex++)
+				{
+					if (!assLines[lineIndex].StartsWith("Dialogue:", StringComparison.Ordinal) || assLines[lineIndex].Contains("\\p1")) continue;
+					int commas = 0;
+					for (int charIndex = 0; charIndex < assLines[lineIndex].Length; charIndex++)
+					{
+						if (assLines[lineIndex][charIndex] != ',') continue;
+						if (++commas != 9) continue;
+						assLines[lineIndex] = assLines[lineIndex].Insert(charIndex + 1, $"{{\\blur{settings.SubtitleGlowBlur}}}");
+						break;
+					}
+				}
+				assOutput = string.Join("\n", assLines);
+			}
+			File.WriteAllText(assPath, assOutput, Encoding.UTF8);
+		}
+
+		// 明亮分句：沿用已有的语音词时间点。只有词时间点缺失时才按字数分配句内时长。
+		internal static List<string> SplitBrightPhrases(string text)
+		{
+			var phrases = new List<string>();
+			var words = (text ?? string.Empty).Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+			var current = new List<string>();
+			foreach (var word in words)
+			{
+				current.Add(word);
+				if (current.Count >= 3 || word.EndsWith(",") || word.EndsWith(".") || word.EndsWith("!") || word.EndsWith("?") || word.EndsWith(";"))
+				{
+					phrases.Add(string.Join(" ", current));
+					current.Clear();
+				}
+			}
+			if (current.Count > 0) phrases.Add(string.Join(" ", current));
+			return phrases;
+		}
+
+		private static void EmitBrightPhraseSubtitles(StringBuilder sb, List<ScrollCue> cues,
+			List<WordTiming> timings, ScriptBatchSettings settings, int width, int fontSize)
+		{
+			int nextTiming = 0;
+			string normal = ScriptBatchSettings.ToAssInlineBgr(settings.SubtitleColorHex, Color.White);
+			string accent = ScriptBatchSettings.ToAssInlineBgr(settings.SubtitleHighlightTextColorHex, Color.FromArgb(255, 215, 0));
+			foreach (var cue in cues)
+			{
+				var phrases = SplitBrightPhrases(cue.Text);
+				if (phrases.Count == 0 || cue.End <= cue.Start) continue;
+				var words = (cue.Text ?? string.Empty).Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+				int first = -1;
+				for (int candidate = nextTiming; candidate < Math.Min(timings.Count, nextTiming + 5); candidate++)
+				{
+					if (candidate + words.Length > timings.Count || Math.Abs(timings[candidate].start - cue.Start) > 0.12) continue;
+					if (words.Select((word, i) => string.Equals(NormalizeSpokenWord(word), NormalizeSpokenWord(timings[candidate + i].text), StringComparison.OrdinalIgnoreCase)).All(match => match))
+					{
+						first = candidate;
+						break;
+					}
+				}
+				if (first >= 0) nextTiming = first + words.Length;
+				int consumed = 0;
+				foreach (var phrase in phrases)
+				{
+					var parts = phrase.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+					int count = parts.Length;
+					double start = first >= 0 ? Math.Max(cue.Start, timings[first + consumed].start) : cue.Start + (cue.End - cue.Start) * consumed / words.Length;
+					double end = first >= 0
+						? (consumed + count < words.Length
+							? Math.Min(cue.End, Math.Max(timings[first + consumed + count - 1].end, timings[first + consumed + count].start))
+							: Math.Max(cue.End, timings[first + consumed + count - 1].end))
+						: cue.Start + (cue.End - cue.Start) * (consumed + count) / words.Length;
+					consumed += count;
+					if (end <= start + 0.01) continue;
+					string safe = phrase.Replace("\\", "").Replace("{", "(").Replace("}", ")");
+					int split = safe.IndexOf(' ');
+					string styled = split < 0
+						? $"{{\\1c{accent}}}{safe}{{\\1c{normal}}}"
+						: $"{{\\1c{accent}}}{safe.Substring(0, split)}{{\\1c{normal}}}{safe.Substring(split)}";
+					sb.AppendLine($"Dialogue: 0,{FormatAssTimeSpan(TimeSpan.FromSeconds(start))},{FormatAssTimeSpan(TimeSpan.FromSeconds(end))},Default,,0,0,0,,{{\\fad(70,70)}}{styled}");
+				}
+			}
 		}
 
 		private sealed class ScrollCue
@@ -598,11 +733,13 @@ namespace VideoBatchMerger.ScriptBatch
 			double lastEnd = lines[lines.Count - 1].End + 1.5;
 			if (settings.SubtitleScrollPanelEnabled)
 			{
+				string panelColor = ScriptBatchSettings.ToAssInlineBgr(settings.SubtitleScrollPanelColorHex, Color.FromArgb(234, 230, 223));
+				int panelAlpha = (int)Math.Round((100 - Math.Max(0, Math.Min(100, settings.SubtitleScrollPanelOpacity))) * 2.55);
 				int panelWidth = (int)(canvasW * 0.91);
 				int panelHeight = maxVisible * lineHeight + lineHeight / 2;
 				int panelLeft = (canvasW - panelWidth) / 2 + settings.SubtitleOffsetX;
 				int panelTop = baseline - (maxVisible - 1) * lineHeight - lineHeight / 2;
-				string panel = $"{{\\an7\\pos({panelLeft},{panelTop})\\p1\\1a&H9A&\\1c&H202020&\\bord0\\shad0}}m 0 0 l {panelWidth} 0 {panelWidth} {panelHeight} 0 {panelHeight}{{\\p0}}";
+				string panel = $"{{\\an7\\pos({panelLeft},{panelTop})\\p1\\1a&H{panelAlpha:X2}&\\1c{panelColor}\\bord0\\shad0}}m 0 0 l {panelWidth} 0 {panelWidth} {panelHeight} 0 {panelHeight}{{\\p0}}";
 				sb.AppendLine($"Dialogue: 0,{FormatAssTimeSpan(TimeSpan.FromSeconds(lines[0].Start))},{FormatAssTimeSpan(TimeSpan.FromSeconds(lastEnd))},Default,,0,0,0,,{panel}");
 			}
 
@@ -676,12 +813,35 @@ namespace VideoBatchMerger.ScriptBatch
 		private static void EmitAssCue(StringBuilder sb, string start, string end, string text,
 			int width, int fontSize, int displayMode, List<WordTiming> wordTimings, ref int nextWordIndex)
 		{
-			if (displayMode == 3 && TryEmitTimedHighlight(sb, start, end, text, width, fontSize, wordTimings, ref nextWordIndex)) return;
+			if (displayMode == 1 || displayMode == 3)
+			{
+				if (TryEmitTimedHighlight(sb, start, end, text, width, fontSize, displayMode, wordTimings, ref nextWordIndex)) return;
+				EmitEstimatedHighlight(sb, start, end, text, width, fontSize, displayMode);
+				return;
+			}
 			EmitAssDialogue(sb, start, end, text, width, fontSize, displayMode);
 		}
 
+		private static void EmitEstimatedHighlight(StringBuilder sb, string srtStart, string srtEnd, string text,
+			int width, int fontSize, int displayMode)
+		{
+			var tokens = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+			if (tokens.Length == 0) return;
+			double start = ParseSrtTimeSpan(srtStart).TotalSeconds;
+			double end = ParseSrtTimeSpan(srtEnd).TotalSeconds;
+			if (end <= start) return;
+			for (int i = 0; i < tokens.Length; i++)
+			{
+				int groupStart = (i / 3) * 3;
+				string phrase = string.Join(" ", tokens.Skip(groupStart).Take(3));
+				double wordStart = start + (end - start) * i / tokens.Length;
+				double wordEnd = start + (end - start) * (i + 1) / tokens.Length;
+				AppendHighlightDialogue(sb, wordStart, wordEnd, phrase, width, fontSize, displayMode, i - groupStart);
+			}
+		}
+
 		private static bool TryEmitTimedHighlight(StringBuilder sb, string srtStart, string srtEnd, string text,
-			int width, int fontSize, List<WordTiming> timings, ref int nextWordIndex)
+			int width, int fontSize, int displayMode, List<WordTiming> timings, ref int nextWordIndex)
 		{
 			if (timings == null || timings.Count == 0) return false;
 			var tokens = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
@@ -713,13 +873,15 @@ namespace VideoBatchMerger.ScriptBatch
 			for (int i = 0; i < tokens.Length; i++)
 			{
 				var timing = timings[first + i];
+				int groupStart = (i / 3) * 3;
+				string phrase = string.Join(" ", tokens.Skip(groupStart).Take(3));
 				double wordStart = Math.Max(position, timing.start);
 				double wordEnd = Math.Min(effectiveEnd, Math.Max(wordStart, timing.end));
-				AppendHighlightDialogue(sb, position, wordStart, text, width, fontSize, -1);
-				AppendHighlightDialogue(sb, wordStart, wordEnd, text, width, fontSize, i);
+				AppendHighlightDialogue(sb, position, wordStart, phrase, width, fontSize, displayMode, -1);
+				AppendHighlightDialogue(sb, wordStart, wordEnd, phrase, width, fontSize, displayMode, i - groupStart);
 				position = wordEnd;
 			}
-			AppendHighlightDialogue(sb, position, effectiveEnd, text, width, fontSize, -1);
+			AppendHighlightDialogue(sb, position, effectiveEnd, string.Join(" ", tokens.Skip(((tokens.Length - 1) / 3) * 3)), width, fontSize, displayMode, -1);
 			return true;
 		}
 
@@ -729,11 +891,50 @@ namespace VideoBatchMerger.ScriptBatch
 		}
 
 		private static void AppendHighlightDialogue(StringBuilder sb, double start, double end, string text,
-			int width, int fontSize, int highlightedWordIndex)
+			int width, int fontSize, int displayMode, int highlightedWordIndex)
 		{
 			if (end - start < 0.009) return;
-			string assText = FormatAssText(text, width, fontSize, 3, highlightedWordIndex);
-			sb.AppendLine($"Dialogue: 0,{FormatAssTimeSpan(TimeSpan.FromSeconds(start))},{FormatAssTimeSpan(TimeSpan.FromSeconds(end))},Default,,0,0,0,,{assText}");
+			string startAss = FormatAssTimeSpan(TimeSpan.FromSeconds(start));
+			string endAss = FormatAssTimeSpan(TimeSpan.FromSeconds(end));
+			if (displayMode == 3 && highlightedWordIndex >= 0)
+			{
+				string boxLayerText = FormatAssBoxOnlyText(text, highlightedWordIndex);
+				string strokeLayerText = FormatAssText(text, width, fontSize, 1, highlightedWordIndex);
+				sb.AppendLine($"Dialogue: 0,{startAss},{endAss},Default,,0,0,0,,{boxLayerText}");
+				sb.AppendLine($"Dialogue: 1,{startAss},{endAss},Default,,0,0,0,,{strokeLayerText}");
+				return;
+			}
+			string assText = FormatAssText(text, width, fontSize, displayMode, highlightedWordIndex);
+			sb.AppendLine($"Dialogue: 0,{startAss},{endAss},Default,,0,0,0,,{assText}");
+		}
+
+		private static string FormatAssBoxOnlyText(string text, int highlightedWordIndex)
+		{
+			text = (text ?? string.Empty).Replace("\r", "").Trim();
+			if (string.IsNullOrEmpty(text)) return text;
+			string wrapped = WrapToShortLines(text, 16);
+			string[] lines = wrapped.Split(new[] { "\n" }, StringSplitOptions.RemoveEmptyEntries);
+			var sbResult = new StringBuilder();
+			int wordIndex = 0;
+			for (int li = 0; li < Math.Min(2, lines.Length); li++)
+			{
+				if (li > 0) sbResult.Append("\\N");
+				var words = lines[li].Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+				for (int wi = 0; wi < words.Length; wi++)
+				{
+					if (wi > 0) sbResult.Append(" ");
+					if (wordIndex == highlightedWordIndex)
+					{
+						sbResult.Append($"{{\\rHighlightBox\\1a&HFF&}}{words[wi]}{{\\rDefault\\alpha&HFF&}}");
+					}
+					else
+					{
+						sbResult.Append($"{{\\alpha&HFF&}}{words[wi]}");
+					}
+					wordIndex++;
+				}
+			}
+			return sbResult.ToString();
 		}
 
 		/// <summary>
@@ -843,7 +1044,7 @@ namespace VideoBatchMerger.ScriptBatch
 			// 自动短句排版：按 2~3 词一行折行，且同屏绝不允许超过 2 行
 			string wrapped = WrapToShortLines(text, 16);
 
-			if (displayMode == 3) // 逐词红底框高亮 (图1效果)
+			if (displayMode == 1 || displayMode == 3)
 			{
 				string[] lines = wrapped.Split(new[] { "\n" }, StringSplitOptions.RemoveEmptyEntries);
 				var sbResult = new StringBuilder();
@@ -862,7 +1063,7 @@ namespace VideoBatchMerger.ScriptBatch
 						if (wordIndex == highlightedWordIndex)
 						{
 							// 黄字 + 饱满红底框 (HighlightBox 样式：BorderStyle=3 独立矩形框 + 亮黄字)
-							sbResult.Append($"{{\\rHighlightBox}}{words[wi]}{{\\rDefault}}");
+							sbResult.Append($"{{\\r{(displayMode == 1 ? "HighlightText" : "HighlightBox")}}}{words[wi]}{{\\rDefault}}");
 						}
 						else
 						{
@@ -917,13 +1118,15 @@ namespace VideoBatchMerger.ScriptBatch
 			string watermarkPngPath,
 			string outputPath,
 			Action<int, string> progressCallback,
-			CancellationToken ct)
+			CancellationToken ct,
+			double previewDurationSeconds = 0)
 		{
 			string ffmpeg = FindFfmpegExe();
 			const double endingHoldSeconds = 2.0;
 			// Probe again for cached items whose DurationSeconds came only from SRT.
 			double voiceDur = Math.Max(item.DurationSeconds, ProbeAudioDurationSeconds(item.AudioPath));
-			double totalDur = Math.Max(1.0, voiceDur) + endingHoldSeconds;
+			double fullDur = Math.Max(1.0, voiceDur) + endingHoldSeconds;
+			double totalDur = previewDurationSeconds > 0 ? Math.Min(fullDur, previewDurationSeconds) : fullDur;
 			string totalDurText = totalDur.ToString("0.00", CultureInfo.InvariantCulture);
 			int w = settings.CanvasWidth;
 			int h = settings.CanvasHeight;
@@ -978,7 +1181,7 @@ namespace VideoBatchMerger.ScriptBatch
 				int bgmInputIdx = nextInputIdx++;
 				inputArgs.Append($"-stream_loop -1 -i {QuoteArg(bgmFile)} ");
 				float bgmVol = Math.Max(0.02f, settings.BgmVolumePercent / 100f);
-				double fadeStart = Math.Max(0.5, totalDur - 1.5);
+				double fadeStart = Math.Max(0.5, fullDur - 1.5);
 
 				string bgmFilter = $"[{bgmInputIdx}:a]volume={bgmVol.ToString("0.00", CultureInfo.InvariantCulture)},afade=t=out:st={fadeStart.ToString("0.00", CultureInfo.InvariantCulture)}:d=1.5[bgm];[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[outa]";
 				filterComplex.Append($"{bgmFilter};");
@@ -1087,8 +1290,9 @@ namespace VideoBatchMerger.ScriptBatch
 
 			filterComplex.Append($"[{currentV}]null[outv]");
 
-			// 编码器选择 (硬件加速优先)
-			string vcodec = "libx264 -preset veryfast -crf 22";
+			// 编码器选择 (硬件加速优先，若硬件编码器驱动版本不匹配则自动无感回退 CPU libx264)
+			const string cpuFallbackCodec = "libx264 -preset veryfast -crf 22";
+			string vcodec = cpuFallbackCodec;
 			if (settings.HardwareEncoder == "nvenc" || (settings.HardwareEncoder == "auto" && HasNvenc()))
 			{
 				vcodec = "h264_nvenc -preset p4 -cq 23";
@@ -1098,6 +1302,38 @@ namespace VideoBatchMerger.ScriptBatch
 				vcodec = "h264_qsv -global_quality 23";
 			}
 
+			var (ok, exitCode, detail) = await ExecuteFfmpegEncodeAsync(
+				ffmpeg, inputArgs.ToString(), filterComplex.ToString(), audioMap, vcodec, totalDurText, totalDur, outputPath, item, progressCallback, ct);
+
+			if (!ok && !ct.IsCancellationRequested && vcodec != cpuFallbackCodec)
+			{
+				if (vcodec.StartsWith("h264_nvenc", StringComparison.OrdinalIgnoreCase))
+				{
+					lock (s_nvencLock) { s_nvencUsable = false; }
+				}
+				progressCallback?.Invoke(60, "检测到显卡编码器驱动版本受限，已自动切换 CPU 高速软编...");
+				(ok, exitCode, detail) = await ExecuteFfmpegEncodeAsync(
+					ffmpeg, inputArgs.ToString(), filterComplex.ToString(), audioMap, cpuFallbackCodec, totalDurText, totalDur, outputPath, item, progressCallback, ct);
+			}
+
+			if (ok) return true;
+			item.ErrorMessage = $"FFmpeg 渲染失败 (代码 {exitCode})" + (detail.Length > 0 ? $": {detail}" : "。请检查素材、GIF 贴纸和编码器设置。");
+			return false;
+		}
+
+		private static async Task<(bool Ok, int ExitCode, string Detail)> ExecuteFfmpegEncodeAsync(
+			string ffmpeg,
+			string inputArgs,
+			string filterComplex,
+			string audioMap,
+			string vcodec,
+			string totalDurText,
+			double totalDur,
+			string outputPath,
+			ScriptBatchItem item,
+			Action<int, string> progressCallback,
+			CancellationToken ct)
+		{
 			string args = $"-hide_banner {inputArgs} -filter_complex \"{filterComplex}\" -map \"[outv]\" {audioMap} -c:v {vcodec} -c:a aac -b:a 192k -t {totalDurText} -y {QuoteArg(outputPath)}";
 			var errorLines = new Queue<string>();
 
@@ -1130,7 +1366,7 @@ namespace VideoBatchMerger.ScriptBatch
 							var m = Regex.Match(line, @"time=(\d+):(\d+):(\d+\.?\d*)");
 							if (m.Success)
 							{
-								double cur = int.Parse(m.Groups[1].Value) * 3600 + int.Parse(m.Groups[2].Value) * 60 + double.Parse(m.Groups[3].Value);
+								double cur = int.Parse(m.Groups[1].Value) * 3600 + int.Parse(m.Groups[2].Value) * 60 + double.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
 								int pct = (int)Math.Min(95, Math.Max(60, 60 + (cur / totalDur) * 35));
 								item.ProgressPercent = pct;
 								progressCallback?.Invoke(pct, $"渲染中... {cur:0.0}/{totalDur:0.0}秒");
@@ -1144,17 +1380,16 @@ namespace VideoBatchMerger.ScriptBatch
 					if (ct.IsCancellationRequested)
 					{
 						try { proc.Kill(); } catch { }
-						return false;
+						return (false, -1, "已取消");
 					}
 					await Task.Delay(200, ct);
 				}
 
 				await readTask;
-				if (proc.ExitCode == 0) return true;
+				if (proc.ExitCode == 0) return (true, 0, string.Empty);
 				string detail = string.Join(" | ", errorLines).Trim();
 				if (detail.Length > 900) detail = detail.Substring(detail.Length - 900);
-				item.ErrorMessage = $"FFmpeg 渲染失败 (代码 {proc.ExitCode})" + (detail.Length > 0 ? $": {detail}" : "。请检查素材、GIF 贴纸和编码器设置。");
-				return false;
+				return (false, proc.ExitCode, detail);
 			}
 		}
 
@@ -1338,21 +1573,34 @@ namespace VideoBatchMerger.ScriptBatch
 
 		private static bool HasNvenc()
 		{
+			lock (s_nvencLock)
+			{
+				if (s_nvencUsable.HasValue) return s_nvencUsable.Value;
+			}
+			bool usable = false;
 			try
 			{
 				string ffmpeg = FindFfmpegExe();
-				var psi = new ProcessStartInfo(ffmpeg, "-encoders")
+				var psi = new ProcessStartInfo(ffmpeg, "-hide_banner -loglevel error -f lavfi -i color=c=black:s=256x256:d=0.04 -frames:v 1 -c:v h264_nvenc -f null -")
 				{
+					RedirectStandardError = true,
 					RedirectStandardOutput = true,
 					UseShellExecute = false,
 					CreateNoWindow = true
 				};
 				using var p = Process.Start(psi);
-				string outStr = p.StandardOutput.ReadToEnd();
-				p.WaitForExit();
-				return outStr.Contains("h264_nvenc");
+				if (p != null)
+				{
+					usable = p.WaitForExit(4000) && p.ExitCode == 0;
+					if (!p.HasExited) try { p.Kill(); } catch { }
+				}
 			}
-			catch { return false; }
+			catch { usable = false; }
+			lock (s_nvencLock)
+			{
+				s_nvencUsable = usable;
+			}
+			return usable;
 		}
 
 		public static string QuoteArg(string value)

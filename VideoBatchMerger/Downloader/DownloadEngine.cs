@@ -21,6 +21,13 @@ public sealed class DownloadEngine
 	private static readonly Regex YtDlpProgressRegex = new Regex(@"\[download\]\s+(\d+(?:\.\d+)?)%\s+of\s+~?([^\s]+)\s+at\s+([^\s]+)\s+ETA\s+([^\s]+)", RegexOptions.Compiled);
 	private static readonly Regex YtDlp100ProgressRegex = new Regex(@"\[download\]\s+100%\s+of\s+~?([^\s]+)", RegexOptions.Compiled);
 	private static readonly Regex YtDlpDestinationRegex = new Regex(@"\[(?:download|Merger)\]\s+(?:Destination:\s+|Merging formats into\s+""?)(.+?)""?$", RegexOptions.Compiled);
+	private static readonly Regex YtDlpAlreadyDownloadedRegex = new Regex(@"\[download\]\s+(.+?)\s+has already been downloaded", RegexOptions.Compiled);
+	private static readonly HashSet<string> NonVideoExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+	{
+		".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".ico", ".tif", ".tiff", ".heic", ".avif",
+		".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma",
+		".pdf", ".zip", ".rar", ".7z", ".txt", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"
+	};
 
 	public static string FindYtDlpPath()
 	{
@@ -287,24 +294,31 @@ public sealed class DownloadEngine
 		}
 		Directory.CreateDirectory(targetDir);
 
-		// 检查 Google Drive 优先使用专业提取引擎（包含大文件流媒体源），若未就绪则使用直链引擎
+		// Google Drive 优先走原文件直链通道，完整保留原始文件名与真实格式（图片保持 .jpg/.png/.webp，视频保持原格式并做 H.264 兼容保障）
 		if (item.Platform == "Google Drive")
 		{
 			var match = GoogleDriveIdRegex.Match(item.Url);
 			if (match.Success)
 			{
 				string fileId = match.Groups[1].Value;
-				// 若 yt-dlp 可用，优先使用 yt-dlp 的原生 GoogleDrive 提取器，可完美下载原始完整高质量视频并自动命名
-				if (!string.IsNullOrEmpty(ytDlpPath) && File.Exists(ytDlpPath))
+				logCallback?.Invoke($"[Google Drive] 启动云端原格式直连下载通道: {fileId}");
+				bool gdriveOk = await DownloadGoogleDriveDirectAsync(item, fileId, targetDir, proxyUrl, logCallback, ct);
+				if (gdriveOk)
 				{
-					logCallback?.Invoke($"[Google Drive] 启用高保真云端提取引擎: {fileId}");
-					// 继续执行下面的 yt-dlp 处理流程
+					if (quality != "audio" && !string.IsNullOrEmpty(item.SaveFilePath) && File.Exists(item.SaveFilePath))
+					{
+						if (string.IsNullOrEmpty(ffmpegPath) || !File.Exists(ffmpegPath))
+						{
+							ffmpegPath = FindFFmpegPath();
+						}
+						await EnsureUniversalH264VideoAsync(item, ffmpegPath, logCallback, ct);
+					}
+					item.Status = "成功";
+					return true;
 				}
-				else
+				if (item.Status != null && item.Status.Contains("权限受限"))
 				{
-					logCallback?.Invoke($"[Google Drive] 启动内置直连加速通道: {fileId}");
-					bool gdriveOk = await DownloadGoogleDriveDirectAsync(item, fileId, targetDir, proxyUrl, logCallback, ct);
-					if (gdriveOk) return true;
+					return false;
 				}
 			}
 		}
@@ -389,6 +403,17 @@ public sealed class DownloadEngine
 			}
 			else if (line.Contains("has already been downloaded"))
 			{
+				var existMatch = YtDlpAlreadyDownloadedRegex.Match(line);
+				if (existMatch.Success)
+				{
+					string p = existMatch.Groups[1].Value.Trim().Trim('"');
+					if (!string.IsNullOrEmpty(p))
+					{
+						detectedFilePath = Path.IsPathRooted(p) ? p : Path.Combine(targetDir, p);
+						item.SaveFilePath = detectedFilePath;
+						item.Title = Path.GetFileNameWithoutExtension(detectedFilePath);
+					}
+				}
 				item.ProgressPercent = 100;
 				item.Status = "已完成 (已存在)";
 			}
@@ -569,27 +594,45 @@ public sealed class DownloadEngine
 				}
 			}
 
-			string fileName = $"GoogleDrive_{fileId}.mp4";
-			if (response.Content.Headers.ContentDisposition?.FileName != null)
+			string mediaType = response.Content.Headers.ContentType?.MediaType?.ToLowerInvariant() ?? string.Empty;
+			string defaultExt = GuessExtensionFromMimeType(mediaType);
+
+			string fileName = null;
+			var cd = response.Content.Headers.ContentDisposition;
+			if (!string.IsNullOrWhiteSpace(cd?.FileNameStar))
 			{
-				string headerName = response.Content.Headers.ContentDisposition.FileName.Trim('"', '\'');
-				if (!string.IsNullOrWhiteSpace(headerName))
+				fileName = cd.FileNameStar.Trim('"', '\'');
+			}
+			else if (!string.IsNullOrWhiteSpace(cd?.FileName))
+			{
+				fileName = cd.FileName.Trim('"', '\'');
+			}
+			if (string.IsNullOrWhiteSpace(fileName) && response.Content.Headers.TryGetValues("Content-Disposition", out var rawCdValues))
+			{
+				string rawCd = string.Join(";", rawCdValues);
+				var utf8Match = Regex.Match(rawCd, @"filename\*=UTF-8''([^;\r\n]+)", RegexOptions.IgnoreCase);
+				if (utf8Match.Success)
 				{
-					fileName = headerName;
+					fileName = Uri.UnescapeDataString(utf8Match.Groups[1].Value.Trim('"', '\''));
 				}
+				else
+				{
+					var fnMatch = Regex.Match(rawCd, @"filename=""?([^"";\r\n]+)""?", RegexOptions.IgnoreCase);
+					if (fnMatch.Success)
+					{
+						fileName = fnMatch.Groups[1].Value.Trim('"', '\'');
+					}
+				}
+			}
+
+			if (string.IsNullOrWhiteSpace(fileName))
+			{
+				fileName = $"GoogleDrive_{fileId}{defaultExt}";
 			}
 			fileName = SanitizeFileName(fileName);
 			if (!Path.HasExtension(fileName) || fileName.EndsWith("."))
 			{
-				fileName += ".mp4";
-			}
-			else if (!fileName.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) &&
-			         !fileName.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase) &&
-			         !fileName.EndsWith(".mov", StringComparison.OrdinalIgnoreCase) &&
-			         !fileName.EndsWith(".avi", StringComparison.OrdinalIgnoreCase) &&
-			         !fileName.EndsWith(".webm", StringComparison.OrdinalIgnoreCase))
-			{
-				fileName += ".mp4";
+				fileName = fileName.TrimEnd('.') + defaultExt;
 			}
 
 			string targetFile = Path.Combine(outputDir, fileName);
@@ -650,9 +693,31 @@ public sealed class DownloadEngine
 		}
 	}
 
+	private static string GuessExtensionFromMimeType(string mediaType)
+	{
+		if (string.IsNullOrWhiteSpace(mediaType)) return ".mp4";
+		if (mediaType.Contains("image/jpeg") || mediaType.Contains("image/jpg")) return ".jpg";
+		if (mediaType.Contains("image/png")) return ".png";
+		if (mediaType.Contains("image/webp")) return ".webp";
+		if (mediaType.Contains("image/gif")) return ".gif";
+		if (mediaType.Contains("image/bmp")) return ".bmp";
+		if (mediaType.Contains("image/svg")) return ".svg";
+		if (mediaType.Contains("image/avif")) return ".avif";
+		if (mediaType.Contains("image/heic")) return ".heic";
+		if (mediaType.Contains("audio/mpeg") || mediaType.Contains("audio/mp3")) return ".mp3";
+		if (mediaType.Contains("audio/wav") || mediaType.Contains("audio/x-wav")) return ".wav";
+		if (mediaType.Contains("audio/mp4") || mediaType.Contains("audio/m4a")) return ".m4a";
+		if (mediaType.Contains("audio/ogg")) return ".ogg";
+		if (mediaType.Contains("video/webm")) return ".webm";
+		if (mediaType.Contains("video/quicktime")) return ".mov";
+		if (mediaType.Contains("video/x-matroska")) return ".mkv";
+		return ".mp4";
+	}
+
 	/// <summary>
 	/// 检测落盘视频是否为 AV1 (av01) 或 VP9 等 Windows 默认播放器不兼容的编码；
 	/// 若是，则自动调用内置 FFmpeg 极速转码为全平台通用的 H.264 (yuv420p) + AAC MP4，杜绝“有声无画”现象。
+	/// 同时自动跳过图片与纯音频文件，绝不将图片转成视频。
 	/// </summary>
 	private static async Task EnsureUniversalH264VideoAsync(
 		DownloadItem item,
@@ -662,6 +727,12 @@ public sealed class DownloadEngine
 	{
 		if (string.IsNullOrEmpty(ffmpegPath) || !File.Exists(ffmpegPath)) return;
 		if (item == null || string.IsNullOrEmpty(item.SaveFilePath) || !File.Exists(item.SaveFilePath)) return;
+
+		string ext = Path.GetExtension(item.SaveFilePath);
+		if (!string.IsNullOrEmpty(ext) && NonVideoExtensions.Contains(ext))
+		{
+			return;
+		}
 
 		try
 		{
@@ -687,7 +758,8 @@ public sealed class DownloadEngine
 			if (!vMatch.Success) return;
 
 			string vcodec = vMatch.Groups[1].Value.ToLowerInvariant();
-			if (vcodec == "h264" || vcodec == "avc1")
+			if (vcodec == "h264" || vcodec == "avc1" ||
+			    vcodec == "mjpeg" || vcodec == "png" || vcodec == "webp" || vcodec == "gif" || vcodec == "bmp" || vcodec == "tiff")
 			{
 				return;
 			}
@@ -702,7 +774,7 @@ public sealed class DownloadEngine
 			var convPsi = new ProcessStartInfo
 			{
 				FileName = ffmpegPath,
-				Arguments = $"-hide_banner -y -i {ScriptBatch.ScriptBatchComposer.QuoteArg(item.SaveFilePath)} -map 0:v:0 -map 0:a:0? -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart {ScriptBatch.ScriptBatchComposer.QuoteArg(tempOut)}",
+				Arguments = $"-hide_banner -y -i {ScriptBatch.ScriptBatchComposer.QuoteArg(item.SaveFilePath)} -map 0:v:0 -map 0:a:0? -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart {ScriptBatch.ScriptBatchComposer.QuoteArg(tempOut)}",
 				UseShellExecute = false,
 				CreateNoWindow = true,
 				RedirectStandardError = true,

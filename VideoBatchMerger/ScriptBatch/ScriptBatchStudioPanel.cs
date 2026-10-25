@@ -59,7 +59,7 @@ namespace VideoBatchMerger.ScriptBatch
 
 		// 控件引用：字幕样式与 XY 轴位置调节
 		private ComboBox _cboSubtitleStyle;
-		private ComboBox _cboSubtitleSize;
+		private NumericUpDown _numSubtitleSize;
 		private ComboBox _cboSubtitleMode;
 		private CheckBox _chkSubtitleScrollPanel;
 		private TrackBar _trkSubtitlePos;
@@ -125,6 +125,19 @@ namespace VideoBatchMerger.ScriptBatch
 		private Label _lblStatusText;
 		private Button _btnOpenOutput;
 		private Button _btnPreviewSelected;
+		private ComboBox _cboPreviewDuration;
+		private Button _btnPlayPreview;
+		private Panel _previewHeaderPanel;
+		private Panel _previewBottomContainer;
+		private WebView2 _videoPreviewView;
+		private CancellationTokenSource _previewCts;
+		private bool _isPreviewRendering;
+		private bool _isPreviewPlaying;
+		private string _lastPreviewVideoPath;
+		private string _lastPreviewHtmlPath;
+		private string _cachedPreviewScriptKey;
+		private string _cachedPreviewAudioPath;
+		private string _cachedPreviewSrtPath;
 
 		// 实时预览视窗 (WebView2 60FPS 所见即所得引擎 + GDI+ 兜底)
 		private PreviewCanvasBox _previewCanvas;
@@ -164,7 +177,7 @@ namespace VideoBatchMerger.ScriptBatch
 
 			if (_mainForm != null)
 			{
-				_mainForm.FormClosing += (_, _) => SaveSettings();
+				_mainForm.FormClosing += (_, _) => { _previewCts?.Cancel(); SaveSettings(); };
 			}
 		}
 
@@ -462,30 +475,50 @@ namespace VideoBatchMerger.ScriptBatch
 				Padding = new Padding(10)
 			};
 
-			// 顶部栏：预览标题 + 右侧【🎨 字幕预设库 (底框/动效)】按钮
+			// 顶部栏：预览标题 + 右侧【时长选择 + ▶ 实机播放 + 🎨 字幕预设库】
 			var headerPanel = new Panel
 			{
 				Dock = DockStyle.Top,
-				Height = 36,
+				Height = 38,
 				BackColor = Color.FromArgb(20, 28, 44),
-				Padding = new Padding(10, 4, 10, 4)
+				Padding = new Padding(10, 4, 8, 4)
 			};
+			_previewHeaderPanel = headerPanel;
 
-			var lblTitle = new Label
+			var rightHeaderFlow = new FlowLayoutPanel
 			{
-				Dock = DockStyle.Left,
+				Dock = DockStyle.Right,
 				AutoSize = true,
-				Text = "📱 手机成片实时预览 (9:16 竖屏 · 画面/字幕/水印)",
-				Font = new Font("Microsoft YaHei UI", 9.2f, FontStyle.Bold),
-				ForeColor = AccentYellow,
-				TextAlign = ContentAlignment.MiddleLeft
+				WrapContents = false,
+				FlowDirection = FlowDirection.LeftToRight,
+				Margin = new Padding(0),
+				Padding = new Padding(0, 1, 0, 0)
 			};
-			headerPanel.Controls.Add(lblTitle);
 
-			_btnPresetLibrary = CreateButton("🎨 字幕预设库 (底框/动效)", AccentOrange, Color.White, 168);
-			_btnPresetLibrary.Dock = DockStyle.Right;
+			_cboPreviewDuration = new ComboBox
+			{
+				DropDownStyle = ComboBoxStyle.DropDownList,
+				Width = 72,
+				BackColor = InputBg,
+				ForeColor = TextPrimary,
+				Font = new Font("Microsoft YaHei UI", 8.2f),
+				Margin = new Padding(0, 2, 5, 0)
+			};
+			_cboPreviewDuration.Items.AddRange(new object[] { "5 秒", "8 秒", "10 秒", "完整视频" });
+			_cboPreviewDuration.SelectedIndexChanged += (_, _) => SaveSettings();
+			rightHeaderFlow.Controls.Add(_cboPreviewDuration);
+
+			_btnPlayPreview = CreateButton("▶ 实机播放", AccentGreen, Color.White, 106);
+			_btnPlayPreview.Height = 28;
+			_btnPlayPreview.Font = new Font("Microsoft YaHei UI", 8.2f, FontStyle.Bold);
+			_btnPlayPreview.Margin = new Padding(0, 0, 6, 0);
+			_btnPlayPreview.Click += async (_, _) => await StartOrStopVideoPreviewAsync();
+			rightHeaderFlow.Controls.Add(_btnPlayPreview);
+
+			_btnPresetLibrary = CreateButton("🎨 字幕预设库", AccentOrange, Color.White, 118);
 			_btnPresetLibrary.Height = 28;
 			_btnPresetLibrary.Font = new Font("Microsoft YaHei UI", 8.2f, FontStyle.Bold);
+			_btnPresetLibrary.Margin = new Padding(0);
 			_btnPresetLibrary.Click += (_, _) =>
 			{
 				using var dlg = new SubtitlePresetDialog(_settings, () =>
@@ -495,7 +528,20 @@ namespace VideoBatchMerger.ScriptBatch
 				});
 				dlg.ShowDialog(this);
 			};
-			headerPanel.Controls.Add(_btnPresetLibrary);
+			rightHeaderFlow.Controls.Add(_btnPresetLibrary);
+
+			var lblTitle = new Label
+			{
+				Dock = DockStyle.Fill,
+				AutoSize = false,
+				AutoEllipsis = true,
+				Text = "📱 手机成片实时预览 (9:16)",
+				Font = new Font("Microsoft YaHei UI", 9.0f, FontStyle.Bold),
+				ForeColor = AccentYellow,
+				TextAlign = ContentAlignment.MiddleLeft
+			};
+			headerPanel.Controls.Add(lblTitle);
+			headerPanel.Controls.Add(rightHeaderFlow);
 
 			// 底部控件区：字幕位置微调 + 实时命名预览 (高度 74px，双行精准对齐，绝不换行遮挡)
 			var bottomContainer = new Panel
@@ -505,6 +551,7 @@ namespace VideoBatchMerger.ScriptBatch
 				BackColor = Color.FromArgb(20, 28, 44),
 				Padding = new Padding(8, 4, 8, 4)
 			};
+			_previewBottomContainer = bottomContainer;
 
 			// 第1行：Y轴垂直滑杆 + [底 82%] [中 50%] [顶 20%]
 			var rowY = new Panel
@@ -675,6 +722,11 @@ namespace VideoBatchMerger.ScriptBatch
 				};
 				container.Controls.Add(_webViewPreview);
 				_webViewPreview.BringToFront();
+
+				_videoPreviewView = new WebView2 { Dock = DockStyle.Fill, Visible = false };
+				container.Controls.Add(_videoPreviewView);
+				headerPanel.BringToFront();
+				bottomContainer.BringToFront();
 
 				InitializeWebViewAsync();
 			}
@@ -931,28 +983,52 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 			_cboSubtitleStyle.SelectedIndexChanged += (_, _) =>
 			{
+				if (_isLoadingSettings) return;
 				if (_cboSubtitleStyle.SelectedIndex >= 0 && _cboSubtitleStyle.SelectedIndex < SubtitlePresetCatalog.Presets.Count)
 				{
 					var sel = SubtitlePresetCatalog.Presets[_cboSubtitleStyle.SelectedIndex];
-					_settings.SubtitleStyleId = sel.Id;
-					_settings.SubtitleColorHex = sel.PrimaryColorHex;
-					_settings.SubtitleStrokeColorHex = sel.OutlineColorHex;
-					_settings.SubtitleStrokeWidth = sel.OutlineWidth;
-					_settings.SubtitleBorderStyle = sel.BorderStyle;
-					_settings.SubtitleDisplayMode = sel.DisplayMode;
-					if (_cboSubtitleMode != null) _cboSubtitleMode.SelectedIndex = Math.Min(4, Math.Max(0, sel.DisplayMode));
+					sel.ApplyToSettings(_settings);
+				_isLoadingSettings = true;
+				try
+				{
+					if (_cboSubtitleMode != null) _cboSubtitleMode.SelectedIndex = Math.Min(5, Math.Max(0, sel.DisplayMode));
+					if (_numSubtitleSize != null)
+						_numSubtitleSize.Value = Math.Max(_numSubtitleSize.Minimum, Math.Min(_numSubtitleSize.Maximum, sel.FontSize));
+				}
+				finally { _isLoadingSettings = false; }
 					_settings.Save();
 					UpdatePreview();
 				}
 			};
 			subFlow.Controls.Add(_cboSubtitleStyle);
+			var btnSubtitleEditor = CreateButton("✎ 自定义字体 / 颜色 / 描边 / 透明度 / 底板", CardBorder, TextPrimary, 300);
+			btnSubtitleEditor.Click += (_, _) =>
+			{
+				using var editor = new SubtitleStyleEditorDialog(_settings, () =>
+				{
+					bool loading = _isLoadingSettings;
+					_isLoadingSettings = true;
+					try { _numSubtitleSize.Value = Math.Max(_numSubtitleSize.Minimum, Math.Min(_numSubtitleSize.Maximum, _settings.SubtitleFontSize)); }
+					finally { _isLoadingSettings = loading; }
+					UpdatePreview();
+				});
+				editor.ShowDialog(this);
+				_settings.Save();
+				UpdatePreview();
+			};
+			subFlow.Controls.Add(btnSubtitleEditor);
 
 			var subOptRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 4, 0, 2) };
 			subOptRow.Controls.Add(new Label { Text = "字号: ", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(0, 4, 2, 0) });
-			_cboSubtitleSize = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110, BackColor = InputBg, ForeColor = TextPrimary, FlatStyle = FlatStyle.Flat };
-			_cboSubtitleSize.Items.AddRange(new object[] { "68 px (精简小号)", "78 px (常规标配)", "86 px (推荐字号)", "96 px (醒目加粗)", "108 px (超大视效)" });
-			_cboSubtitleSize.SelectedIndexChanged += (_, _) => { SaveSettings(); UpdatePreview(); };
-			subOptRow.Controls.Add(_cboSubtitleSize);
+			_numSubtitleSize = new NumericUpDown { Minimum = 24, Maximum = 160, Width = 82, BackColor = InputBg, ForeColor = TextPrimary, Value = Math.Max(24, Math.Min(160, _settings.SubtitleFontSize)) };
+			_numSubtitleSize.ValueChanged += (_, _) =>
+			{
+				if (_isLoadingSettings) return;
+				_settings.SubtitleFontSize = (int)_numSubtitleSize.Value;
+				SaveSettings();
+				UpdatePreview();
+			};
+			subOptRow.Controls.Add(_numSubtitleSize);
 
 			subOptRow.Controls.Add(new Label { Text = "模式: ", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(6, 4, 2, 0) });
 			_cboSubtitleMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, BackColor = InputBg, ForeColor = TextPrimary, FlatStyle = FlatStyle.Flat };
@@ -962,7 +1038,8 @@ namespace VideoBatchMerger.ScriptBatch
 				"1. 逐词高亮跳动",
 				"2. 动感回弹弹出",
 				"3. 逐词红底框高亮",
-				"4. 随语音逐行上滚"
+				"4. 随语音逐行上滚",
+				"5. 明亮分句·重点词"
 			});
 			_cboSubtitleMode.SelectedIndexChanged += (_, _) =>
 			{
@@ -1669,15 +1746,9 @@ namespace VideoBatchMerger.ScriptBatch
 					_cboSubtitleStyle.SelectedIndex = 0;
 				}
 
-				_cboSubtitleSize.SelectedIndex = _settings.SubtitleFontSize switch
-				{
-					68 => 0,
-					78 => 1,
-					96 => 3,
-					108 => 4,
-					_ => 2
-				};
-				_cboSubtitleMode.SelectedIndex = Math.Min(4, Math.Max(0, _settings.SubtitleDisplayMode));
+				_numSubtitleSize.Value = Math.Max(_numSubtitleSize.Minimum, Math.Min(_numSubtitleSize.Maximum, _settings.SubtitleFontSize));
+				_cboSubtitleMode.SelectedIndex = Math.Min(5, Math.Max(0, _settings.SubtitleDisplayMode));
+				_cboPreviewDuration.SelectedIndex = _settings.PreviewDurationSeconds == 8 ? 1 : _settings.PreviewDurationSeconds == 10 ? 2 : _settings.PreviewDurationSeconds == 0 ? 3 : 0;
 				_chkSubtitleScrollPanel.Checked = _settings.SubtitleScrollPanelEnabled;
 				_chkSubtitleScrollPanel.Visible = _settings.SubtitleDisplayMode == 4;
 				_trkSubtitlePos.Value = Math.Max(15, Math.Min(88, _settings.SubtitleVerticalPercent));
@@ -1773,21 +1844,11 @@ namespace VideoBatchMerger.ScriptBatch
 			{
 				var p = SubtitlePresetCatalog.Presets[_cboSubtitleStyle.SelectedIndex];
 				_settings.SubtitleStyleId = p.Id;
-				_settings.SubtitleColorHex = p.PrimaryColorHex;
-				_settings.SubtitleStrokeColorHex = p.OutlineColorHex;
-				_settings.SubtitleStrokeWidth = p.OutlineWidth;
-				_settings.SubtitleBorderStyle = p.BorderStyle;
 			}
 
-			_settings.SubtitleFontSize = _cboSubtitleSize.SelectedIndex switch
-			{
-				0 => 68,
-				1 => 78,
-				3 => 96,
-				4 => 108,
-				_ => 86
-			};
+			// 字号由数值控件或样式编辑器实时更新，保存其他参数时不覆盖。
 			_settings.SubtitleDisplayMode = _cboSubtitleMode.SelectedIndex;
+			_settings.PreviewDurationSeconds = _cboPreviewDuration.SelectedIndex == 1 ? 8 : _cboPreviewDuration.SelectedIndex == 2 ? 10 : _cboPreviewDuration.SelectedIndex == 3 ? 0 : 5;
 			_settings.SubtitleScrollPanelEnabled = _chkSubtitleScrollPanel.Checked;
 			_settings.SubtitleVerticalPercent = _trkSubtitlePos.Value;
 			_settings.SubtitleOffsetX = _trkSubtitleX.Value;
@@ -1908,9 +1969,11 @@ namespace VideoBatchMerger.ScriptBatch
 
 		private void UpdatePreview()
 		{
+			if (_isPreviewRendering) _previewCts?.Cancel();
+			if (_isPreviewPlaying) CloseVideoPreview();
 			if (_previewCanvas != null && _webViewPreview != null && _isWebViewReady)
 			{
-				bool useCanvas = _settings.SubtitleDisplayMode == 4 || (_settings.GifStickers != null && _settings.GifStickers.Any(s => s.Enabled));
+				bool useCanvas = _settings.SubtitleDisplayMode == 4 || _settings.SubtitleDisplayMode == 5 || (_settings.GifStickers != null && _settings.GifStickers.Any(s => s.Enabled));
 				_previewCanvas.Visible = useCanvas;
 				_webViewPreview.Visible = !useCanvas;
 			}
@@ -2135,10 +2198,22 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					["subtitleText"] = sampleText,
 					["subtitleStyleId"] = _settings.SubtitleStyleId,
-					["subtitleDisplayMode"] = _settings.SubtitleDisplayMode == 4 ? 4 : (_settings.SubtitleDisplayMode == 3 || SubtitlePresetCatalog.GetById(_settings.SubtitleStyleId).DisplayMode == 3 ? 3 : _settings.SubtitleDisplayMode),
+					["subtitleDisplayMode"] = _settings.SubtitleDisplayMode,
 					["subtitleScrollPanelEnabled"] = _settings.SubtitleScrollPanelEnabled,
-					["subtitleHighlightBgColor"] = ColorTranslator.ToHtml(SubtitlePresetCatalog.GetById(_settings.SubtitleStyleId).PreviewHighlightBgColor),
-					["subtitleHighlightTextColor"] = ColorTranslator.ToHtml(SubtitlePresetCatalog.GetById(_settings.SubtitleStyleId).PreviewHighlightTextColor),
+					["subtitleHighlightBgColor"] = _settings.SubtitleHighlightBoxColorHex,
+					["subtitleHighlightTextColor"] = _settings.SubtitleHighlightTextColorHex,
+					["subtitleHighlightBoxEnabled"] = _settings.SubtitleHighlightBoxEnabled,
+					["subtitleHighlightBoxOpacity"] = _settings.SubtitleHighlightBoxOpacity,
+					["subtitleTextColor"] = _settings.SubtitleColorHex,
+					["subtitleTextOpacity"] = _settings.SubtitleTextOpacity,
+					["subtitleStrokeColor"] = _settings.SubtitleStrokeColorHex,
+					["subtitleStrokeWidth"] = _settings.SubtitleStrokeWidth,
+					["subtitleShadowColor"] = _settings.SubtitleShadowColorHex,
+					["subtitleShadowDepth"] = _settings.SubtitleShadowDepth,
+					["subtitleGlowBlur"] = _settings.SubtitleGlowBlur,
+					["subtitleBorderStyle"] = _settings.SubtitleBorderStyle,
+					["subtitlePanelColor"] = _settings.SubtitleScrollPanelColorHex,
+					["subtitlePanelOpacity"] = _settings.SubtitleScrollPanelOpacity,
 					["subtitleFontSize"] = _settings.SubtitleFontSize,
 					["subtitleVerticalPercent"] = _settings.SubtitleVerticalPercent,
 					["subtitleOffsetX"] = _settings.SubtitleOffsetX,
@@ -2788,6 +2863,190 @@ namespace VideoBatchMerger.ScriptBatch
 				if (r.Tag == item) return r;
 			}
 			return null;
+		}
+
+		private void CloseVideoPreview()
+		{
+			_isPreviewPlaying = false;
+			if (_videoPreviewView != null && !_videoPreviewView.IsDisposed)
+			{
+				_videoPreviewView.Visible = false;
+				try { _videoPreviewView.CoreWebView2?.Navigate("about:blank"); } catch { }
+			}
+			if (_btnPlayPreview != null)
+			{
+				_btnPlayPreview.Text = "▶ 实机播放";
+				_btnPlayPreview.BackColor = AccentGreen;
+			}
+		}
+
+		private async Task StartOrStopVideoPreviewAsync()
+		{
+			if (_isPreviewRendering)
+			{
+				_previewCts?.Cancel();
+				_lblStatusText.Text = "正在取消手机预览生成...";
+				return;
+			}
+			if (_isPreviewPlaying)
+			{
+				CloseVideoPreview();
+				UpdatePreview();
+				return;
+			}
+			if (_isProcessing)
+			{
+				MessageBox.Show(this, "批量生产期间请等待当前任务完成后再播放预览。", "提示");
+				return;
+			}
+			SyncGridEditsToItems();
+			ScriptBatchItem sourceItem = null;
+			if (_grid.SelectedRows.Count > 0 && _grid.SelectedRows[0].Tag is ScriptBatchItem selItem && !string.IsNullOrWhiteSpace(selItem.ScriptText))
+			{
+				sourceItem = selItem;
+			}
+			else if (_grid.CurrentRow?.Tag is ScriptBatchItem curItem && !string.IsNullOrWhiteSpace(curItem.ScriptText))
+			{
+				sourceItem = curItem;
+			}
+			else
+			{
+				sourceItem = _items.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.ScriptText));
+			}
+
+			if (sourceItem == null)
+			{
+				sourceItem = new ScriptBatchItem
+				{
+					Id = 999,
+					ScriptCode = "DEMO",
+					ChineseTitle = "示例预览",
+					Title = "示例预览",
+					ScriptText = "Amém! Deus abençoe sua família hoje e sempre. Digite Amém nos comentários!"
+				};
+			}
+
+			SaveSettings();
+			if (_settings.BgmEnabled && !string.IsNullOrWhiteSpace(_settings.BgmPath) && !ScriptBatchComposer.HasUsableBgmSource(_settings.BgmPath))
+			{
+				MessageBox.Show(this, "背景音乐路径无可用音频，请先修正或关闭背景音乐。", "预览无法开始");
+				return;
+			}
+
+			string effectiveVoice = string.IsNullOrWhiteSpace(sourceItem.VoiceKey)
+				? (string.Equals(_settings.TtsEngine, "elevenlabs", StringComparison.OrdinalIgnoreCase) ? _settings.ElevenLabsVoice : _settings.DefaultVoice)
+				: sourceItem.VoiceKey;
+			string currentScriptKey = $"{_settings.TtsEngine}|{effectiveVoice}|{_settings.SpeechRate}|{_settings.SpeechPitch}|{sourceItem.ScriptText?.Trim()}";
+
+			var item = new ScriptBatchItem
+			{
+				Id = sourceItem.Id,
+				ScriptCode = sourceItem.ScriptCode,
+				ChineseTitle = sourceItem.ChineseTitle,
+				Title = sourceItem.Title,
+				ScriptText = sourceItem.ScriptText,
+				VoiceKey = sourceItem.VoiceKey
+			};
+
+			if (!string.IsNullOrEmpty(sourceItem.AudioPath) && File.Exists(sourceItem.AudioPath) &&
+			    !string.IsNullOrEmpty(sourceItem.SrtPath) && File.Exists(sourceItem.SrtPath))
+			{
+				item.AudioPath = sourceItem.AudioPath;
+				item.SrtPath = sourceItem.SrtPath;
+			}
+			else if (string.Equals(_cachedPreviewScriptKey, currentScriptKey, StringComparison.Ordinal) &&
+			         !string.IsNullOrEmpty(_cachedPreviewAudioPath) && File.Exists(_cachedPreviewAudioPath) &&
+			         !string.IsNullOrEmpty(_cachedPreviewSrtPath) && File.Exists(_cachedPreviewSrtPath))
+			{
+				item.AudioPath = _cachedPreviewAudioPath;
+				item.SrtPath = _cachedPreviewSrtPath;
+			}
+
+			string previewDir = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_Previews");
+			Directory.CreateDirectory(previewDir);
+			foreach (string oldFile in Directory.EnumerateFiles(previewDir, "preview_*"))
+			{
+				try
+				{
+					if (File.GetLastWriteTimeUtc(oldFile) < DateTime.UtcNow.AddDays(-1) ||
+						string.Equals(oldFile, _lastPreviewVideoPath, StringComparison.OrdinalIgnoreCase) ||
+						string.Equals(oldFile, _lastPreviewHtmlPath, StringComparison.OrdinalIgnoreCase))
+						File.Delete(oldFile);
+				}
+				catch { }
+			}
+			string previewId = Guid.NewGuid().ToString("N");
+			string videoPath = Path.Combine(previewDir, $"preview_{previewId}.mp4");
+			_previewCts = new CancellationTokenSource();
+			_isPreviewRendering = true;
+			_btnPlayPreview.Text = "⏹ 取消生成";
+			_btnPlayPreview.BackColor = AccentOrange;
+			_lblStatusText.Text = "正在合成手机预览片段...";
+			try
+			{
+				void ShowProgress(int percent, string message)
+				{
+					if (IsHandleCreated && !IsDisposed)
+						BeginInvoke((MethodInvoker)(() => _lblStatusText.Text = $"手机预览 {percent}%：{message}"));
+				}
+				bool ready = await ScriptBatchComposer.ProcessItemAsync(
+					item, _settings, _footageFiles, previewDir, ShowProgress,
+					_previewCts.Token, _settings.PreviewDurationSeconds, videoPath);
+				if (_previewCts.IsCancellationRequested || !ready || !File.Exists(videoPath))
+				{
+					if (_previewCts.IsCancellationRequested) _lblStatusText.Text = "已取消手机预览生成。";
+					if (!_previewCts.IsCancellationRequested)
+						MessageBox.Show(this, string.IsNullOrWhiteSpace(item.ErrorMessage) ? "预览视频合成失败，请检查配音、素材和 FFmpeg 设置。" : item.ErrorMessage, "预览失败");
+					return;
+				}
+				if (!string.IsNullOrEmpty(item.AudioPath) && File.Exists(item.AudioPath) &&
+				    !string.IsNullOrEmpty(item.SrtPath) && File.Exists(item.SrtPath))
+				{
+					_cachedPreviewScriptKey = currentScriptKey;
+					_cachedPreviewAudioPath = item.AudioPath;
+					_cachedPreviewSrtPath = item.SrtPath;
+				}
+				if (_videoPreviewView == null || _videoPreviewView.IsDisposed)
+					throw new InvalidOperationException("手机视频播放控件不可用。");
+				var playbackEnvironment = await CoreWebView2Environment.CreateAsync(
+					null, Path.Combine(Path.GetTempPath(), "VideoBatchStudio_WebView2"));
+				await _videoPreviewView.EnsureCoreWebView2Async(playbackEnvironment);
+				string htmlPath = Path.Combine(previewDir, $"preview_{previewId}.html");
+				string videoUrl = new Uri(videoPath).AbsoluteUri;
+				string html = "<!doctype html><meta charset=\"utf-8\"><style>html,body{margin:0;width:100%;height:100%;background:#070a12;overflow:hidden;display:flex;align-items:center;justify-content:center}video{width:100%;height:100%;object-fit:contain}</style>"
+					+ "<video src=\"" + videoUrl + "\" autoplay controls playsinline></video>";
+				File.WriteAllText(htmlPath, html, Encoding.UTF8);
+				_lastPreviewVideoPath = videoPath;
+				_lastPreviewHtmlPath = htmlPath;
+				_videoPreviewView.Source = new Uri(htmlPath);
+				_videoPreviewView.Visible = true;
+				_videoPreviewView.BringToFront();
+				_previewHeaderPanel?.SendToBack();
+				_previewBottomContainer?.SendToBack();
+				_isPreviewPlaying = true;
+				_btnPlayPreview.Text = "■ 关闭预览";
+				_btnPlayPreview.BackColor = Color.FromArgb(220, 38, 38);
+				_lblStatusText.Text = "正在手机面板播放实际合成画面；修改参数后可重新生成预览。";
+			}
+			catch (OperationCanceledException)
+			{
+				_lblStatusText.Text = "已取消手机预览生成。";
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(this, ex.Message, "手机预览失败");
+			}
+			finally
+			{
+				_isPreviewRendering = false;
+				if (!_isPreviewPlaying)
+				{
+					_btnPlayPreview.Text = "▶ 实机播放";
+					_btnPlayPreview.BackColor = AccentGreen;
+				}
+				_previewCts?.Dispose();
+				_previewCts = null;
+			}
 		}
 
 		private void PreviewSelectedVideo()
@@ -3493,6 +3752,74 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 			}
 
+			private void DrawBrightPhrasePreview(Graphics g, string text, Font font,
+				int screenX, int screenW, float centerY, float shiftX)
+			{
+				var phrases = ScriptBatchComposer.SplitBrightPhrases(text);
+				if (phrases.Count == 0) return;
+				string phrase = phrases[(int)(_subtitlePreviewClock.Elapsed.TotalSeconds / 1.5) % phrases.Count];
+				string wrapped = ScriptBatchComposer.WrapToShortLines(phrase, 18);
+				string[] lines = wrapped.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+				float scale = screenW / 1080f;
+				float lineHeight = font.GetHeight(g) * 1.12f;
+				float y = centerY - lines.Length * lineHeight / 2f;
+				var settings = _panel._settings;
+				Color main = ScriptBatchSettings.ParseToColor(settings.SubtitleColorHex, Color.White);
+				Color accent = ScriptBatchSettings.ParseToColor(settings.SubtitleHighlightTextColorHex, Color.Gold);
+				Color edge = ScriptBatchSettings.ParseToColor(settings.SubtitleStrokeColorHex, Color.FromArgb(146, 115, 75));
+				Color shadow = ScriptBatchSettings.ParseToColor(settings.SubtitleShadowColorHex, Color.FromArgb(198, 165, 120));
+				int opacity = Math.Max(0, Math.Min(255, (int)Math.Round(settings.SubtitleTextOpacity * 2.55)));
+				bool firstWord = true;
+				using var format = (StringFormat)StringFormat.GenericTypographic.Clone();
+				if (settings.SubtitleBorderStyle == 3)
+				{
+					float widest = lines.Max(line => g.MeasureString(line, font, PointF.Empty, format).Width);
+					float padding = Math.Max(10f * scale, font.Size * 0.18f);
+					var box = new RectangleF(screenX + (screenW - widest) / 2f + shiftX - padding,
+						y - padding, widest + padding * 2f, lines.Length * lineHeight + padding * 2f);
+					Color panel = ScriptBatchSettings.ParseToColor(settings.SubtitleScrollPanelColorHex, Color.FromArgb(248, 243, 230));
+					int panelOpacity = Math.Max(0, Math.Min(255, (int)Math.Round(settings.SubtitleScrollPanelOpacity * 2.55)));
+					using var brush = new SolidBrush(Color.FromArgb(panelOpacity, panel));
+					g.FillRectangle(brush, box);
+				}
+				foreach (string line in lines)
+				{
+					string[] words = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+					float space = g.MeasureString(" ", font, PointF.Empty, format).Width;
+					float rowWidth = words.Sum(word => g.MeasureString(word, font, PointF.Empty, format).Width) + Math.Max(0, words.Length - 1) * space;
+					float x = screenX + (screenW - rowWidth) / 2f + shiftX;
+					foreach (string word in words)
+					{
+						using var path = new GraphicsPath();
+						path.AddString(word, font.FontFamily, (int)font.Style, font.Size, new PointF(x, y), format);
+						if (settings.SubtitleGlowBlur > 0)
+						{
+							using var glowPen = new Pen(Color.FromArgb(38, shadow), Math.Max(2f, settings.SubtitleGlowBlur * scale * 2.2f)) { LineJoin = LineJoin.Round };
+							g.DrawPath(glowPen, path);
+						}
+						if (settings.SubtitleShadowDepth > 0)
+						{
+							using var shadowPath = (GraphicsPath)path.Clone();
+							using var matrix = new Matrix();
+							matrix.Translate(settings.SubtitleShadowDepth * scale, settings.SubtitleShadowDepth * scale);
+							shadowPath.Transform(matrix);
+							using var shadowBrush = new SolidBrush(shadow);
+							g.FillPath(shadowBrush, shadowPath);
+						}
+						if (settings.SubtitleStrokeWidth > 0)
+						{
+							using var pen = new Pen(edge, Math.Max(0.5f, settings.SubtitleStrokeWidth * scale)) { LineJoin = LineJoin.Round };
+							g.DrawPath(pen, path);
+						}
+						using var fill = new SolidBrush(Color.FromArgb(opacity, firstWord ? accent : main));
+						g.FillPath(fill, path);
+						x += g.MeasureString(word, font, PointF.Empty, format).Width + space;
+						firstWord = false;
+					}
+					y += lineHeight;
+				}
+			}
+
 			private void DrawScrollingSubtitlePreview(Graphics g, string text, SubtitlePreset preset, Font font,
 				int screenX, int screenY, int screenW, int screenH, float baseline, float shiftX)
 			{
@@ -3666,9 +3993,8 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 
 				// 2.3 绘制字幕文字与底框 (支持预设库样式与 XY 偏移)
-				var preset = SubtitlePresetCatalog.GetById(_panel._settings.SubtitleStyleId);
+				var preset = SubtitlePresetCatalog.CreatePreviewPreset(_panel._settings);
 				int displayMode = _panel._settings.SubtitleDisplayMode;
-				if (displayMode != 4 && preset.DisplayMode == 3) displayMode = 3;
 
 				float posPercent = _panel._settings.SubtitleVerticalPercent / 100f;
 				float subCenterY = screenY + (screenH * posPercent);
@@ -3682,11 +4008,15 @@ namespace VideoBatchMerger.ScriptBatch
 				string fontName = string.IsNullOrWhiteSpace(_panel._settings.SubtitleFontFamily) ? "Arial" : _panel._settings.SubtitleFontFamily;
 				using var font = new Font(fontName, previewFontSize, FontStyle.Bold, GraphicsUnit.Pixel);
 
-				if (displayMode == 4)
+				if (displayMode == 5)
+				{
+					DrawBrightPhrasePreview(g, sampleText, font, screenX, screenW, subCenterY, subShiftX);
+				}
+				else if (displayMode == 4)
 				{
 					DrawScrollingSubtitlePreview(g, sampleText, preset, font, screenX, screenY, screenW, screenH, subCenterY, subShiftX);
 				}
-				else if (displayMode == 3) // 逐词红底框高亮 (图1效果：短句排版，红底框+黄字，白字粗黑边)
+				else if (displayMode == 1 || displayMode == 3)
 				{
 					string wrapped = ScriptBatchComposer.WrapToShortLines(sampleText, 16);
 					string[] subLines = wrapped.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -3727,9 +4057,20 @@ namespace VideoBatchMerger.ScriptBatch
 								float padBoxX = 8f * scale + 4f;
 								float padBoxY = 3f * scale + 2f;
 								var boxRect = new RectangleF(wordX - padBoxX, curY - padBoxY, wW + padBoxX * 2, lineH + padBoxY * 2);
-								using var bgBrush = new SolidBrush(preset.PreviewHighlightBgColor);
-								using var boxPath = GetRoundedRectPath(boxRect, Math.Max(3f, 6f * scale));
-								g.FillPath(bgBrush, boxPath);
+								if (displayMode == 3 && _panel._settings.SubtitleHighlightBoxEnabled)
+								{
+									using var bgBrush = new SolidBrush(Color.FromArgb(
+										Math.Max(0, Math.Min(255, (int)Math.Round(_panel._settings.SubtitleHighlightBoxOpacity * 2.55))), preset.PreviewHighlightBgColor));
+									using var boxPath = GetRoundedRectPath(boxRect, Math.Max(3f, 6f * scale));
+									g.FillPath(bgBrush, boxPath);
+								}
+								if ((displayMode == 1 || !_panel._settings.SubtitleHighlightBoxEnabled) && preset.OutlineWidth > 0)
+								{
+									using var highlightPath = new GraphicsPath();
+									highlightPath.AddString(word, font.FontFamily, (int)font.Style, font.Size, new PointF(wordX, curY), StringFormat.GenericDefault);
+									using var highlightPen = new Pen(preset.PreviewStrokeColor, Math.Max(1f, preset.OutlineWidth * scale)) { LineJoin = LineJoin.Round };
+									g.DrawPath(highlightPen, highlightPath);
+								}
 
 								using var hlBrush = new SolidBrush(preset.PreviewHighlightTextColor);
 								g.DrawString(word, font, hlBrush, wordX, curY);

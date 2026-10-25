@@ -270,9 +270,19 @@ class PreviewStage {
     renderSubtitles(ctx, w, h, scale) {
         const displayMode = Number(this.state.subtitleDisplayMode || 0);
         const fullText = this.state.subtitleText || "Senhora que está segurando um telefone, você é abençoada.";
-        const text = displayMode === 3 ? fullText.trim().split(/\s+/).slice(0, 4).join(' ') : fullText;
+        const text = (displayMode === 1 || displayMode === 3) ? fullText.trim().split(/\s+/).slice(0, 4).join(' ') : fullText;
         const styleId = this.state.subtitleStyleId || "焦糖橙底框高亮";
-        const preset = (window.findPreset && window.findPreset(styleId)) || (window.VIDEOKIT_PRESETS && window.VIDEOKIT_PRESETS[styleId]) || window.VIDEOKIT_PRESETS["默认白字"] || {};
+        const basePreset = (window.findPreset && window.findPreset(styleId)) || (window.VIDEOKIT_PRESETS && window.VIDEOKIT_PRESETS[styleId]) || window.VIDEOKIT_PRESETS["默认白字"] || {};
+        const preset = {
+            ...basePreset,
+            color_text: this.state.subtitleTextColor || basePreset.color_text || '#FFFFFF',
+            color_outline: this.state.subtitleStrokeColor || basePreset.color_outline,
+            border_width: Number(this.state.subtitleStrokeWidth ?? basePreset.border_width ?? 0),
+            use_stroke: Number(this.state.subtitleStrokeWidth ?? basePreset.border_width ?? 0) > 0,
+            use_box: Number(this.state.subtitleBorderStyle ?? 1) === 3,
+            color_bg: this.state.subtitlePanelColor || basePreset.color_bg,
+            opacity_bg: Math.round(Number(this.state.subtitlePanelOpacity ?? 62) * 2.55)
+        };
 
         const fontSize = Math.max(10, (this.state.subtitleFontSize || preset.fontsize || 86) * scale);
         const fontFamily = this.state.subtitleFontFamily || preset.font_family || 'Arial, -apple-system, sans-serif';
@@ -336,6 +346,10 @@ class PreviewStage {
         ctx.translate(subCenterX, subCenterY);
         ctx.scale(animScale, animScale);
         ctx.translate(-subCenterX, -subCenterY);
+        ctx.shadowColor = this.state.subtitleShadowColor || 'transparent';
+        ctx.shadowOffsetX = Number(this.state.subtitleShadowDepth || 0) * scale;
+        ctx.shadowOffsetY = Number(this.state.subtitleShadowDepth || 0) * scale;
+        ctx.shadowBlur = Number(this.state.subtitleGlowBlur || 0) * scale;
 
         let globalWordIndex = 0;
         const wordCount = text.trim().split(/\s+/).length;
@@ -345,24 +359,39 @@ class PreviewStage {
             const metrics = ctx.measureText(line);
             const lineW = metrics.width;
 
-            if (displayMode === 3) {
+            if (displayMode === 1 || displayMode === 3) {
                 const lineWords = line.trim().split(/\s+/);
                 ctx.textAlign = 'left';
                 const spaceW = ctx.measureText(' ').width;
                 let x = subCenterX - lineW / 2;
                 for (const word of lineWords) {
                     const wordW = ctx.measureText(word).width;
-                    if (globalWordIndex === activeWordIndex) {
+                    const isActive = globalWordIndex === activeWordIndex;
+                    if (isActive) {
                         const padX = 10 * scale;
                         const padY = 5 * scale;
-                        ctx.fillStyle = this.state.subtitleHighlightBgColor || '#D01010';
-                        this.drawRoundedRect(ctx, x - padX, lineY - fontSize / 2 - padY, wordW + 2 * padX, fontSize + 2 * padY, 5 * scale);
-                        ctx.fill();
+                        if (displayMode === 3 && this.state.subtitleHighlightBoxEnabled !== false) {
+                            ctx.save();
+                            ctx.globalAlpha = Math.max(0.1, Math.min(1, Number(this.state.subtitleHighlightBoxOpacity || 100) / 100));
+                            ctx.fillStyle = this.state.subtitleHighlightBgColor || '#D01010';
+                            this.drawRoundedRect(ctx, x - padX, lineY - fontSize / 2 - padY, wordW + 2 * padX, fontSize + 2 * padY, 5 * scale);
+                            ctx.fill();
+                            ctx.restore();
+                        }
                         ctx.fillStyle = this.state.subtitleHighlightTextColor || '#FFD700';
                     } else {
                         ctx.fillStyle = preset.color_text || '#FFFFFF';
                     }
+                    if ((!isActive || displayMode === 1 || this.state.subtitleHighlightBoxEnabled === false) && preset.use_stroke && preset.border_width > 0) {
+                        ctx.strokeStyle = preset.color_outline || '#6488A8';
+                        ctx.lineWidth = Math.max(1, preset.border_width * scale);
+                        ctx.lineJoin = 'round';
+                        ctx.strokeText(word, x, lineY);
+                    }
+                    ctx.save();
+                    ctx.globalAlpha = Math.max(0.2, Math.min(1, Number(this.state.subtitleTextOpacity || 100) / 100));
                     ctx.fillText(word, x, lineY);
+                    ctx.restore();
                     x += wordW + spaceW;
                     globalWordIndex++;
                 }
@@ -407,7 +436,10 @@ class PreviewStage {
 
             // 3) 绘制文字主体与高亮
             ctx.fillStyle = preset.color_text || '#FFFFFF';
+            ctx.save();
+            ctx.globalAlpha = Math.max(0.2, Math.min(1, Number(this.state.subtitleTextOpacity || 100) / 100));
             ctx.fillText(line, subCenterX, lineY);
+            ctx.restore();
         });
 
         ctx.restore();
