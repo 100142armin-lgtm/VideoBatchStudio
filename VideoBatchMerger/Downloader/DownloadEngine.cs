@@ -110,6 +110,10 @@ public sealed class DownloadEngine
 			catch { }
 		}
 
+		// 若未单独安装 ffprobe.exe，自动回退使用已就绪的内置 ffmpeg.exe（软件全流程通过 ffmpeg -i 完成流探测）
+		string ffmpegFallback = FindFFmpegPath();
+		if (!string.IsNullOrEmpty(ffmpegFallback) && File.Exists(ffmpegFallback)) return ffmpegFallback;
+
 		return string.Empty;
 	}
 
@@ -312,6 +316,11 @@ public sealed class DownloadEngine
 			return false;
 		}
 
+		if (string.IsNullOrEmpty(ffmpegPath) || !File.Exists(ffmpegPath))
+		{
+			ffmpegPath = FindFFmpegPath();
+		}
+
 		item.Status = "下载中";
 		item.ProgressPercent = 0;
 		logCallback?.Invoke($"[启动下载] [{item.Platform}] {item.Url}");
@@ -450,6 +459,13 @@ public sealed class DownloadEngine
 				}
 				catch { }
 			}
+
+			if (quality != "audio" && !string.IsNullOrEmpty(item.SaveFilePath) && File.Exists(item.SaveFilePath))
+			{
+				await EnsureUniversalH264VideoAsync(item, ffmpegPath, logCallback, ct);
+			}
+
+			item.Status = "成功";
 			logCallback?.Invoke($"[下载完成] 成功保存: {item.SaveFilePath}");
 			return true;
 		}
@@ -634,6 +650,107 @@ public sealed class DownloadEngine
 		}
 	}
 
+	/// <summary>
+	/// 检测落盘视频是否为 AV1 (av01) 或 VP9 等 Windows 默认播放器不兼容的编码；
+	/// 若是，则自动调用内置 FFmpeg 极速转码为全平台通用的 H.264 (yuv420p) + AAC MP4，杜绝“有声无画”现象。
+	/// </summary>
+	private static async Task EnsureUniversalH264VideoAsync(
+		DownloadItem item,
+		string ffmpegPath,
+		Action<string> logCallback,
+		CancellationToken ct)
+	{
+		if (string.IsNullOrEmpty(ffmpegPath) || !File.Exists(ffmpegPath)) return;
+		if (item == null || string.IsNullOrEmpty(item.SaveFilePath) || !File.Exists(item.SaveFilePath)) return;
+
+		try
+		{
+			var probePsi = new ProcessStartInfo
+			{
+				FileName = ffmpegPath,
+				Arguments = $"-hide_banner -i {ScriptBatch.ScriptBatchComposer.QuoteArg(item.SaveFilePath)}",
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardError = true,
+				StandardErrorEncoding = Encoding.UTF8
+			};
+
+			string info;
+			using (var probeProc = new Process { StartInfo = probePsi })
+			{
+				probeProc.Start();
+				info = await probeProc.StandardError.ReadToEndAsync();
+				await Task.Run(() => probeProc.WaitForExit(8000), ct);
+			}
+
+			var vMatch = Regex.Match(info ?? string.Empty, @"Stream\s+#\d+:\d+.*?Video:\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
+			if (!vMatch.Success) return;
+
+			string vcodec = vMatch.Groups[1].Value.ToLowerInvariant();
+			if (vcodec == "h264" || vcodec == "avc1")
+			{
+				return;
+			}
+
+			item.Status = "转码H.264画面中...";
+			logCallback?.Invoke($"[兼容转码] 检测到原始视频流为 {vcodec.ToUpperInvariant()} 编码，正在自动转换为全平台通用的 H.264 高清画面...");
+
+			string dir = Path.GetDirectoryName(item.SaveFilePath) ?? Path.GetTempPath();
+			string nameNoExt = Path.GetFileNameWithoutExtension(item.SaveFilePath);
+			string tempOut = Path.Combine(dir, $"{nameNoExt}.h264_temp_{Guid.NewGuid():N}.mp4");
+
+			var convPsi = new ProcessStartInfo
+			{
+				FileName = ffmpegPath,
+				Arguments = $"-hide_banner -y -i {ScriptBatch.ScriptBatchComposer.QuoteArg(item.SaveFilePath)} -map 0:v:0 -map 0:a:0? -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart {ScriptBatch.ScriptBatchComposer.QuoteArg(tempOut)}",
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardError = true,
+				StandardErrorEncoding = Encoding.UTF8
+			};
+
+			using (var convProc = new Process { StartInfo = convPsi })
+			{
+				convProc.Start();
+				var errTask = convProc.StandardError.ReadToEndAsync();
+				using (ct.Register(() =>
+				{
+					try { if (!convProc.HasExited) convProc.Kill(); } catch { }
+				}))
+				{
+					await Task.Run(() => convProc.WaitForExit(), ct);
+				}
+				await errTask;
+
+				if (convProc.ExitCode == 0 && File.Exists(tempOut) && new FileInfo(tempOut).Length > 1024)
+				{
+					string finalMp4 = Path.ChangeExtension(item.SaveFilePath, ".mp4");
+					try
+					{
+						File.Delete(item.SaveFilePath);
+					}
+					catch { }
+					if (File.Exists(finalMp4))
+					{
+						try { File.Delete(finalMp4); } catch { }
+					}
+					File.Move(tempOut, finalMp4);
+					item.SaveFilePath = finalMp4;
+					item.FileSizeStr = $"{new FileInfo(finalMp4).Length / (1024.0 * 1024.0):F1} MB";
+					logCallback?.Invoke($"[兼容转码完成] 已转换为标准 H.264 + AAC 编码 ({item.FileSizeStr})，所有播放器均可正常播放画面与声音。");
+				}
+				else
+				{
+					try { if (File.Exists(tempOut)) File.Delete(tempOut); } catch { }
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			logCallback?.Invoke($"[兼容转码提示] {ex.Message}");
+		}
+	}
+
 	private static string BuildYtDlpArgs(
 		string url,
 		string quality,
@@ -662,20 +779,20 @@ public sealed class DownloadEngine
 			// 自动挂载 node.js 运行时以应对复杂的 YouTube 签名加密挑战
 			sb.Append("--js-runtimes node ");
 
-			// 画质选择：优先选取包含完整原生原声（原音+人声伴奏混合音轨）的流，避免单独拉取了平台伴奏BGM音频；优先直连 HTTP/HTTPS 流避开 403 阻断
+			// 画质与编码选择：优先选取 H.264 (avc1) + AAC (m4a) 标准编码，同时保留包含完整原声的高清流并合并为 mp4
 			switch (quality)
 			{
 				case "1080p":
-					sb.Append("-f \"b[height<=1080][acodec!=none]/bv*[height<=1080][acodec!=none]/bv*[height<=1080][protocol^=http]+ba[protocol^=http]/bv*[height<=1080]+ba/b[height<=1080]/b\" ");
+					sb.Append("-S \"res:1080,vcodec:h264,acodec:m4a\" --merge-output-format mp4 -f \"bv*[height<=1920]+ba/b[height<=1920]/bv*+ba/b\" ");
 					break;
 				case "720p":
-					sb.Append("-f \"b[height<=720][acodec!=none]/bv*[height<=720][acodec!=none]/bv*[height<=720][protocol^=http]+ba[protocol^=http]/bv*[height<=720]+ba/b[height<=720]/b\" ");
+					sb.Append("-S \"res:720,vcodec:h264,acodec:m4a\" --merge-output-format mp4 -f \"bv*[height<=1280]+ba/b[height<=1280]/bv*+ba/b\" ");
 					break;
 				case "audio":
 					sb.Append("-x --audio-format mp3 ");
 					break;
 				default: // best
-					sb.Append("-f \"b[acodec!=none]/bv*[acodec!=none]/bv*[protocol^=http]+ba[protocol^=http]/bv*+ba/b\" ");
+					sb.Append("-S \"res,vcodec:h264,acodec:m4a\" --merge-output-format mp4 -f \"bv*+ba/b\" ");
 					break;
 			}
 
