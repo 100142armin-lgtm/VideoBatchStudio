@@ -67,17 +67,20 @@ jobs:
           Remove-Item -Path "staging/VideoBatchStudio/*.key" -Force -ErrorAction SilentlyContinue
           Remove-Item -Path "staging/VideoBatchStudio/*.pdb" -Force -ErrorAction SilentlyContinue
 
-          # Copy launcher helper for auto-unblock
+          # Ensure all staging files use UTF-8 safe ASCII filenames in zip archive to prevent corrupt characters on English/US runners
           if (Test-Path "双击启动软件.bat") {
-            Copy-Item -Path "双击启动软件.bat" -Destination "staging/VideoBatchStudio/" -Force
+            Copy-Item -Path "双击启动软件.bat" -Destination "staging/VideoBatchStudio/双击启动软件.bat" -Force
+            Copy-Item -Path "双击启动软件.bat" -Destination "staging/VideoBatchStudio/Start_VideoBatchStudio.bat" -Force
           }
 
           # Copy fonts and documentation
           if (Test-Path "fonts") {
             Copy-Item -Path "fonts" -Destination "staging/VideoBatchStudio/fonts" -Recurse -Force
           }
-          Copy-Item -Path "完整使用说明.md" -Destination "staging/VideoBatchStudio/" -Force -ErrorAction SilentlyContinue
-          Copy-Item -Path "使用说明.txt" -Destination "staging/VideoBatchStudio/" -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "完整使用说明.md" -Destination "staging/VideoBatchStudio/完整使用说明.md" -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "完整使用说明.md" -Destination "staging/VideoBatchStudio/INSTRUCTIONS.md" -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "使用说明.txt" -Destination "staging/VideoBatchStudio/使用说明.txt" -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "使用说明.txt" -Destination "staging/VideoBatchStudio/README_CN.txt" -Force -ErrorAction SilentlyContinue
           Copy-Item -Path "THIRD_PARTY_NOTICES.txt" -Destination "staging/VideoBatchStudio/" -Force -ErrorAction SilentlyContinue
           Copy-Item -Path "README.md" -Destination "staging/VideoBatchStudio/" -Force -ErrorAction SilentlyContinue
 

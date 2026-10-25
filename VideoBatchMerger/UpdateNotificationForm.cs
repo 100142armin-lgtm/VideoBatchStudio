@@ -396,7 +396,8 @@ internal sealed class UpdateNotificationForm : Form
 					continue;
 				}
 				string parent = Path.GetDirectoryName(target);
-				if (string.IsNullOrEmpty(parent) || !parent.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+				string parentWithSlash = (parent ?? string.Empty).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+				if (string.IsNullOrEmpty(parent) || !parentWithSlash.StartsWith(root, StringComparison.OrdinalIgnoreCase))
 					throw new InvalidDataException("更新包包含异常文件路径，已拒绝解压。");
 				Directory.CreateDirectory(parent);
 				using (Stream input = entry.Open())
