@@ -60,6 +60,11 @@ jobs:
           Remove-Item -Path "staging/VideoBatchStudio/*.key" -Force -ErrorAction SilentlyContinue
           Remove-Item -Path "staging/VideoBatchStudio/*.pdb" -Force -ErrorAction SilentlyContinue
 
+          # Copy launcher helper for auto-unblock
+          if (Test-Path "双击启动软件.bat") {
+            Copy-Item -Path "双击启动软件.bat" -Destination "staging/VideoBatchStudio/" -Force
+          }
+
           # Copy fonts and documentation
           if (Test-Path "fonts") {
             Copy-Item -Path "fonts" -Destination "staging/VideoBatchStudio/fonts" -Recurse -Force

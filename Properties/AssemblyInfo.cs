@@ -1,8 +1,19 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
-[assembly: AssemblyTitle("视频批处理工具 V9.4.0")]
-[assembly: AssemblyProduct("视频批处理工具")]
-[assembly: AssemblyFileVersion("9.4.0.0")]
-[assembly: AssemblyDescription("专业视频合并、拆分、水印、视频下载、视频拼屏、多轨剪辑、短视频贴片包装、交付终审与硬件加速批处理工具")]
+[assembly: AssemblyTitle("VideoBatchStudio")]
+[assembly: AssemblyDescription("VideoBatchStudio Professional Batch Video Creator & Automation Studio")]
+[assembly: AssemblyConfiguration("")]
+[assembly: AssemblyCompany("VideoBatchStudio Team")]
+[assembly: AssemblyProduct("VideoBatchStudio")]
+[assembly: AssemblyCopyright("Copyright © 2026 VideoBatchStudio")]
+[assembly: AssemblyTrademark("VideoBatchStudio")]
+[assembly: AssemblyCulture("")]
+
+[assembly: ComVisible(false)]
+[assembly: Guid("b294e6c1-a8e5-4f77-98c2-3e284a1e940a")]
+
 [assembly: AssemblyVersion("9.4.0.0")]
+[assembly: AssemblyFileVersion("9.4.0.0")]
+[assembly: AssemblyInformationalVersion("9.4.0")]
