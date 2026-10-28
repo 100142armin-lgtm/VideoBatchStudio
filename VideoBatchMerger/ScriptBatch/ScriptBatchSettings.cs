@@ -135,6 +135,7 @@ namespace VideoBatchMerger.ScriptBatch
 		public bool WatermarkEnabled { get; set; } = false;
 		public int WatermarkType { get; set; } = 0; // 0: 文字水印, 1: 图片水印
 		public string WatermarkText { get; set; } = "Voice: ElevenLabs";
+		public string WatermarkFontFamily { get; set; } = "Arial";
 		public string WatermarkTextColorHex { get; set; } = "#FFFFFF";
 		public int WatermarkTextOpacity { get; set; } = 80; // 10% ~ 100%
 		public int WatermarkFontSize { get; set; } = 28;    // 16 ~ 72 px
@@ -294,6 +295,7 @@ namespace VideoBatchMerger.ScriptBatch
 						if (loaded.SubtitleHighlightBoxOpacity <= 0) loaded.SubtitleHighlightBoxOpacity = 95;
 						if (loaded.SubtitleScrollPanelOpacity <= 0) loaded.SubtitleScrollPanelOpacity = 62;
 						if (string.IsNullOrWhiteSpace(loaded.SubtitleFontFamily)) loaded.SubtitleFontFamily = "Arial Rounded MT Bold";
+						if (string.IsNullOrWhiteSpace(loaded.WatermarkFontFamily)) loaded.WatermarkFontFamily = "Arial";
 						return loaded;
 					}
 				}

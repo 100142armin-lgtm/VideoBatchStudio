@@ -375,7 +375,7 @@ namespace VideoBatchMerger.ScriptBatch
 						{
 							string text = string.IsNullOrWhiteSpace(settings.WatermarkText) ? "Voice: ElevenLabs" : settings.WatermarkText.Trim();
 							int fontSize = Math.Max(16, settings.WatermarkFontSize);
-							string fontName = string.IsNullOrWhiteSpace(settings.SubtitleFontFamily) ? "Arial" : settings.SubtitleFontFamily;
+							string fontName = string.IsNullOrWhiteSpace(settings.WatermarkFontFamily) ? "Arial" : settings.WatermarkFontFamily;
 
 							using (var font = new Font(fontName, fontSize, FontStyle.Bold, GraphicsUnit.Pixel))
 							{

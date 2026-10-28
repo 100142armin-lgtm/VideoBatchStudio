@@ -472,7 +472,7 @@ class PreviewStage {
             const opacity = Math.max(0.1, (this.state.watermarkTextOpacity || 80) / 100.0);
 
             vctx.save();
-            vctx.font = `bold ${fontSize}px "Microsoft YaHei", Arial, sans-serif`;
+            vctx.font = `bold ${fontSize}px "${this.state.watermarkFontFamily || 'Arial'}", Arial, sans-serif`;
             vctx.textBaseline = 'top';
 
             // 支持手动回车换行与超长行自动折行，保证长文本不溢出画面边缘

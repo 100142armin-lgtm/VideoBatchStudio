@@ -2296,7 +2296,8 @@ namespace VideoBatchMerger.ScriptBatch
 					["watermarkEnabled"] = _settings.WatermarkEnabled,
 					["watermarkType"] = _settings.WatermarkType,
 					["watermarkText"] = _settings.WatermarkText,
-					["watermarkFontSize"] = _settings.WatermarkFontSize,
+						["watermarkFontSize"] = _settings.WatermarkFontSize,
+						["watermarkFontFamily"] = _settings.WatermarkFontFamily,
 					["watermarkTextColorHex"] = _settings.WatermarkTextColorHex,
 					["watermarkTextOpacity"] = _settings.WatermarkTextOpacity,
 					["watermarkImagePath"] = _settings.WatermarkImagePath,
@@ -4327,7 +4328,7 @@ namespace VideoBatchMerger.ScriptBatch
 					{
 						string wmText = string.IsNullOrWhiteSpace(_panel._settings.WatermarkText) ? "Voice: ElevenLabs" : _panel._settings.WatermarkText;
 						float wmFontSize = Math.Max(8f, _panel._settings.WatermarkFontSize * scale);
-						string wmFontName = string.IsNullOrWhiteSpace(_panel._settings.SubtitleFontFamily) ? "Arial" : _panel._settings.SubtitleFontFamily;
+						string wmFontName = string.IsNullOrWhiteSpace(_panel._settings.WatermarkFontFamily) ? "Arial" : _panel._settings.WatermarkFontFamily;
 						using var wmFont = new Font(wmFontName, wmFontSize, FontStyle.Bold, GraphicsUnit.Pixel);
 
 						float maxWmWidth = Math.Max(60f, wmCanvasW * 0.85f - offX);

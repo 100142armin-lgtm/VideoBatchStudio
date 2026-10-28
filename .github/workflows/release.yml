@@ -150,33 +150,13 @@ jobs:
         with:
           subject-path: 'release_assets/*'
 
-      - name: Create Release
+      - name: Create or Update Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release_assets/*
-          generate_release_notes: true
-
-      - name: Refresh existing v9.4.0 download files
-        if: github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload v9.4.0 release_assets/VideoBatchStudio.exe release_assets/VideoBatchStudio_Portable.zip --clobber
-
-          # Confirm both public release assets are the bytes just built by this run.
-          $names = @('VideoBatchStudio.exe', 'VideoBatchStudio_Portable.zip')
-          $matched = $false
-          for ($attempt = 0; $attempt -lt 6; $attempt++) {
-            $release = gh api "repos/${{ github.repository }}/releases/tags/v9.4.0" | ConvertFrom-Json
-            $matched = $true
-            foreach ($name in $names) {
-              $asset = $release.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
-              $localHash = (Get-FileHash -Path "release_assets/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
-              if (-not $asset -or $asset.digest -ne "sha256:$localHash") { $matched = $false; break }
-            }
-            if ($matched) { break }
-            Start-Sleep -Seconds 5
-          }
-          if (-not $matched) { throw 'Release asset hashes do not match this build.' }
+          $tag = "${{ github.ref_name }}"
+          Write-Host "Publishing release assets for tag $tag..."
+          gh release upload $tag release_assets/VideoBatchStudio.exe release_assets/VideoBatchStudio_Portable.zip --clobber
+          Write-Host "Successfully overwritten release assets for $tag."
