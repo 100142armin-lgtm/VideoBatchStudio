@@ -44,10 +44,12 @@ namespace VideoBatchMerger.ScriptBatch
 			font.SelectedIndexChanged += (_, _) => { settings.SubtitleFontFamily = font.SelectedItem?.ToString() ?? "Arial"; Changed(); };
 			AddRow("字体", font);
 			AddNumber("字号 px", 24, 160, settings.SubtitleFontSize, 0, value => settings.SubtitleFontSize = (int)value);
+			AddCheck("文字加粗", settings.SubtitleBold, value => settings.SubtitleBold = value);
+			AddCheck("字幕全部大写（仅改变显示，不改变配音）", settings.SubtitleUppercase, value => settings.SubtitleUppercase = value);
 			AddColor("文字颜色", settings.SubtitleColorHex, color => settings.SubtitleColorHex = color);
 			AddNumber("文字不透明度 %", 20, 100, settings.SubtitleTextOpacity, 0, value => settings.SubtitleTextOpacity = (int)value);
 			AddColor("描边颜色", settings.SubtitleStrokeColorHex, color => settings.SubtitleStrokeColorHex = color);
-			AddNumber("描边粗细 px", 0, 12, (decimal)settings.SubtitleStrokeWidth, 1, value => settings.SubtitleStrokeWidth = (float)value);
+			AddNumber("描边粗细 px", 0, 40, (decimal)settings.SubtitleStrokeWidth, 1, value => settings.SubtitleStrokeWidth = (float)value);
 			AddColor("阴影颜色", settings.SubtitleShadowColorHex, color => settings.SubtitleShadowColorHex = color);
 			AddNumber("阴影距离 px", 0, 10, (decimal)settings.SubtitleShadowDepth, 1, value => settings.SubtitleShadowDepth = (float)value);
 			AddNumber("柔光强度", 0, 15, settings.SubtitleGlowBlur, 0, value => settings.SubtitleGlowBlur = (int)value);

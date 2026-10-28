@@ -61,6 +61,7 @@ namespace VideoBatchMerger.ScriptBatch
 		private ComboBox _cboSubtitleStyle;
 		private NumericUpDown _numSubtitleSize;
 		private ComboBox _cboSubtitleMode;
+		private CheckBox _chkSubtitleUppercase;
 		private CheckBox _chkSubtitleScrollPanel;
 		private TrackBar _trkSubtitlePos;
 		private Label _lblSubtitlePos;
@@ -1006,7 +1007,11 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					bool loading = _isLoadingSettings;
 					_isLoadingSettings = true;
-					try { _numSubtitleSize.Value = Math.Max(_numSubtitleSize.Minimum, Math.Min(_numSubtitleSize.Maximum, _settings.SubtitleFontSize)); }
+					try
+					{
+						_numSubtitleSize.Value = Math.Max(_numSubtitleSize.Minimum, Math.Min(_numSubtitleSize.Maximum, _settings.SubtitleFontSize));
+						_chkSubtitleUppercase.Checked = _settings.SubtitleUppercase;
+					}
 					finally { _isLoadingSettings = loading; }
 					UpdatePreview();
 				});
@@ -1048,6 +1053,22 @@ namespace VideoBatchMerger.ScriptBatch
 			};
 			subOptRow.Controls.Add(_cboSubtitleMode);
 			subFlow.Controls.Add(subOptRow);
+			_chkSubtitleUppercase = new CheckBox
+			{
+				Text = "字幕全部大写（仅改变画面文字）",
+				Checked = _settings.SubtitleUppercase,
+				ForeColor = TextPrimary,
+				AutoSize = true,
+				Margin = new Padding(0, 3, 0, 4)
+			};
+			_chkSubtitleUppercase.CheckedChanged += (_, _) =>
+			{
+				if (_isLoadingSettings) return;
+				_settings.SubtitleUppercase = _chkSubtitleUppercase.Checked;
+				_settings.Save();
+				UpdatePreview();
+			};
+			subFlow.Controls.Add(_chkSubtitleUppercase);
 			_chkSubtitleScrollPanel = new CheckBox
 			{
 				Text = "上滚字幕显示半透明底板",
@@ -1080,7 +1101,7 @@ namespace VideoBatchMerger.ScriptBatch
 			var stratRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
 			stratRow.Controls.Add(new Label { Text = "抽取策略: ", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(0, 4, 4, 0) });
 			_cboFootageStrategy = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 205, BackColor = InputBg, ForeColor = TextPrimary, FlatStyle = FlatStyle.Flat };
-			_cboFootageStrategy.Items.AddRange(new object[] { "🎲 智能去重随机抽选 (推荐)", "📁 按素材文件名顺序拼接" });
+			_cboFootageStrategy.Items.AddRange(new object[] { "🎲 智能去重随机抽选 (推荐)", "📁 按素材文件名顺序拼接", "🔁 单素材循环（批次不重复）" });
 			_cboFootageStrategy.SelectedIndexChanged += (_, _) => SaveSettings();
 			stratRow.Controls.Add(_cboFootageStrategy);
 			footageFlow.Controls.Add(stratRow);
@@ -1725,7 +1746,7 @@ namespace VideoBatchMerger.ScriptBatch
 				};
 
 				_cboCanvasRatio.SelectedIndex = (_settings.CanvasWidth == 1920 && _settings.CanvasHeight == 1080) ? 1 : 0;
-				_cboFootageStrategy.SelectedIndex = Math.Min(1, Math.Max(0, _settings.FootageStrategy));
+				_cboFootageStrategy.SelectedIndex = Math.Min(2, Math.Max(0, _settings.FootageStrategy));
 
 				_txtFootageFolder.Text = _settings.FootageFolderPath ?? "";
 				_chkBgmEnabled.Checked = _settings.BgmEnabled;
@@ -1746,6 +1767,7 @@ namespace VideoBatchMerger.ScriptBatch
 
 				_numSubtitleSize.Value = Math.Max(_numSubtitleSize.Minimum, Math.Min(_numSubtitleSize.Maximum, _settings.SubtitleFontSize));
 				_cboSubtitleMode.SelectedIndex = Math.Min(5, Math.Max(0, _settings.SubtitleDisplayMode));
+				_chkSubtitleUppercase.Checked = _settings.SubtitleUppercase;
 				_cboPreviewDuration.SelectedIndex = _settings.PreviewDurationSeconds == 8 ? 1 : _settings.PreviewDurationSeconds == 10 ? 2 : _settings.PreviewDurationSeconds == 0 ? 3 : 0;
 				_chkSubtitleScrollPanel.Checked = _settings.SubtitleScrollPanelEnabled;
 				_chkSubtitleScrollPanel.Visible = _settings.SubtitleDisplayMode == 4;
@@ -2232,6 +2254,7 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 
 				string wmImgDataUrl = "";
+				if (_settings.SubtitleUppercase) sampleText = sampleText.ToUpperInvariant();
 				if (!string.IsNullOrWhiteSpace(_settings.WatermarkImagePath) && File.Exists(_settings.WatermarkImagePath))
 				{
 					try
@@ -2268,6 +2291,7 @@ namespace VideoBatchMerger.ScriptBatch
 					["subtitleVerticalPercent"] = _settings.SubtitleVerticalPercent,
 					["subtitleOffsetX"] = _settings.SubtitleOffsetX,
 					["subtitleFontFamily"] = _settings.SubtitleFontFamily,
+					["subtitleBold"] = _settings.SubtitleBold,
 
 					["watermarkEnabled"] = _settings.WatermarkEnabled,
 					["watermarkType"] = _settings.WatermarkType,
@@ -2781,6 +2805,22 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 
 			SaveSettings();
+			List<string> singleFootageAssignments = null;
+			if (_settings.FootageStrategy == 2)
+			{
+				var candidates = (_footageFiles ?? new List<string>())
+					.Where(File.Exists)
+					.Select(Path.GetFullPath)
+					.Distinct(StringComparer.OrdinalIgnoreCase)
+					.OrderBy(_ => Guid.NewGuid())
+					.ToList();
+				singleFootageAssignments = await Task.Run(() => candidates.Where(ScriptBatchComposer.IsUsableFootage).ToList());
+				if (singleFootageAssignments.Count < _items.Count)
+				{
+					MessageBox.Show(this, $"单素材循环需要每条文案使用不同的视频。目前有 {_items.Count} 条文案，但只有 {singleFootageAssignments.Count} 个可用素材。请添加素材后重试。", "素材不足", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+					return;
+				}
+			}
 			if (_settings.BgmEnabled && !string.IsNullOrWhiteSpace(_settings.BgmPath)
 				&& !ScriptBatchComposer.HasUsableBgmSource(_settings.BgmPath))
 			{
@@ -2841,7 +2881,7 @@ namespace VideoBatchMerger.ScriptBatch
 				bool ok = await ScriptBatchComposer.ProcessItemAsync(
 					item,
 					_settings,
-					_footageFiles,
+					singleFootageAssignments == null ? _footageFiles : new List<string> { singleFootageAssignments[i] },
 					outDir,
 					UpdateProgress,
 					_cts.Token
@@ -3851,14 +3891,17 @@ namespace VideoBatchMerger.ScriptBatch
 				using var format = (StringFormat)StringFormat.GenericTypographic.Clone();
 				if (settings.SubtitleBorderStyle == 3)
 				{
-					float widest = lines.Max(line => g.MeasureString(line, font, PointF.Empty, format).Width);
 					float padding = Math.Max(10f * scale, font.Size * 0.18f);
-					var box = new RectangleF(screenX + (screenW - widest) / 2f + shiftX - padding,
-						y - padding, widest + padding * 2f, lines.Length * lineHeight + padding * 2f);
 					Color panel = ScriptBatchSettings.ParseToColor(settings.SubtitleScrollPanelColorHex, Color.FromArgb(248, 243, 230));
 					int panelOpacity = Math.Max(0, Math.Min(255, (int)Math.Round(settings.SubtitleScrollPanelOpacity * 2.55)));
 					using var brush = new SolidBrush(Color.FromArgb(panelOpacity, panel));
-					g.FillRectangle(brush, box);
+					for (int lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+					{
+						float lineWidth = g.MeasureString(lines[lineIndex], font, PointF.Empty, format).Width;
+						var box = new RectangleF(screenX + (screenW - lineWidth) / 2f + shiftX - padding,
+							y + lineIndex * lineHeight - padding, lineWidth + padding * 2f, lineHeight + padding * 2f);
+						g.FillRectangle(brush, box);
+					}
 				}
 				foreach (string line in lines)
 				{
@@ -3886,7 +3929,7 @@ namespace VideoBatchMerger.ScriptBatch
 						}
 						if (settings.SubtitleStrokeWidth > 0)
 						{
-							using var pen = new Pen(edge, Math.Max(0.5f, settings.SubtitleStrokeWidth * scale)) { LineJoin = LineJoin.Round };
+							using var pen = new Pen(edge, Math.Max(0.5f, settings.SubtitleStrokeWidth * scale * 2f)) { LineJoin = LineJoin.Round };
 							g.DrawPath(pen, path);
 						}
 						using var fill = new SolidBrush(Color.FromArgb(opacity, firstWord ? accent : main));
@@ -3906,9 +3949,12 @@ namespace VideoBatchMerger.ScriptBatch
 				float lineHeight = font.GetHeight(g) * 1.24f;
 				if (_panel._settings.SubtitleScrollPanelEnabled)
 				{
+					int visibleSlots = Math.Min(7, lines.Count);
 					var panel = new RectangleF(screenX + screenW * 0.045f + shiftX,
-						baseline - 6.5f * lineHeight, screenW * 0.91f, 7.5f * lineHeight);
-					using var panelBrush = new SolidBrush(Color.FromArgb(95, 32, 32, 32));
+						baseline - (visibleSlots - 0.5f) * lineHeight, screenW * 0.91f, (visibleSlots + 0.5f) * lineHeight);
+					Color panelColor = ScriptBatchSettings.ParseToColor(_panel._settings.SubtitleScrollPanelColorHex, Color.FromArgb(234, 230, 223));
+					int panelAlpha = Math.Max(0, Math.Min(255, (int)Math.Round(_panel._settings.SubtitleScrollPanelOpacity * 2.55)));
+					using var panelBrush = new SolidBrush(Color.FromArgb(panelAlpha, panelColor));
 					g.FillRectangle(panelBrush, panel);
 				}
 				double cycleSeconds = lines.Count * 0.85 + 1.0;
@@ -3924,12 +3970,23 @@ namespace VideoBatchMerger.ScriptBatch
 							y - lineHeight / 2f, screenW * 0.91f, lineHeight);
 					if (preset.PreviewShadowColor != Color.Transparent)
 					{
+						using var shadowPath = new GraphicsPath();
+						shadowPath.AddString(lines[i], font.FontFamily, (int)font.Style, font.Size, rect, format);
+						using var translation = new Matrix();
+						translation.Translate(preset.ShadowDepth * screenW / 1080f, preset.ShadowDepth * screenW / 1080f);
+						shadowPath.Transform(translation);
 						using var shadowBrush = new SolidBrush(Color.FromArgb(Math.Min(alpha, preset.PreviewShadowColor.A), preset.PreviewShadowColor));
-						g.DrawString(lines[i], font, shadowBrush,
-							new RectangleF(rect.X + 2, rect.Y + 2, rect.Width, rect.Height), format);
+						g.FillPath(shadowBrush, shadowPath);
+					}
+					using var textPath = new GraphicsPath();
+					textPath.AddString(lines[i], font.FontFamily, (int)font.Style, font.Size, rect, format);
+					if (preset.OutlineWidth > 0 && preset.PreviewStrokeColor != Color.Transparent)
+					{
+						using var strokePen = new Pen(preset.PreviewStrokeColor, preset.OutlineWidth * screenW / 1080f * 2f) { LineJoin = LineJoin.Round };
+						g.DrawPath(strokePen, textPath);
 					}
 					using var brush = new SolidBrush(Color.FromArgb(alpha, preset.PreviewTextColor));
-					g.DrawString(lines[i], font, brush, rect, format);
+					g.FillPath(brush, textPath);
 				}
 			}
 
@@ -4071,6 +4128,7 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 
 				// 2.3 绘制字幕文字与底框 (支持预设库样式与 XY 偏移)
+				if (_panel._settings.SubtitleUppercase) sampleText = sampleText.ToUpperInvariant();
 				var preset = SubtitlePresetCatalog.CreatePreviewPreset(_panel._settings);
 				int displayMode = _panel._settings.SubtitleDisplayMode;
 
@@ -4084,7 +4142,7 @@ namespace VideoBatchMerger.ScriptBatch
 
 				float previewFontSize = Math.Max(12f, _panel._settings.SubtitleFontSize * scale);
 				string fontName = string.IsNullOrWhiteSpace(_panel._settings.SubtitleFontFamily) ? "Arial" : _panel._settings.SubtitleFontFamily;
-				using var font = new Font(fontName, previewFontSize, FontStyle.Bold, GraphicsUnit.Pixel);
+				using var font = new Font(fontName, previewFontSize, _panel._settings.SubtitleBold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
 
 				if (displayMode == 5)
 				{
@@ -4142,31 +4200,38 @@ namespace VideoBatchMerger.ScriptBatch
 									using var boxPath = GetRoundedRectPath(boxRect, Math.Max(3f, 6f * scale));
 									g.FillPath(bgBrush, boxPath);
 								}
-								if ((displayMode == 1 || !_panel._settings.SubtitleHighlightBoxEnabled) && preset.OutlineWidth > 0)
+								if (preset.OutlineWidth > 0)
 								{
 									using var highlightPath = new GraphicsPath();
 									highlightPath.AddString(word, font.FontFamily, (int)font.Style, font.Size, new PointF(wordX, curY), StringFormat.GenericDefault);
-									using var highlightPen = new Pen(preset.PreviewStrokeColor, Math.Max(1f, preset.OutlineWidth * scale)) { LineJoin = LineJoin.Round };
+									using var highlightPen = new Pen(preset.PreviewStrokeColor, Math.Max(1f, preset.OutlineWidth * scale * 2f)) { LineJoin = LineJoin.Round };
 									g.DrawPath(highlightPen, highlightPath);
 								}
 
 								using var hlBrush = new SolidBrush(preset.PreviewHighlightTextColor);
-								g.DrawString(word, font, hlBrush, wordX, curY);
+								using var fillPath = new GraphicsPath();
+								fillPath.AddString(word, font.FontFamily, (int)font.Style, font.Size, new PointF(wordX, curY), StringFormat.GenericDefault);
+								g.FillPath(hlBrush, fillPath);
 							}
 							else
 							{
 								// 绘制立体光影 (去黑化：暖色3D立体落影 + 纯净白字)
 								if (preset.PreviewShadowColor != Color.Transparent)
 								{
-									float shX = Math.Max(1.5f, preset.ShadowDepth * scale * 1.0f);
-									float shY = Math.Max(1.5f, preset.ShadowDepth * scale * 1.0f);
+									float shX = preset.ShadowDepth * scale;
+									float shY = preset.ShadowDepth * scale;
+									using var shadowPath = new GraphicsPath();
+									shadowPath.AddString(word, font.FontFamily, (int)font.Style, font.Size, new PointF(wordX, curY), StringFormat.GenericDefault);
+									using var translation = new Matrix();
+									translation.Translate(shX, shY);
+									shadowPath.Transform(translation);
 									using var shadowBrush = new SolidBrush(preset.PreviewShadowColor);
-									g.DrawString(word, font, shadowBrush, wordX + shX, curY + shY);
+									g.FillPath(shadowBrush, shadowPath);
 								}
 
 								if (preset.OutlineWidth > 0 && preset.PreviewStrokeColor != Color.Transparent)
 								{
-									float strokeW = Math.Max(1f, preset.OutlineWidth * scale);
+									float strokeW = Math.Max(1f, preset.OutlineWidth * scale * 2f);
 									using var strokePen = new Pen(preset.PreviewStrokeColor, strokeW) { LineJoin = LineJoin.Round };
 									using var path = new GraphicsPath();
 									path.AddString(word, font.FontFamily, (int)font.Style, font.Size, new PointF(wordX, curY), StringFormat.GenericDefault);
@@ -4174,7 +4239,9 @@ namespace VideoBatchMerger.ScriptBatch
 								}
 
 								using var whiteBrush = new SolidBrush(preset.PreviewTextColor);
-								g.DrawString(word, font, whiteBrush, wordX, curY);
+								using var fillPath = new GraphicsPath();
+								fillPath.AddString(word, font.FontFamily, (int)font.Style, font.Size, new PointF(wordX, curY), StringFormat.GenericDefault);
+								g.FillPath(whiteBrush, fillPath);
 							}
 
 							wordX += wW + spaceW;
@@ -4198,6 +4265,8 @@ namespace VideoBatchMerger.ScriptBatch
 					float textX = screenX + (screenW - textSize.Width) / 2 + subShiftX;
 					float textY = subCenterY - (textSize.Height / 2);
 					var subRect = new RectangleF(textX, textY, textSize.Width, textSize.Height);
+					using var subtitlePath = new GraphicsPath();
+					subtitlePath.AddString(sampleText, font.FontFamily, (int)font.Style, font.Size, subRect, subFormat);
 
 					if (preset.HasBox)
 					{
@@ -4209,41 +4278,39 @@ namespace VideoBatchMerger.ScriptBatch
 						using var boxPath = GetRoundedRectPath(boxRect, Math.Max(3f, 6f * scale));
 						g.FillPath(boxBrush, boxPath);
 
+						if (preset.OutlineWidth > 0 && preset.PreviewStrokeColor != Color.Transparent)
+						{
+						using var strokePen = new Pen(preset.PreviewStrokeColor, preset.OutlineWidth * scale * 2f) { LineJoin = LineJoin.Round };
+						g.DrawPath(strokePen, subtitlePath);
+						}
 						using var textBrush = new SolidBrush(preset.PreviewTextColor);
-						g.DrawString(sampleText, font, textBrush, subRect, subFormat);
+						g.FillPath(textBrush, subtitlePath);
 					}
 					else
 					{
 						// 绘制纯净 3D 立体落影 (非黑色)
 						if (preset.PreviewShadowColor != Color.Transparent)
 						{
-							float shX = Math.Max(1.5f, preset.ShadowDepth * scale * 1.0f);
-							float shY = Math.Max(1.5f, preset.ShadowDepth * scale * 1.0f);
-							var shadowRect = new RectangleF(textX + shX, textY + shY, textSize.Width, textSize.Height);
+							float shX = preset.ShadowDepth * scale;
+							float shY = preset.ShadowDepth * scale;
+							using var shadowPath = (GraphicsPath)subtitlePath.Clone();
+							using var translation = new Matrix();
+							translation.Translate(shX, shY);
+							shadowPath.Transform(translation);
 							using var shadowBrush = new SolidBrush(preset.PreviewShadowColor);
-							g.DrawString(sampleText, font, shadowBrush, shadowRect, subFormat);
+							g.FillPath(shadowBrush, shadowPath);
 						}
 
 						// 绘制微立体轮廓 (非黑色)
 						if (preset.OutlineWidth > 0 && preset.PreviewStrokeColor != Color.Transparent)
 						{
-							float strokeWidth = Math.Max(1f, preset.OutlineWidth * scale);
-							using var path = new GraphicsPath();
-							path.AddString(
-								sampleText,
-								font.FontFamily,
-								(int)font.Style,
-								font.Size,
-								subRect,
-								subFormat
-							);
-
+							float strokeWidth = Math.Max(1f, preset.OutlineWidth * scale * 2f);
 							using var strokePen = new Pen(preset.PreviewStrokeColor, strokeWidth) { LineJoin = LineJoin.Round };
-							g.DrawPath(strokePen, path);
+							g.DrawPath(strokePen, subtitlePath);
 						}
 
 						using var textBrush = new SolidBrush(preset.PreviewTextColor);
-						g.DrawString(sampleText, font, textBrush, subRect, subFormat);
+						g.FillPath(textBrush, subtitlePath);
 					}
 				}
 

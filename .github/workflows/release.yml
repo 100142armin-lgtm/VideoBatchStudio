@@ -29,7 +29,8 @@ jobs:
         shell: pwsh
         run: |
           dotnet build -c Release VideoBatchStudio.csproj
-          if (-not (Test-Path "bin/Release/net48/VideoBatchStudio.exe")) {
+          $binDir = if (Test-Path "bin_out/Release/net48/VideoBatchStudio.exe") { "bin_out/Release/net48" } else { "bin/Release/net48" }
+          if (-not (Test-Path "$binDir/VideoBatchStudio.exe")) {
             throw "Build output VideoBatchStudio.exe not found!"
           }
 
@@ -39,9 +40,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path release_assets | Out-Null
           New-Item -ItemType Directory -Force -Path staging/VideoBatchStudio | Out-Null
 
+          $binDir = if (Test-Path "bin_out/Release/net48/VideoBatchStudio.exe") { "bin_out/Release/net48" } else { "bin/Release/net48" }
+
           # Copy entire build output (executable, WebView2 DLLs, runtimes, web_preview, config)
-          Copy-Item -Path "bin/Release/net48/*" -Destination "staging/VideoBatchStudio/" -Recurse -Force
-          Copy-Item -Path "bin/Release/net48/VideoBatchStudio.exe" -Destination "release_assets/VideoBatchStudio.exe" -Force
+          Copy-Item -Path "$binDir/*" -Destination "staging/VideoBatchStudio/" -Recurse -Force
+          Copy-Item -Path "$binDir/VideoBatchStudio.exe" -Destination "release_assets/VideoBatchStudio.exe" -Force
 
           # Ensure both win-x64 and win-x86 WebView2Loader.dll are present (prevent 0x8007000B BadImageFormatException)
           $wv64 = Get-ChildItem -Path "$env:USERPROFILE\.nuget\packages\microsoft.web.webview2" -Filter "WebView2Loader.dll" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "win-x64\\native\\" } | Select-Object -First 1

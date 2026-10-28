@@ -32,6 +32,7 @@ class PreviewStage {
             subtitleVerticalPercent: 82,
             subtitleOffsetX: 0,
             subtitleFontFamily: "Arial",
+            subtitleBold: true,
 
             watermarkEnabled: true,
             watermarkType: 0, // 0: 文字, 1: 图片
@@ -286,7 +287,7 @@ class PreviewStage {
 
         const fontSize = Math.max(10, (this.state.subtitleFontSize || preset.fontsize || 86) * scale);
         const fontFamily = this.state.subtitleFontFamily || preset.font_family || 'Arial, -apple-system, sans-serif';
-        const fontWeight = preset.bold !== false ? 'bold' : 'normal';
+        const fontWeight = this.state.subtitleBold !== false ? 'bold' : 'normal';
 
         ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
         ctx.textAlign = 'center';
@@ -382,9 +383,9 @@ class PreviewStage {
                     } else {
                         ctx.fillStyle = preset.color_text || '#FFFFFF';
                     }
-                    if ((!isActive || displayMode === 1 || this.state.subtitleHighlightBoxEnabled === false) && preset.use_stroke && preset.border_width > 0) {
+                    if (preset.use_stroke && preset.border_width > 0) {
                         ctx.strokeStyle = preset.color_outline || '#6488A8';
-                        ctx.lineWidth = Math.max(1, preset.border_width * scale);
+                        ctx.lineWidth = Math.max(1, preset.border_width * scale * 2);
                         ctx.lineJoin = 'round';
                         ctx.strokeText(word, x, lineY);
                     }
@@ -429,7 +430,7 @@ class PreviewStage {
             // 2) 绘制描边
             if (preset.use_stroke && preset.border_width > 0) {
                 ctx.strokeStyle = preset.color_outline || '#000000';
-                ctx.lineWidth = Math.max(2, (preset.border_width || 5) * scale);
+                ctx.lineWidth = Math.max(2, (preset.border_width || 5) * scale * 2);
                 ctx.lineJoin = 'round';
                 ctx.strokeText(line, subCenterX, lineY);
             }

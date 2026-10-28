@@ -512,11 +512,14 @@ namespace VideoBatchMerger.ScriptBatch
 			var preset = SubtitlePresetCatalog.GetById(settings.SubtitleStyleId);
 			string primaryColor = ScriptBatchSettings.ToAssStyleColor(settings.SubtitleColorHex, Color.White, settings.SubtitleTextOpacity);
 			string outlineColor = ScriptBatchSettings.ToAssStyleColor(
-				settings.SubtitleBorderStyle == 3 ? settings.SubtitleScrollPanelColorHex : settings.SubtitleStrokeColorHex,
+				settings.SubtitleBorderStyle == 3 && settings.SubtitleDisplayMode != 4 ? settings.SubtitleScrollPanelColorHex : settings.SubtitleStrokeColorHex,
 				Color.FromArgb(112, 92, 65),
-				settings.SubtitleBorderStyle == 3 ? settings.SubtitleScrollPanelOpacity : 100);
+				settings.SubtitleBorderStyle == 3 && settings.SubtitleDisplayMode != 4 ? settings.SubtitleScrollPanelOpacity : 100);
 			float outlineWidth = Math.Max(0, settings.SubtitleStrokeWidth);
 			int borderStyle = settings.SubtitleBorderStyle;
+			int displayMode = settings.SubtitleDisplayMode;
+			if (displayMode == 4) borderStyle = 1; // 上滚底板由独立矢量层绘制，文字始终保留可调描边。
+			bool layeredPanel = borderStyle == 3 && (displayMode == 0 || displayMode == 2 || displayMode == 5);
 			float shadowDepth = Math.Max(0, settings.SubtitleShadowDepth);
 			if (borderStyle == 3) outlineWidth = Math.Max(10, (float)Math.Round(fontSize * 0.18));
 			string backColor = ScriptBatchSettings.ToAssStyleColor(settings.SubtitleShadowColorHex, Color.FromArgb(147, 120, 79));
@@ -539,20 +542,26 @@ namespace VideoBatchMerger.ScriptBatch
 			sb.AppendLine();
 			sb.AppendLine("[V4+ Styles]");
 			sb.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
-			sb.AppendLine($"Style: Default,{fontName},{fontSize},{primaryColor},&H000000FF,{outlineColor},{backColor},-1,0,0,0,100,100,0,0,{borderStyle},{outlineWidth.ToString("0.0", CultureInfo.InvariantCulture)},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
+			string bold = settings.SubtitleBold ? "-1" : "0";
+			string panelPrimaryColor = layeredPanel ? ScriptBatchSettings.ToAssStyleColor(settings.SubtitleColorHex, Color.White, 0) : primaryColor;
+			sb.AppendLine($"Style: Default,{fontName},{fontSize},{panelPrimaryColor},&H000000FF,{outlineColor},{backColor},{bold},0,0,0,100,100,0,0,{borderStyle},{outlineWidth.ToString("0.0", CultureInfo.InvariantCulture)},{(layeredPanel ? 0f : shadowDepth).ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
+			if (layeredPanel)
+			{
+				string textOutline = ScriptBatchSettings.ToAssStyleColor(settings.SubtitleStrokeColorHex, Color.FromArgb(112, 92, 65));
+				sb.AppendLine($"Style: PanelText,{fontName},{fontSize},{primaryColor},&H000000FF,{textOutline},{backColor},{bold},0,0,0,100,100,0,0,1,{Math.Max(0, settings.SubtitleStrokeWidth).ToString("0.0", CultureInfo.InvariantCulture)},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
+			}
 			int boxPadding = (int)Math.Max(10, Math.Round(fontSize * 0.18));
 			string boxBgColor = ScriptBatchSettings.ToAssStyleColor(settings.SubtitleHighlightBoxColorHex, Color.FromArgb(214, 0, 0), settings.SubtitleHighlightBoxOpacity);
 			string hlTextColor = ScriptBatchSettings.ToAssStyleColor(settings.SubtitleHighlightTextColorHex, Color.Yellow, settings.SubtitleTextOpacity);
 			int highlightStyle = settings.SubtitleHighlightBoxEnabled ? 3 : 1;
 			string highlightOutline = settings.SubtitleHighlightBoxEnabled ? boxBgColor : ScriptBatchSettings.ToAssStyleColor(settings.SubtitleStrokeColorHex, Color.FromArgb(112, 92, 65));
 			string highlightWidth = settings.SubtitleHighlightBoxEnabled ? boxPadding.ToString(CultureInfo.InvariantCulture) : outlineWidth.ToString("0.0", CultureInfo.InvariantCulture);
-			sb.AppendLine($"Style: HighlightBox,{fontName},{fontSize},{hlTextColor},&H000000FF,{highlightOutline},{backColor},-1,0,0,0,100,100,0,0,{highlightStyle},{highlightWidth},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
-			sb.AppendLine($"Style: HighlightText,{fontName},{fontSize},{hlTextColor},&H000000FF,{ScriptBatchSettings.ToAssStyleColor(settings.SubtitleStrokeColorHex, Color.FromArgb(112, 92, 65))},{backColor},-1,0,0,0,100,100,0,0,1,{settings.SubtitleStrokeWidth.ToString("0.0", CultureInfo.InvariantCulture)},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
+			sb.AppendLine($"Style: HighlightBox,{fontName},{fontSize},{hlTextColor},&H000000FF,{highlightOutline},{backColor},{bold},0,0,0,100,100,0,0,{highlightStyle},{highlightWidth},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
+			sb.AppendLine($"Style: HighlightText,{fontName},{fontSize},{hlTextColor},&H000000FF,{ScriptBatchSettings.ToAssStyleColor(settings.SubtitleStrokeColorHex, Color.FromArgb(112, 92, 65))},{backColor},{bold},0,0,0,100,100,0,0,1,{settings.SubtitleStrokeWidth.ToString("0.0", CultureInfo.InvariantCulture)},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
 			sb.AppendLine();
 			sb.AppendLine("[Events]");
 			sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
 
-			int displayMode = settings.SubtitleDisplayMode;
 			var wordTimings = displayMode == 1 || displayMode == 3 || displayMode == 5 ? LoadWordTimings(srtPath + ".words.json") : new List<WordTiming>();
 			int nextWordIndex = 0;
 			var cues = new List<ScrollCue>();
@@ -599,6 +608,11 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 			}
 
+			if (settings.SubtitleUppercase)
+			{
+				foreach (var cue in cues) cue.Text = cue.Text?.ToUpperInvariant();
+			}
+
 			if (displayMode == 5)
 			{
 				EmitBrightPhraseSubtitles(sb, cues, wordTimings, settings, w, fontSize);
@@ -617,12 +631,29 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 
 			string assOutput = sb.ToString();
+			if (layeredPanel)
+			{
+				var layeredLines = new StringBuilder();
+				foreach (string line in assOutput.Split('\n'))
+				{
+					if (!line.StartsWith("Dialogue: 0,", StringComparison.Ordinal) || !line.Contains(",Default,,") || line.Contains("\\p1"))
+					{
+						layeredLines.Append(line).Append('\n');
+						continue;
+					}
+					// 颜色覆盖会使 ASS 的 BorderStyle=3 按词切开底板；底板层只保留纯文字。
+					string panelLine = Regex.Replace(line, @"\{\\1c&H[0-9A-Fa-f]+&\}", string.Empty);
+					layeredLines.Append(panelLine).Append('\n');
+					layeredLines.Append(line.Replace("Dialogue: 0,", "Dialogue: 1,").Replace(",Default,,", ",PanelText,,")).Append('\n');
+				}
+				assOutput = layeredLines.ToString();
+			}
 			if (settings.SubtitleGlowBlur > 0)
 			{
 				var assLines = assOutput.Split('\n');
 				for (int lineIndex = 0; lineIndex < assLines.Length; lineIndex++)
 				{
-					if (!assLines[lineIndex].StartsWith("Dialogue:", StringComparison.Ordinal) || assLines[lineIndex].Contains("\\p1")) continue;
+					if (!assLines[lineIndex].StartsWith("Dialogue:", StringComparison.Ordinal) || assLines[lineIndex].Contains("\\p1") || (layeredPanel && assLines[lineIndex].Contains(",Default,,"))) continue;
 					int commas = 0;
 					for (int charIndex = 0; charIndex < assLines[lineIndex].Length; charIndex++)
 					{
@@ -727,6 +758,7 @@ namespace VideoBatchMerger.ScriptBatch
 			if (lines.Count == 0) return;
 
 			const int maxVisible = 7;
+			int visibleSlots = Math.Min(maxVisible, lines.Count);
 			int lineHeight = (int)Math.Round(fontSize * 1.24);
 			int baseline = (int)Math.Round(canvasH * Math.Max(0.35, Math.Min(0.88, settings.SubtitleVerticalPercent / 100.0)));
 			int centerX = canvasW / 2 + settings.SubtitleOffsetX;
@@ -736,9 +768,9 @@ namespace VideoBatchMerger.ScriptBatch
 				string panelColor = ScriptBatchSettings.ToAssInlineBgr(settings.SubtitleScrollPanelColorHex, Color.FromArgb(234, 230, 223));
 				int panelAlpha = (int)Math.Round((100 - Math.Max(0, Math.Min(100, settings.SubtitleScrollPanelOpacity))) * 2.55);
 				int panelWidth = (int)(canvasW * 0.91);
-				int panelHeight = maxVisible * lineHeight + lineHeight / 2;
+				int panelHeight = visibleSlots * lineHeight + lineHeight / 2;
 				int panelLeft = (canvasW - panelWidth) / 2 + settings.SubtitleOffsetX;
-				int panelTop = baseline - (maxVisible - 1) * lineHeight - lineHeight / 2;
+				int panelTop = baseline - (visibleSlots - 1) * lineHeight - lineHeight / 2;
 				string panel = $"{{\\an7\\pos({panelLeft},{panelTop})\\p1\\1a&H{panelAlpha:X2}&\\1c{panelColor}\\bord0\\shad0}}m 0 0 l {panelWidth} 0 {panelWidth} {panelHeight} 0 {panelHeight}{{\\p0}}";
 				sb.AppendLine($"Dialogue: 0,{FormatAssTimeSpan(TimeSpan.FromSeconds(lines[0].Start))},{FormatAssTimeSpan(TimeSpan.FromSeconds(lastEnd))},Default,,0,0,0,,{panel}");
 			}
@@ -1150,7 +1182,10 @@ namespace VideoBatchMerger.ScriptBatch
 			{
 				for (int i = 0; i < selectedClips.Count; i++)
 				{
-					inputArgs.Append($"-ss {selectedClips[i].StartSec:0.00} -t {selectedClips[i].DurationSec:0.00} -i {QuoteArg(selectedClips[i].FilePath)} ");
+					if (settings.FootageStrategy == 2)
+						inputArgs.Append($"-stream_loop -1 -t {totalDurText} -i {QuoteArg(selectedClips[i].FilePath)} ");
+					else
+						inputArgs.Append($"-ss {selectedClips[i].StartSec:0.00} -t {selectedClips[i].DurationSec:0.00} -i {QuoteArg(selectedClips[i].FilePath)} ");
 				}
 
 				for (int i = 0; i < selectedClips.Count; i++)
@@ -1408,6 +1443,12 @@ namespace VideoBatchMerger.ScriptBatch
 				catch { return false; }
 			}).ToList();
 			if (availablePool.Count == 0) return list;
+			if (settings.FootageStrategy == 2)
+			{
+				string single = availablePool.FirstOrDefault(IsUsableFootage);
+				if (single != null) list.Add(new ClipSlice(single, 0, targetDur));
+				return list;
+			}
 			if (settings.FootageStrategy == 0)
 			{
 				availablePool = availablePool.OrderBy(_ => s_rand.Next()).ToList();
@@ -1438,7 +1479,7 @@ namespace VideoBatchMerger.ScriptBatch
 			return list;
 		}
 
-		private static bool IsUsableFootage(string path)
+		public static bool IsUsableFootage(string path)
 		{
 			try
 			{

@@ -29,6 +29,7 @@ namespace VideoBatchMerger.ScriptBatch
 
 		public string FontFamily { get; set; } = "Arial Rounded MT Bold";
 		public int FontSize { get; set; } = 86;
+		public bool Bold { get; set; } = true;
 		public int DisplayMode { get; set; } = 0;      // 0: 句级自然居中, 1: 逐词卡拉OK高亮, 2: 动感回弹弹出, 3: 逐词底框高亮, 4: 随语音逐行上滚
 		public int BorderStyle { get; set; } = 1;      // 1: 描边阴影/立体, 3: 整句胶囊底框 (Box)
 
@@ -74,7 +75,7 @@ namespace VideoBatchMerger.ScriptBatch
 		public Color PreviewBoxColor
 		{
 			get => BorderStyle == 3
-				? Color.FromArgb(Math.Max(30, Math.Min(255, (int)Math.Round(ScrollPanelOpacity * 2.55))), ScriptBatchSettings.ParseToColor(ScrollPanelColorHex, Color.FromArgb(212, 85, 0)))
+				? Color.FromArgb(Math.Max(0, Math.Min(255, (int)Math.Round(ScrollPanelOpacity * 2.55))), ScriptBatchSettings.ParseToColor(ScrollPanelColorHex, Color.FromArgb(212, 85, 0)))
 				: Color.Transparent;
 			set
 			{
@@ -105,6 +106,7 @@ namespace VideoBatchMerger.ScriptBatch
 			settings.SubtitleStyleId = Id;
 			settings.SubtitleFontFamily = SubtitlePresetCatalog.ResolveInstalledFont(FontFamily);
 			settings.SubtitleFontSize = FontSize;
+			settings.SubtitleBold = Bold;
 			settings.SubtitleDisplayMode = DisplayMode;
 			settings.SubtitleBorderStyle = BorderStyle;
 
@@ -734,6 +736,48 @@ namespace VideoBatchMerger.ScriptBatch
 			},
 			new SubtitlePreset
 			{
+				Id = "clear_crimson_panel",
+				Name = "清晰大字·透红底板",
+				Category = "底框样式",
+				TagText = "大字分句 · 半透明红底 · 白字青色重点",
+				FontFamily = "Arial Black",
+				FontSize = 116,
+				Bold = true,
+				DisplayMode = 5,
+				BorderStyle = 3,
+				PrimaryColorHex = "#FFFFFF",
+				HighlightTextColorHex = "#27DCE8",
+				OutlineColorHex = "#66332A",
+				OutlineWidth = 3f,
+				ShadowDepth = 0f,
+				ScrollPanelEnabled = true,
+				ScrollPanelColorHex = "#C52528",
+				ScrollPanelOpacity = 68,
+				HighlightBoxEnabled = false
+			},
+			new SubtitlePreset
+			{
+				Id = "clear_amber_panel",
+				Name = "清晰大字·透橙底板",
+				Category = "底框样式",
+				TagText = "大字分句 · 半透明橙底 · 立体白字",
+				FontFamily = "Impact",
+				FontSize = 114,
+				Bold = true,
+				DisplayMode = 5,
+				BorderStyle = 3,
+				PrimaryColorHex = "#FFFFFF",
+				HighlightTextColorHex = "#FFFFFF",
+				OutlineColorHex = "#B65B0D",
+				OutlineWidth = 3.5f,
+				ShadowDepth = 0f,
+				ScrollPanelEnabled = true,
+				ScrollPanelColorHex = "#C47522",
+				ScrollPanelOpacity = 70,
+				HighlightBoxEnabled = false
+			},
+			new SubtitlePreset
+			{
 				Id = "typewriter_sacred",
 				Name = "经文显现·打字机立体",
 				Category = "特殊动效",
@@ -766,6 +810,7 @@ namespace VideoBatchMerger.ScriptBatch
 				Category = source.Category,
 				FontFamily = settings.SubtitleFontFamily,
 				FontSize = settings.SubtitleFontSize,
+				Bold = settings.SubtitleBold,
 				DisplayMode = settings.SubtitleDisplayMode,
 				BorderStyle = settings.SubtitleBorderStyle,
 				PrimaryColorHex = settings.SubtitleColorHex,

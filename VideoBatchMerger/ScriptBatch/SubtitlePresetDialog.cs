@@ -288,13 +288,19 @@ namespace VideoBatchMerger.ScriptBatch
 
 				if (_preset.DisplayMode == 5)
 				{
-					using var font = new Font(fontFamilyName, 14.5f, FontStyle.Bold, GraphicsUnit.Pixel);
+					using var font = new Font(fontFamilyName, 14.5f, _preset.Bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
 					string first = "DIOS";
 					string rest = " TE BENDIGA";
 					float firstW = g.MeasureString(first, font).Width;
 					float restW = g.MeasureString(rest, font).Width;
 					float x = (w - firstW - restW) / 2f;
 					float y = h * 0.49f;
+					if (_preset.HasBox)
+					{
+						var panelRect = new RectangleF(x - 8f, y - 4f, firstW + restW + 16f, font.GetHeight(g) + 8f);
+						using var panelBrush = new SolidBrush(_preset.PreviewBoxColor);
+						g.FillRectangle(panelBrush, panelRect);
+					}
 					DrawOutlinedWordAt(g, first, font, x, y, _preset.PreviewHighlightTextColor, strokeCol, strokeW, shadowCol);
 					DrawOutlinedWordAt(g, rest, font, x + firstW, y, textCol, strokeCol, strokeW, shadowCol);
 				}
@@ -302,7 +308,7 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					// 上滚字幕模式预览 (图4/图5)
 					float fontSize = 11.5f;
-					using var font = new Font(fontFamilyName, fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
+					using var font = new Font(fontFamilyName, fontSize, _preset.Bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
 					string[] lines = { "Acalma o coração,", "enxuga a lágrima", "e renova a fé" };
 					float lineH = fontSize * 1.38f;
 					float startY = h * 0.34f;
@@ -326,7 +332,7 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					// 逐词底框高亮模式预览 (图1/图2/图6：带描边 + 彩色底框)
 					float fontSize = 14.5f;
-					using var font = new Font(fontFamilyName, fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
+					using var font = new Font(fontFamilyName, fontSize, _preset.Bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
 					string word1 = "Em nome";
 					string word2 = "de";
 					string word3 = "Jesus";
@@ -360,7 +366,7 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					// Canva 花字 / 纯净立体 / 整句胶囊底框 / 逐词发光
 					float fontSize = _preset.Category == "Canva花字" ? 17f : 14.5f;
-					using var font = new Font(fontFamilyName, fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
+					using var font = new Font(fontFamilyName, fontSize, _preset.Bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
 					string sampleLine1 = _preset.Category == "Canva花字" ? "CANVA" : "PARE TUDO";
 					string sampleLine2 = _preset.Category == "Canva花字" ? "POP STYLE" : "AGORA";
 

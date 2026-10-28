@@ -2,6 +2,7 @@
   <PropertyGroup>
     <AssemblyName>VideoBatchStudio</AssemblyName>
     <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>False</GenerateTargetFrameworkAttribute>
     <OutputType>WinExe</OutputType>
     <UseWindowsForms>True</UseWindowsForms>
     <UseWPF>True</UseWPF>
@@ -9,11 +10,14 @@
   </PropertyGroup>
   <PropertyGroup>
     <LangVersion>14.0</LangVersion>
-    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <AllowUnsafeBlocks>False</AllowUnsafeBlocks>
     <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
     <Optimize>False</Optimize>
     <DebugType>none</DebugType>
     <DebugSymbols>False</DebugSymbols>
+    <IntermediateOutputPath>obj_build\Release\net48\</IntermediateOutputPath>
+    <OutputPath>bin_out\Release\net48\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
   <PropertyGroup>
     <ApplicationIcon>app.ico</ApplicationIcon>

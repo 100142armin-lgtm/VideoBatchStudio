@@ -95,16 +95,18 @@ namespace VideoBatchMerger.ScriptBatch
 
 		public double SliceDurationMin { get; set; } = 3.5;
 		public double SliceDurationMax { get; set; } = 5.0;
-		public int FootageStrategy { get; set; } = 0; // 0: 随机去重, 1: 顺序轮询
+		public int FootageStrategy { get; set; } = 0; // 0: 随机拼接, 1: 顺序拼接, 2: 单素材循环且批次去重
 
 		// 字幕样式与排版 (全自由定制 + 永久记忆)
 		public string SubtitleFontFamily { get; set; } = "Arial Rounded MT Bold";
 		public int SubtitleFontSize { get; set; } = 86; // 36 ~ 140 px 连续可调
+		public bool SubtitleBold { get; set; } = true;
+		public bool SubtitleUppercase { get; set; } = false;
 		public string SubtitleStyleId { get; set; } = "viral_blue_red_yellow";
 		public string SubtitleColorHex { get; set; } = "#FFFFFF"; // 主文字颜色 (#RRGGBB 或 &H00BBGGRR)
 		public int SubtitleTextOpacity { get; set; } = 100; // 主文字不透明度 20% ~ 100%
 		public string SubtitleStrokeColorHex { get; set; } = "#0A1172"; // 描边颜色
-		public float SubtitleStrokeWidth { get; set; } = 6.0f; // 描边粗细 0 ~ 12 px
+		public float SubtitleStrokeWidth { get; set; } = 6.0f; // ASS 轮廓向外扩展的像素数，0 ~ 40 px
 		public string SubtitleShadowColorHex { get; set; } = "#050838"; // 阴影/外发光颜色
 		public float SubtitleShadowDepth { get; set; } = 3.0f; // 立体阴影距离 0 ~ 10
 		public int SubtitleGlowBlur { get; set; } = 0; // 外发光柔和度 0 ~ 15

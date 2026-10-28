@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
 
 namespace VideoBatchMerger;
 
@@ -324,11 +325,24 @@ internal sealed class UpdateNotificationForm : Form
 		}
 	}
 
+	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	private static extern bool DeleteFile(string lpFileName);
+
+	private static void UnblockFileNative(string filePath)
+	{
+		try
+		{
+			DeleteFile(filePath + ":Zone.Identifier");
+		}
+		catch { }
+	}
+
 	private static bool IsApprovedUpdateUrl(string value)
 	{
 		if (!Uri.TryCreate(value, UriKind.Absolute, out Uri uri) || uri.Scheme != Uri.UriSchemeHttps) return false;
 		string host = uri.Host.TrimEnd('.').ToLowerInvariant();
-		return host == "github.com" || host == "ghfast.top" || host == "ghproxy.net" || host == "objects.githubusercontent.com";
+		return host == "github.com" || host == "ghfast.top" || host == "ghproxy.net" || host == "objects.githubusercontent.com" || host == "cdn.jsdelivr.net" || host == "raw.gitmirror.com";
 	}
 
 	private static void ApplyUpdateFilesInPlace(string sourceFolder, string targetFolder)
@@ -364,6 +378,7 @@ internal sealed class UpdateNotificationForm : Form
 			try
 			{
 				File.Copy(srcFile, destFile, true);
+				UnblockFileNative(destFile);
 			}
 			catch (IOException)
 			{
@@ -373,6 +388,7 @@ internal sealed class UpdateNotificationForm : Form
 					if (File.Exists(backupPath)) File.Delete(backupPath);
 					File.Move(destFile, backupPath);
 					File.Copy(srcFile, destFile, true);
+					UnblockFileNative(destFile);
 				}
 				catch { }
 			}

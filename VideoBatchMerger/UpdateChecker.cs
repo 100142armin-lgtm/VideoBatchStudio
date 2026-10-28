@@ -46,44 +46,39 @@ internal static class UpdateChecker
 
 				string json = null;
 
-				// 1. Try fetching from raw version.json (Fast, no API rate limit, with cache-busting)
-				try
+				// 多通道容灾获取版本信息（首选国内高可用全球Anycast CDN与极速镜像，彻底解决团队人员因网络阻断更新失败的问题）
+				string[] versionSources = new string[]
 				{
-					string rawUrl = RawVersionUrl + "?t=" + DateTime.UtcNow.Ticks;
-					HttpWebRequest req = (HttpWebRequest)WebRequest.Create(rawUrl);
-					req.Method = "GET";
-					req.UserAgent = "VideoBatchStudio-Updater/" + currentVersion;
-					req.Timeout = 6000;
-					req.ReadWriteTimeout = 6000;
-					req.Headers[HttpRequestHeader.CacheControl] = "no-cache";
-					req.Headers[HttpRequestHeader.Pragma] = "no-cache";
+					"https://cdn.jsdelivr.net/gh/100142armin-lgtm/VideoBatchStudio@main/version.json",
+					"https://ghfast.top/https://raw.githubusercontent.com/100142armin-lgtm/VideoBatchStudio/main/version.json",
+					"https://raw.gitmirror.com/100142armin-lgtm/VideoBatchStudio/main/version.json",
+					RawVersionUrl,
+					GitHubReleaseApiUrl
+				};
 
-					using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
-					using (Stream stream = resp.GetResponseStream())
-					using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
-					{
-						json = reader.ReadToEnd();
-					}
-				}
-				catch
+				foreach (string srcUrl in versionSources)
 				{
-					// Fallback to GitHub Release API
 					try
 					{
-						string apiUrl = GitHubReleaseApiUrl + "?t=" + DateTime.UtcNow.Ticks;
-						HttpWebRequest reqApi = (HttpWebRequest)WebRequest.Create(apiUrl);
-						reqApi.Method = "GET";
-						reqApi.UserAgent = "VideoBatchStudio-Updater/" + currentVersion;
-						reqApi.Timeout = 6000;
-						reqApi.ReadWriteTimeout = 6000;
-						reqApi.Headers[HttpRequestHeader.CacheControl] = "no-cache";
-						reqApi.Headers[HttpRequestHeader.Pragma] = "no-cache";
+						string fetchUrl = srcUrl + (srcUrl.Contains("?") ? "&" : "?") + "t=" + DateTime.UtcNow.Ticks;
+						HttpWebRequest req = (HttpWebRequest)WebRequest.Create(fetchUrl);
+						req.Method = "GET";
+						req.UserAgent = "VideoBatchStudio-Updater/" + currentVersion;
+						req.Timeout = 4000;
+						req.ReadWriteTimeout = 4000;
+						req.Headers[HttpRequestHeader.CacheControl] = "no-cache";
+						req.Headers[HttpRequestHeader.Pragma] = "no-cache";
 
-						using (HttpWebResponse respApi = (HttpWebResponse)reqApi.GetResponse())
-						using (Stream streamApi = respApi.GetResponseStream())
-						using (StreamReader readerApi = new StreamReader(streamApi, Encoding.UTF8))
+						using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
+						using (Stream stream = resp.GetResponseStream())
+						using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
 						{
-							json = readerApi.ReadToEnd();
+							string content = reader.ReadToEnd();
+							if (!string.IsNullOrWhiteSpace(content) && (content.Contains("\"version\"") || content.Contains("\"tag_name\"")))
+							{
+								json = content;
+								break;
+							}
 						}
 					}
 					catch { }
