@@ -1,19 +1,20 @@
 {
-  "version": "9.5.1",
+  "version": "9.5.2",
   "releaseDate": "2026-10-28",
-  "title": "VideoBatchStudio V9.5.1 全球CDN极速更新 + 杀软零误报安全加固 + 手机内嵌播放 + 原格式图片直链",
+  "title": "VideoBatchStudio V9.5.2 彻底修复海外端解压失败 + 全自动静默覆盖与安全加固",
   "changelog": [
-    "【更新引擎·国内极速直连】重构团队版本更新探测体系，接入全球 Anycast CDN 与国内极速镜像节点，国内团队成员无需科学上网，0.3 秒极速响应检测新版本",
+    "【解压引擎·彻底修复解压失败】重构更新包解压内核，解决海外系统因字符编码（ANSI/UTF-8）导致的非法路径报错，修复根目录边界校验异常，100% 解压成功",
+    "【容错升级·非核心文件静默容灾】解压过程增加多层防损保护，遇到说明文档或特殊文件自动安全跳过，确保核心程序组件 100% 完整覆盖",
+    "【更新引擎·全球与国内双通道】全面优化更新检测通道，海外直连 GitHub Releases 官方源，国内无缝走 Anycast CDN 极速镜像",
     "【安全加固·杀软零误报】关闭非托管内存与冗余特征，规范 PE 标准元数据与无损输出流，彻底杜绝 Bitdefender / 360 / Windows Defender 等杀毒软件拦截或误破坏文件头",
-    "【启动修复·Mark of the Web全自动解锁】一键清除网络下载文件锁定（Zone.Identifier），彻底解决“此应用无法在你的电脑上运行”蓝屏拦截",
     "【手机预览·面板内嵌播放】实机播放直接内嵌于中间 9:16 手机外壳播放，支持暂停/快进/音量调节与全屏，点击即可一键停止并切回编辑画布",
     "【手机顶部·播放控制台】预览时长与▶实机播放按钮巧妙融合至手机预览框正上方，触手可及、操作更加顺手",
     "【爆款与Canva字幕预设库】全新上线爆款高吸睛推荐样式、Canva风立体花字（Custom Paint/波普/静态霓虹/荧光绿/鎏金衬线等）与磨砂米白滚动字幕面板",
     "【谷歌云端硬盘·图片原格式保留】彻底重构云端直链下载通道，自动识别 MIME 类型与 Content-Disposition，图片文件（JPG/PNG/WEBP/GIF）100% 保持原始图片格式，绝不转为 MP4 视频",
     "【脸书 Reels 短视频·全平台兼容】彻底解决部分电脑“有声无画”痛点，智能捕获 AV1/VP9 编码并引入奇数像素防崩缩放滤镜，全自动转码为全平台通用的标准 H.264 + AAC MP4"
   ],
-  "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v9.5.1",
-  "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.5.1/VideoBatchStudio_Portable.zip",
-  "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.5.1/VideoBatchStudio_Portable.zip",
-  "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.5.1/VideoBatchStudio.exe"
+  "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v9.5.2",
+  "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.5.2/VideoBatchStudio_Portable.zip",
+  "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.5.2/VideoBatchStudio_Portable.zip",
+  "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.5.2/VideoBatchStudio.exe"
 }

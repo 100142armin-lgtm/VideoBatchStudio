@@ -398,28 +398,49 @@ internal sealed class UpdateNotificationForm : Form
 	private static void ExtractZipSafely(string zipPath, string destination)
 	{
 		string root = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-		using (ZipArchive archive = ZipFile.OpenRead(zipPath))
+		using (ZipArchive archive = ZipFile.Open(zipPath, ZipArchiveMode.Read, Encoding.UTF8))
 		{
 			foreach (ZipArchiveEntry entry in archive.Entries)
 			{
-				string entryName = entry.FullName.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
-				string target = Path.GetFullPath(Path.Combine(root, entryName));
-				if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-					throw new InvalidDataException("更新包包含越界压缩路径，已拒绝解压。");
-				if (string.IsNullOrEmpty(entry.Name))
+				try
 				{
-					Directory.CreateDirectory(target);
-					continue;
+					string rawName = entry.FullName.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+					char[] invalidChars = Path.GetInvalidPathChars();
+					string cleanName = new string(rawName.Where(c => !invalidChars.Contains(c) && c != '?' && c != '*' && c != '"' && c != '<' && c != '>' && c != '|').ToArray());
+
+					if (string.IsNullOrWhiteSpace(cleanName)) continue;
+
+					string target = Path.GetFullPath(Path.Combine(root, cleanName));
+					if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+						continue;
+
+					if (string.IsNullOrEmpty(entry.Name) || cleanName.EndsWith(Path.DirectorySeparatorChar.ToString()))
+					{
+						Directory.CreateDirectory(target);
+						continue;
+					}
+
+					string parent = Path.GetDirectoryName(target);
+					if (!string.IsNullOrEmpty(parent))
+					{
+						string parentWithSlash = parent.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+						if (!parentWithSlash.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+							continue;
+						Directory.CreateDirectory(parent);
+					}
+
+					using (Stream input = entry.Open())
+					using (FileStream output = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None))
+					{
+						input.CopyTo(output);
+					}
 				}
-				string parent = Path.GetDirectoryName(target);
-				string parentWithSlash = (parent ?? string.Empty).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-				if (string.IsNullOrEmpty(parent) || !parentWithSlash.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-					throw new InvalidDataException("更新包包含异常文件路径，已拒绝解压。");
-				Directory.CreateDirectory(parent);
-				using (Stream input = entry.Open())
-				using (FileStream output = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None))
+				catch (Exception ex)
 				{
-					input.CopyTo(output);
+					if (entry.FullName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || entry.FullName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+					{
+						throw new InvalidDataException($"核心组件 {entry.Name} 解压失败: {ex.Message}");
+					}
 				}
 			}
 		}
