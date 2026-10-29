@@ -20,10 +20,13 @@ foreach ($folder in @('ScriptBatch','Setup','web_preview','runtimes')) {
     if (-not (Test-Path -LiteralPath $source)) { throw ('Missing build folder: ' + $folder) }
     Copy-Item -LiteralPath $source -Destination (Join-Path $stagingDirectory $folder) -Recurse
 }
-foreach ($file in @('Install_Components.cmd','Start_VideoBatchStudio.cmd','THIRD_PARTY_NOTICES.txt','Chatterbox_使用说明.md','Chatterbox_组件说明.txt','团队安装说明.txt','version.json','双击启动软件.bat')) {
+foreach ($file in @('Install_Components.cmd','Start_VideoBatchStudio.cmd','THIRD_PARTY_NOTICES.txt','README.md','version.json','双击启动软件.bat')) {
     $source = Join-Path $repositoryDirectory $file
     if (-not (Test-Path -LiteralPath $source)) { throw ('Missing release file: ' + $file) }
     Copy-Item -LiteralPath $source -Destination (Join-Path $stagingDirectory $file)
+}
+if (Test-Path -LiteralPath (Join-Path $repositoryDirectory 'docs')) {
+    Copy-Item -LiteralPath (Join-Path $repositoryDirectory 'docs') -Destination (Join-Path $stagingDirectory 'docs') -Recurse
 }
 Copy-Item -LiteralPath (Join-Path $repositoryDirectory 'fonts') -Destination (Join-Path $stagingDirectory 'fonts') -Recurse
 
