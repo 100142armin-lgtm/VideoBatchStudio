@@ -20,3 +20,21 @@ The complete license text is included at fonts\OFL.txt.
 Noto project and licensing information:
 https://fonts.google.com/noto
 https://openfontlicense.org/
+
+Chatterbox local speech synthesis (Resemble AI)
+
+The optional local speech engine uses Chatterbox Multilingual V3 (MIT), the PerTh
+audio watermarker (MIT), and Whisper / stable-ts for local word alignment.
+Copyright and license texts are retained in licenses\Chatterbox and in each
+Python package's dist-info directory under chatterbox_runtime\python\Lib\site-packages.
+The standalone Python runtime includes its own LICENSE.txt.
+
+Official source and model:
+https://github.com/resemble-ai/chatterbox
+https://huggingface.co/ResembleAI/chatterbox
+https://github.com/resemble-ai/Perth
+https://github.com/openai/whisper
+https://github.com/jianfch/stable-ts
+
+The audio watermarker remains enabled. Model inference runs locally without
+network connections. Reference voices must be owned or authorized by the user.

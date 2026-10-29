@@ -28,3 +28,12 @@ desktop.ini
 
 # Third-party offline binary runtime & models
 whisper/
+bin_out/
+obj_build/
+component_cache/
+chatterbox_runtime/
+edge_runtime/
+tools/
+staging/
+__pycache__/
+*.pyc

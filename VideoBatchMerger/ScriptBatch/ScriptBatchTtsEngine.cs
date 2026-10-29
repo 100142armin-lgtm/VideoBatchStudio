@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -41,6 +42,25 @@ namespace VideoBatchMerger.ScriptBatch
 
 	public static class ScriptBatchTtsEngine
 	{
+		public static string GetSynthesisCacheKey(ScriptBatchSettings settings, string text, string voice)
+		{
+			string referenceStamp = "";
+			if (File.Exists(settings.ChatterboxReferenceAudio))
+			{
+				var file = new FileInfo(settings.ChatterboxReferenceAudio);
+				referenceStamp = file.Length + ":" + file.LastWriteTimeUtc.Ticks;
+			}
+			var serialized = new JavaScriptSerializer().Serialize(new
+			{
+				settings.TtsEngine, voice, text = text?.Trim(), settings.SpeechRate, settings.SpeechPitch,
+				settings.SpeechVolume, settings.ElevenLabsCustomVoiceId,
+				settings.ChatterboxLanguage, settings.ChatterboxExaggeration, settings.ChatterboxCfg,
+				settings.ChatterboxReferenceAudio, settings.ChatterboxReferenceAuthorized, referenceStamp
+			});
+			using (var hash = SHA256.Create())
+				return BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(serialized))).Replace("-", "");
+		}
+
 		[DllImport("winmm.dll", CharSet = CharSet.Auto)]
 		private static extern int mciSendString(string command, StringBuilder buffer, int bufferSize, IntPtr hwndCallback);
 
@@ -165,6 +185,8 @@ namespace VideoBatchMerger.ScriptBatch
 
 		public static string FindPythonExe()
 		{
+			string portable = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "edge_runtime", "python", "python.exe");
+			if (File.Exists(portable)) return portable;
 			string direct = @"C:\Users\PcVkH\AppData\Local\Programs\Python\Python312\python.exe";
 			if (File.Exists(direct)) return direct;
 

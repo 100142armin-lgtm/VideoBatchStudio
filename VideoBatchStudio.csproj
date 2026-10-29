@@ -25,6 +25,9 @@
   </PropertyGroup>
   <ItemGroup />
   <ItemGroup>
+    <None Update="Setup\**;Install_Components.cmd;Start_VideoBatchStudio.cmd">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <Reference Include="System.Core" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Web.Extensions" />
@@ -38,6 +41,10 @@
   <ItemGroup>
     <None Update="web_preview\**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="VideoBatchMerger\ScriptBatch\chatterbox_worker.py;VideoBatchMerger\ScriptBatch\chatterbox_install.py;VideoBatchMerger\ScriptBatch\chatterbox-requirements.lock;VideoBatchMerger\ScriptBatch\edge_tts_worker.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>ScriptBatch\%(Filename)%(Extension)</TargetPath>
     </None>
   </ItemGroup>
 </Project>

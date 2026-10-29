@@ -1,0 +1,33 @@
+本次接入范围：Chatterbox 本地配音运行环境、软件内试听、预览、批量出片与字幕时间对齐。
+
+发布方：Resemble AI。模型为官方 Chatterbox Multilingual V3；部分底层代码沿用 CosyVoice / S3Tokenizer 等开源实现，经用户确认允许使用。配音在本地运行。
+
+固定来源：
+Chatterbox 代码提交 5de7a54aa4e5e2baadb0182dde554908b48b85c2
+Chatterbox 模型提交 5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18
+PerTh 1.0.1 官方 PyPI wheel，SHA-256 校验后安装。
+CPython 3.12.10 官方 Windows x64 嵌入运行环境，SHA-256 校验后使用。
+PyTorch / torchaudio 2.11.0+cu128（官方 CUDA 12.8 wheel）。
+transformers 5.10.0、diffusers 0.38.0、safetensors 0.8.0。
+全部已验证包版本在 ScriptBatch/chatterbox-requirements.lock 中固定。
+
+安全措施：
+1. 六个 Chatterbox 模型数据文件均固定 SHA-256；加载前检查。
+2. 配音进程禁止 socket 网络连接，使用标准输入 / 输出管道通信，不开放服务器端口。
+3. 禁用 Hugging Face 在线下载与遥测，延迟初始化未使用的中文分词器，防止预加载时额外联网。
+4. PyTorch 只加载权重，使用已修复旧版 weights_only 高危问题的版本。
+5. 不接收外部 .pth / Python 脚本作为参考声音。只将媒体解码为 WAV。
+6. 逐词时间从实际音频对齐；异常短词进行声学复核，必要时重新生成。无法可靠对齐时停止该任务。
+7. 参考声音要求确认使用权；PerTh 音频水印保留。
+
+依赖核对：通过 OSV API 查询实际安装版本。本次升级移除了旧 diffusers、transformers、setuptools、torch 版本的高危公告匹配。剩余公告及适用条件如下：
+- setuptools 81.0.0：GHSA-h35f-9h28-mq5c，macOS 文件系统下的源码包排除规则问题；当前 Windows 不满足利用条件。
+- setuptools 81.0.0：GHSA-xmj3-9gf7-h52w，legacy wheel 安装时 namespace_packages.txt 路径问题；当前安装采用官方固定来源和现代 pip 安装，本地配音不处理外部 wheel。
+- torch 2.11.0：GHSA-rrmf-rvhw-rf47，torch.jit.script 处理恶意 Python 函数的内存问题；用户只输入文字和媒体，当前引擎不接受用户 Python 函数。
+OSV 的 PYSEC-2026-3447 为上述 setuptools 问题的重复记录。
+
+安全性不能用“零风险”保证。未来更新模型或依赖时应重新核对公告和回归测试。
+
+试听性能优化：试听只生成声音，按实际声音参数、参考音频内容、工作脚本和模型安装信息计算缓存标识；字幕对齐模型仅在需要成片字幕时加载。相同声音参数可跨软件重启复用试听缓存。缓存最多保留 64 条 / 约 64MB。模型默认保留 15 分钟，可选 3 / 15 / 30 分钟，并支持手动释放。完整成片继续校验模型文件并对齐实际音频。
+
+许可证：MIT 版权与许可文本位于 licenses/Chatterbox；依赖自带的许可证位于各 dist-info 目录。向团队分发完整软件目录时需一并保留。MIT 许可证不要求在导出视频画面里署名。参考声音、输入素材的授权仍需单独满足。

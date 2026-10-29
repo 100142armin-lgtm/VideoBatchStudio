@@ -34,6 +34,8 @@ namespace VideoBatchMerger.ScriptBatch
 		private ComboBox _cboDefaultVoice;
 		private Button _btnElevenKeys;
 		private Button _btnFetchCloudVoices;
+		private Button _btnChatterboxSettings;
+		private CancellationTokenSource _auditionCts;
 		private bool _isLoadingSettings = false;
 		private Panel _pnlCustomVoiceId;
 		private TextBox _txtCustomVoiceId;
@@ -111,12 +113,20 @@ namespace VideoBatchMerger.ScriptBatch
 		private Panel _pnlStickerMotionParams;
 		private TrackBar _trkStickerEndX;
 		private TrackBar _trkStickerEndY;
+		private TrackBar _trkStickerStartX;
+		private TrackBar _trkStickerStartY;
+		private Label _lblStickerStartX;
+		private Label _lblStickerStartY;
 		private Label _lblStickerEndX;
 		private Label _lblStickerEndY;
 		private NumericUpDown _numStickerMoveDuration;
 		private bool _isSyncingStickerDetails;
 		private CheckBox _chkStickerLoop;
 		private readonly Dictionary<string, Image> _stickerImageCache = new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, MemoryStream> _stickerPreviewStreams = new Dictionary<string, MemoryStream>(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, EventHandler> _stickerAnimationHandlers = new Dictionary<string, EventHandler>(StringComparer.OrdinalIgnoreCase);
+		private readonly HashSet<string> _stickerPreviewPending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		private readonly HashSet<string> _stickerPreviewFailed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 		// 控件引用：输出与控制台
 		private TextBox _txtOutputDir;
@@ -144,6 +154,7 @@ namespace VideoBatchMerger.ScriptBatch
 		private PreviewCanvasBox _previewCanvas;
 		private Image _cachedFootageThumbnail = null;
 		private string _cachedFootageThumbnailBase64 = null;
+		private int _thumbnailRequestId;
 		private Microsoft.Web.WebView2.WinForms.WebView2 _webViewPreview;
 		private bool _isWebViewReady = false;
 		private bool _isWebViewUpdating = false;
@@ -180,6 +191,23 @@ namespace VideoBatchMerger.ScriptBatch
 			{
 				_mainForm.FormClosing += (_, _) => { _previewCts?.Cancel(); SaveSettings(); };
 			}
+		}
+
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing)
+			{
+				_auditionCts?.Cancel();
+				foreach (var pair in _stickerImageCache)
+				{
+					if (_stickerAnimationHandlers.TryGetValue(pair.Key, out var handler))
+						ImageAnimator.StopAnimate(pair.Value, handler);
+					pair.Value.Dispose();
+				}
+				foreach (var stream in _stickerPreviewStreams.Values) stream.Dispose();
+				_cachedFootageThumbnail?.Dispose();
+			}
+			base.Dispose(disposing);
 		}
 
 		private void InitializeUi()
@@ -469,18 +497,26 @@ namespace VideoBatchMerger.ScriptBatch
 				BackColor = BgCanvas
 			};
 
-			var container = new Panel
+			var container = new TableLayoutPanel
 			{
 				Dock = DockStyle.Fill,
 				BackColor = CardBg,
-				Padding = new Padding(10)
+				Padding = new Padding(10),
+				ColumnCount = 1,
+				RowCount = 3
 			};
+			container.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+			container.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+			container.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+			container.RowStyles.Add(new RowStyle(SizeType.Absolute, 74f));
+			var previewViewport = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty, BackColor = Color.FromArgb(7, 10, 18) };
 
 			// 顶部栏：预览标题 + 右侧【时长选择 + ▶ 实机播放 + 🎨 字幕预设库】
 			var headerPanel = new Panel
 			{
-				Dock = DockStyle.Top,
+				Dock = DockStyle.Fill,
 				Height = 38,
+				Margin = Padding.Empty,
 				BackColor = Color.FromArgb(20, 28, 44),
 				Padding = new Padding(10, 4, 8, 4)
 			};
@@ -544,8 +580,9 @@ namespace VideoBatchMerger.ScriptBatch
 			// 底部控件区：字幕位置微调 + 实时命名预览 (高度 74px，双行精准对齐，绝不换行遮挡)
 			var bottomContainer = new Panel
 			{
-				Dock = DockStyle.Bottom,
+				Dock = DockStyle.Fill,
 				Height = 74,
+				Margin = Padding.Empty,
 				BackColor = Color.FromArgb(20, 28, 44),
 				Padding = new Padding(8, 4, 8, 4)
 			};
@@ -703,13 +740,11 @@ namespace VideoBatchMerger.ScriptBatch
 				BackColor = Color.FromArgb(7, 10, 18)
 			};
 
-			// 确保层级严格生效：Top 与 Bottom 靠前停靠，Fill 纯净填充中间区域，绝不遮挡底部微调按钮
-			container.Controls.Add(_previewCanvas);
-			container.Controls.Add(bottomContainer);
-			container.Controls.Add(headerPanel);
-			headerPanel.BringToFront();
-			bottomContainer.BringToFront();
-			_previewCanvas.SendToBack();
+			// 独立的中间单元格限定手机画布高度，避免 Fill 控件延伸到工具栏背后。
+			previewViewport.Controls.Add(_previewCanvas);
+			container.Controls.Add(headerPanel, 0, 0);
+			container.Controls.Add(previewViewport, 0, 1);
+			container.Controls.Add(bottomContainer, 0, 2);
 
 			try
 			{
@@ -719,13 +754,11 @@ namespace VideoBatchMerger.ScriptBatch
 					Dock = DockStyle.Fill,
 					Visible = false
 				};
-				container.Controls.Add(_webViewPreview);
+				previewViewport.Controls.Add(_webViewPreview);
 				_webViewPreview.BringToFront();
 
 				_videoPreviewView = new WebView2 { Dock = DockStyle.Fill, Visible = false };
-				container.Controls.Add(_videoPreviewView);
-				headerPanel.BringToFront();
-				bottomContainer.BringToFront();
+				previewViewport.Controls.Add(_videoPreviewView);
 
 				InitializeWebViewAsync();
 			}
@@ -852,14 +885,16 @@ namespace VideoBatchMerger.ScriptBatch
 			_cboTtsEngine.Items.AddRange(new object[]
 			{
 				"🌐 微软 Edge-TTS (完全免费 · 纯正葡语神父腔 · 0额度限制)",
-				"✨ ElevenLabs 官方 API (超自然情感 · 多Key轮询 · 0额度试听)"
+				"✨ ElevenLabs 官方 API (超自然情感 · 多Key轮询 · 0额度试听)",
+				"🎙 Chatterbox 本地配音（免费 · 离线 · 情绪可调）"
 			});
 			_cboTtsEngine.SelectedIndexChanged += (_, _) =>
 			{
+				if (_isLoadingSettings) return;
 				int idx = _cboTtsEngine.SelectedIndex;
-				_settings.TtsEngine = idx == 1 ? "elevenlabs" : "edge_tts";
-				_settings.Save();
+				_settings.TtsEngine = idx == 2 ? "chatterbox" : (idx == 1 ? "elevenlabs" : "edge_tts");
 				UpdateVoiceDropdownItems();
+				SaveSettings();
 			};
 			voiceFlow.Controls.Add(_cboTtsEngine);
 
@@ -877,6 +912,17 @@ namespace VideoBatchMerger.ScriptBatch
 			_btnFetchCloudVoices.Click += async (_, _) => await FetchCloudVoicesAsync();
 			keyActionRow.Controls.Add(_btnFetchCloudVoices);
 			voiceFlow.Controls.Add(keyActionRow);
+			_btnChatterboxSettings = CreateButton("🎙 Chatterbox 设置 / 安装", AccentBlue, Color.White, 300);
+			_btnChatterboxSettings.Click += (_, _) =>
+			{
+				using (var dialog = new ChatterboxSettingsDialog(_settings))
+				{
+					var result = dialog.ShowDialog(this);
+					UpdateVoiceDropdownItems();
+					if (result == DialogResult.OK) SaveSettings();
+				}
+			};
+			voiceFlow.Controls.Add(_btnChatterboxSettings);
 
 			voiceFlow.Controls.Add(CreateLabel("音色精选:"));
 			_cboDefaultVoice = new ComboBox
@@ -889,6 +935,7 @@ namespace VideoBatchMerger.ScriptBatch
 			};
 			_cboDefaultVoice.SelectedIndexChanged += (_, _) =>
 			{
+				if (_isLoadingSettings) return;
 				SaveSettings();
 				UpdatePreview();
 
@@ -948,7 +995,7 @@ namespace VideoBatchMerger.ScriptBatch
 				ForeColor = TextPrimary,
 				FlatStyle = FlatStyle.Flat
 			};
-			_cboRate.Items.AddRange(new object[] { "正常 (1.0x)", "略快 (1.05x)", "快速 (1.10x)", "沉缓 (0.95x)" });
+			_cboRate.Items.AddRange(new object[] { "正常 (1.0x)", "略快 (1.05x)", "快速 (1.10x)", "沉缓 (0.95x)", "舒缓 (0.90x)", "庄重 (0.85x)", "慢速 (0.80x)" });
 			_cboRate.SelectedIndexChanged += (_, _) => SaveSettings();
 			rateRow.Controls.Add(_cboRate);
 
@@ -1082,6 +1129,7 @@ namespace VideoBatchMerger.ScriptBatch
 			subFlow.Controls.Add(_chkSubtitleScrollPanel);
 
 			flow.Controls.Add(CreateCollapsibleCard("🎨 字幕视觉模板与排版", subFlow, true));
+			flow.Controls.Add(CreateCollapsibleCard("🏷️ 独立视频标题 (样式 / 位置 / 时长)", BuildTitleSection(), false));
 
 			// 3. 背景素材池 (智能增剪与对齐) (默认折叠)
 			var footageFlow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Width = 310 };
@@ -1462,59 +1510,53 @@ namespace VideoBatchMerger.ScriptBatch
 			scrollContainer.Controls.Add(flow);
 			outer.Controls.Add(scrollContainer);
 
-			// 右栏随拖拽宽度等比例缩放 (带严格重入保护与相等防护，彻底防止死循环与界面卡死)
+			// 随右栏拖拽调整卡片和输入区。只在有效宽度真正变化时更新。
 			var designWidths = new Dictionary<Control, int>();
 			void Collect(Control parent)
 			{
-				foreach (Control c in parent.Controls)
+				foreach (Control control in parent.Controls)
 				{
-					if (c is Panel && c.Parent == flow)
+					if (control is Panel && control.Parent == flow)
 					{
-						// 卡片容器本身宽度由 flow 统一管理，跳过避免重复计算
+						// 卡片容器由 flow 统一设置宽度。
 					}
-					else if (c.Dock == DockStyle.None && c.Width >= 160 && !designWidths.ContainsKey(c))
+					else if (control.Dock == DockStyle.None && control.Width >= 160 && !designWidths.ContainsKey(control))
 					{
-						designWidths[c] = Math.Min(c.Width, 330);
+						designWidths[control] = Math.Min(control.Width, 330);
 					}
-					Collect(c);
+					Collect(control);
 				}
 			}
 			Collect(flow);
 
 			bool isScaling = false;
 			int lastScaledWidth = -1;
-
 			void ScaleRightContent()
 			{
 				if (isScaling) return;
-				int avail = scrollContainer.ClientSize.Width - scrollContainer.Padding.Horizontal - 6;
-				if (avail < 120 || avail == lastScaledWidth) return;
-				lastScaledWidth = avail;
-
+				int available = scrollContainer.ClientSize.Width - scrollContainer.Padding.Horizontal - 6;
+				if (available < 120 || available == lastScaledWidth) return;
+				lastScaledWidth = available;
 				isScaling = true;
 				try
 				{
-					float ratio = Math.Max(0.75f, avail / 310f);
+					float ratio = Math.Max(0.75f, available / 310f);
 					flow.SuspendLayout();
-					flow.Width = avail;
-					pnlTopExec.Width = avail;
-					topFlow.Width = Math.Max(avail - 16, 280);
-
+					flow.Width = available;
+					pnlTopExec.Width = available;
+					topFlow.Width = Math.Max(available - 16, 280);
 					foreach (Control card in flow.Controls)
+						if (card.Width != available) card.Width = available;
+					foreach (var entry in designWidths)
 					{
-						if (card.Width != avail) card.Width = avail;
+						if (entry.Key.IsDisposed) continue;
+						int target = (int)Math.Round(entry.Value * ratio);
+						if (entry.Key.Width != target) entry.Key.Width = target;
 					}
-
-					foreach (var kv in designWidths)
-					{
-						if (kv.Key.IsDisposed) continue;
-						int target = (int)Math.Round(kv.Value * ratio);
-						if (kv.Key.Width != target) kv.Key.Width = target;
-					}
-					flow.ResumeLayout(true);
 				}
 				finally
 				{
+					flow.ResumeLayout(true);
 					isScaling = false;
 				}
 			}
@@ -1572,7 +1614,7 @@ namespace VideoBatchMerger.ScriptBatch
 						{
 							int pos = Math.Max(VerticalScroll.Minimum, Math.Min(VerticalScroll.Maximum, si.nTrackPos));
 							AutoScrollPosition = new Point(-AutoScrollPosition.X, pos);
-							Update();
+							Invalidate();
 							return;
 						}
 					}
@@ -1584,20 +1626,35 @@ namespace VideoBatchMerger.ScriptBatch
 			protected override void OnMouseWheel(MouseEventArgs e)
 			{
 				base.OnMouseWheel(e);
-				Update();
+				Invalidate();
 			}
 		}
 
 		private void UpdateVoiceDropdownItems()
 		{
+			bool wasLoading = _isLoadingSettings;
+			_isLoadingSettings = true;
+			try
+			{
 			_cboDefaultVoice.Items.Clear();
 			int engineIdx = _cboTtsEngine.SelectedIndex;
 			bool isEleven = engineIdx == 1;
+			bool isChatterbox = engineIdx == 2;
 
 			_btnElevenKeys.Visible = isEleven;
 			_btnFetchCloudVoices.Visible = isEleven;
-			_lblVoiceHint.Visible = isEleven;
-			if (isEleven)
+			_btnChatterboxSettings.Visible = isChatterbox;
+			_lblVoiceHint.Visible = isEleven || isChatterbox;
+			if (isChatterbox)
+			{
+				_lblVoiceHint.Text = ChatterboxEngine.IsInstalled
+					? "本地模型已就绪。首次加载较慢；试听、预览、批量均使用同一套声音参数。"
+					: "首次使用请点击【Chatterbox 设置 / 安装】下载本地模型。";
+				foreach (var voice in ChatterboxEngine.AvailableVoices) _cboDefaultVoice.Items.Add(voice);
+				_cboDefaultVoice.SelectedItem = ChatterboxEngine.AvailableVoices.FirstOrDefault(v => v.Key == "chatterbox:" + _settings.ChatterboxLanguage)
+					?? ChatterboxEngine.AvailableVoices[0];
+			}
+			else if (isEleven)
 			{
 				_lblVoiceHint.Text = "💡 ElevenLabs 采用多密钥池智能轮询；试听使用官方云端 CDN 零额度直连播放，绝不消耗任何字符配额！";
 
@@ -1644,6 +1701,8 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 
 			CheckCustomVoicePanelVisibility();
+			}
+			finally { _isLoadingSettings = wasLoading; }
 		}
 
 		private void CheckCustomVoicePanelVisibility()
@@ -1731,7 +1790,7 @@ namespace VideoBatchMerger.ScriptBatch
 			_isLoadingSettings = true;
 			try
 			{
-				_cboTtsEngine.SelectedIndex = string.Equals(_settings.TtsEngine, "elevenlabs", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+				_cboTtsEngine.SelectedIndex = _settings.TtsEngine == "chatterbox" ? 2 : (string.Equals(_settings.TtsEngine, "elevenlabs", StringComparison.OrdinalIgnoreCase) ? 1 : 0);
 				UpdateVoiceDropdownItems();
 
 				_txtProducerName.Text = string.IsNullOrWhiteSpace(_settings.ProducerName) ? "陆恒" : _settings.ProducerName;
@@ -1742,6 +1801,9 @@ namespace VideoBatchMerger.ScriptBatch
 					"+5%" => 1,
 					"+10%" => 2,
 					"-5%" => 3,
+					"-10%" => 4,
+					"-15%" => 5,
+					"-20%" => 6,
 					_ => 0
 				};
 
@@ -1821,11 +1883,12 @@ namespace VideoBatchMerger.ScriptBatch
 			if (_isLoadingSettings) return;
 
 			int engineIdx = _cboTtsEngine.SelectedIndex;
-			_settings.TtsEngine = engineIdx == 1 ? "elevenlabs" : "edge_tts";
+			_settings.TtsEngine = engineIdx == 2 ? "chatterbox" : (engineIdx == 1 ? "elevenlabs" : "edge_tts");
 
 			if (_cboDefaultVoice.SelectedItem is VoiceOption vo)
 			{
-				if (engineIdx == 1) _settings.ElevenLabsVoice = vo.Key;
+				if (engineIdx == 2) _settings.ChatterboxLanguage = vo.Language;
+				else if (engineIdx == 1) _settings.ElevenLabsVoice = vo.Key;
 				else _settings.DefaultVoice = vo.Key;
 			}
 			_settings.ElevenLabsCustomVoiceId = _txtCustomVoiceId.Text.Trim();
@@ -1836,6 +1899,9 @@ namespace VideoBatchMerger.ScriptBatch
 				1 => "+5%",
 				2 => "+10%",
 				3 => "-5%",
+				4 => "-10%",
+				5 => "-15%",
+				6 => "-20%",
 				_ => "+0%"
 			};
 
@@ -1933,6 +1999,10 @@ namespace VideoBatchMerger.ScriptBatch
 
 		private void ScanFootageFolder()
 		{
+			int requestId = ++_thumbnailRequestId;
+			_cachedFootageThumbnail?.Dispose();
+			_cachedFootageThumbnail = null;
+			_cachedFootageThumbnailBase64 = null;
 			_footageFiles.Clear();
 			string path = _txtFootageFolder.Text.Trim();
 			if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
@@ -1946,7 +2016,7 @@ namespace VideoBatchMerger.ScriptBatch
 					_footageFiles.AddRange(files);
 					_lblFootageCount.Text = $"已扫描 {_footageFiles.Count} 个素材 (渲染时自动跳过损坏文件)";
 					_lblFootageCount.ForeColor = _footageFiles.Count > 0 ? AccentGreen : AccentYellow;
-					ExtractThumbnailFromFootage();
+					if (_footageFiles.Count > 0) ExtractThumbnailFromFootage(_footageFiles[0], requestId);
 					return;
 				}
 				catch { }
@@ -1955,34 +2025,42 @@ namespace VideoBatchMerger.ScriptBatch
 			_lblFootageCount.ForeColor = TextMuted;
 		}
 
-		private void ExtractThumbnailFromFootage()
+		private async void ExtractThumbnailFromFootage(string firstVideo, int requestId)
 		{
-			if (_footageFiles.Count == 0) return;
 			try
 			{
-				string firstVideo = _footageFiles[0];
-				string ffmpeg = ScriptBatchComposer.FindFfmpegExe();
-				string tempThumb = Path.Combine(Path.GetTempPath(), "script_preview_thumb.jpg");
-				var psi = new ProcessStartInfo
+				byte[] thumbBytes = await Task.Run(() =>
 				{
-					FileName = ffmpeg,
-					Arguments = $"-y -ss 00:00:01 -i {ScriptBatchComposer.QuoteArg(firstVideo)} -vframes 1 -q:v 2 {ScriptBatchComposer.QuoteArg(tempThumb)}",
-					CreateNoWindow = true,
-					UseShellExecute = false
-				};
-				using var p = Process.Start(psi);
-				p.WaitForExit(3000);
-				if (File.Exists(tempThumb))
-				{
-					using var img = Image.FromFile(tempThumb);
-					_cachedFootageThumbnail = new Bitmap(img);
+					string tempThumb = Path.Combine(Path.GetTempPath(), "script_preview_" + Guid.NewGuid().ToString("N") + ".jpg");
 					try
 					{
-						byte[] thumbBytes = File.ReadAllBytes(tempThumb);
-						_cachedFootageThumbnailBase64 = "data:image/jpeg;base64," + Convert.ToBase64String(thumbBytes);
+						var psi = new ProcessStartInfo
+						{
+							FileName = ScriptBatchComposer.FindFfmpegExe(),
+							Arguments = $"-y -loglevel error -ss 00:00:01 -i {ScriptBatchComposer.QuoteArg(firstVideo)} -vframes 1 -q:v 2 {ScriptBatchComposer.QuoteArg(tempThumb)}",
+							CreateNoWindow = true,
+							UseShellExecute = false
+						};
+						using var process = Process.Start(psi);
+						if (process == null) return null;
+						if (!process.WaitForExit(3000))
+						{
+							try { process.Kill(); } catch { }
+							return null;
+						}
+						return process.ExitCode == 0 && File.Exists(tempThumb) ? File.ReadAllBytes(tempThumb) : null;
 					}
-					catch { }
+					catch { return null; }
+					finally { try { File.Delete(tempThumb); } catch { } }
+				});
+				if (thumbBytes == null || IsDisposed || requestId != _thumbnailRequestId) return;
+				using (var stream = new MemoryStream(thumbBytes))
+				using (var img = Image.FromStream(stream))
+				{
+					_cachedFootageThumbnail = new Bitmap(img);
 				}
+				_cachedFootageThumbnailBase64 = "data:image/jpeg;base64," + Convert.ToBase64String(thumbBytes);
+				if (IsHandleCreated && !_isPreviewRendering && !_isPreviewPlaying) UpdatePreview();
 			}
 			catch { }
 		}
@@ -1991,19 +2069,12 @@ namespace VideoBatchMerger.ScriptBatch
 		{
 			if (_isPreviewRendering) _previewCts?.Cancel();
 			if (_isPreviewPlaying) CloseVideoPreview();
-			if (_previewCanvas != null && _webViewPreview != null && _isWebViewReady)
-			{
-				bool useCanvas = _settings.SubtitleDisplayMode == 4 || _settings.SubtitleDisplayMode == 5 || (_settings.GifStickers != null && _settings.GifStickers.Any(s => s.Enabled));
-				_previewCanvas.Visible = useCanvas;
-				_webViewPreview.Visible = !useCanvas;
-			}
+			// 参数编辑始终使用同一张 GDI 画布。按 GIF 启用状态切换到 WebView
+			// 会丢失本地素材背景，导致停用/更换贴纸时手机预览变黑。
+			if (_previewCanvas != null) _previewCanvas.Visible = true;
+			if (_webViewPreview != null) _webViewPreview.Visible = false;
 			_previewCanvas?.Invalidate();
-			_previewCanvas?.Update();
 
-			if (_isWebViewReady && _webViewPreview != null && !_webViewPreview.IsDisposed && !_isWebViewUpdating)
-			{
-				SendStateToWebView();
-			}
 		}
 
 		private void WireLiveTrackBar(TrackBar trk, Action<int> onUpdate, Action onCommit = null)
@@ -2014,7 +2085,6 @@ namespace VideoBatchMerger.ScriptBatch
 				UpdatePreview();
 			}
 
-			trk.Scroll += (_, _) => HandleLiveUpdate();
 			trk.ValueChanged += (_, _) => HandleLiveUpdate();
 			trk.MouseUp += (_, _) =>
 			{
@@ -2663,6 +2733,11 @@ namespace VideoBatchMerger.ScriptBatch
 		{
 			if (_isAuditioning)
 			{
+				if (_auditionCts != null)
+				{
+					_auditionCts.Cancel();
+					_btnAudition.Enabled = false;
+				}
 				ScriptBatchTtsEngine.StopAudio();
 				ResetAuditionButton();
 				_lblStatusText.Text = "已停止音频试听";
@@ -2687,10 +2762,35 @@ namespace VideoBatchMerger.ScriptBatch
 
 			string auditionDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "auditions");
 			try { Directory.CreateDirectory(auditionDir); } catch { }
+			CancellationTokenSource localAuditionCts = null;
 
 			try
 			{
-				if (isEleven)
+				if (engineIdx == 2)
+				{
+					SaveSettings();
+					localAuditionCts = new CancellationTokenSource();
+					_auditionCts = localAuditionCts;
+					string sample = _settings.ChatterboxLanguage switch
+					{
+						"en" => "May God give you strength and hope.",
+						"es" => "Que Dios bendiga a tu familia.",
+						"fr" => "Que Dieu bénisse votre famille.",
+						"de" => "Möge Gott deine Familie segnen.",
+						"it" => "Che Dio benedica la tua famiglia.",
+						_ => "Que Deus abençoe a sua família."
+					};
+					var res = await ChatterboxEngine.SynthesizeAsync(sample, voiceKey, _settings, auditionDir, 998, localAuditionCts.Token,
+						message => { if (IsHandleCreated && !IsDisposed) BeginInvoke((MethodInvoker)(() => _lblStatusText.Text = message)); }, audioOnly: true);
+					localAuditionCts.Token.ThrowIfCancellationRequested();
+					if (res.Success)
+					{
+						_lblStatusText.Text = "正在播放 Chatterbox 本地配音试听。";
+						if (!ScriptBatchTtsEngine.PlayAudioFile(res.AudioPath, () => { if (IsHandleCreated) BeginInvoke((MethodInvoker)ResetAuditionButton); })) ResetAuditionButton();
+					}
+					else { ResetAuditionButton(); MessageBox.Show(this, res.ErrorMessage, "本地配音试听"); }
+				}
+				else if (isEleven)
 				{
 					// 参考 VideoKit 核心机制：试听优先直连官方 CDN 预录音频，100%零额度消耗，绝不消耗任何 API 字符配额
 					string cachedAudio = Path.Combine(auditionDir, $"eleven_{voiceKey}.mp3");
@@ -2786,10 +2886,24 @@ namespace VideoBatchMerger.ScriptBatch
 					}
 				}
 			}
+			catch (OperationCanceledException)
+			{
+				ResetAuditionButton();
+				_lblStatusText.Text = "已取消本地配音试听。";
+			}
 			catch (Exception ex)
 			{
 				ResetAuditionButton();
 				_lblStatusText.Text = $"试听异常: {ex.Message}";
+			}
+			finally
+			{
+				if (localAuditionCts != null)
+				{
+					if (ReferenceEquals(_auditionCts, localAuditionCts)) _auditionCts = null;
+					localAuditionCts.Dispose();
+					if (!IsDisposed) _btnAudition.Enabled = true;
+				}
 			}
 		}
 
@@ -3025,9 +3139,9 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 
 			string effectiveVoice = string.IsNullOrWhiteSpace(sourceItem.VoiceKey)
-				? (string.Equals(_settings.TtsEngine, "elevenlabs", StringComparison.OrdinalIgnoreCase) ? _settings.ElevenLabsVoice : _settings.DefaultVoice)
+				? (_settings.TtsEngine == "chatterbox" ? "chatterbox:" + _settings.ChatterboxLanguage : (string.Equals(_settings.TtsEngine, "elevenlabs", StringComparison.OrdinalIgnoreCase) ? _settings.ElevenLabsVoice : _settings.DefaultVoice))
 				: sourceItem.VoiceKey;
-			string currentScriptKey = $"{_settings.TtsEngine}|{effectiveVoice}|{_settings.SpeechRate}|{_settings.SpeechPitch}|{sourceItem.ScriptText?.Trim()}";
+			string currentScriptKey = ScriptBatchTtsEngine.GetSynthesisCacheKey(_settings, sourceItem.ScriptText, effectiveVoice);
 
 			var item = new ScriptBatchItem
 			{
@@ -3036,10 +3150,11 @@ namespace VideoBatchMerger.ScriptBatch
 				ChineseTitle = sourceItem.ChineseTitle,
 				Title = sourceItem.Title,
 				ScriptText = sourceItem.ScriptText,
-				VoiceKey = sourceItem.VoiceKey
+				VoiceKey = effectiveVoice,
+				TtsCacheKey = sourceItem.TtsCacheKey
 			};
 
-			if (!string.IsNullOrEmpty(sourceItem.AudioPath) && File.Exists(sourceItem.AudioPath) &&
+			if (sourceItem.TtsCacheKey == currentScriptKey && !string.IsNullOrEmpty(sourceItem.AudioPath) && File.Exists(sourceItem.AudioPath) &&
 			    !string.IsNullOrEmpty(sourceItem.SrtPath) && File.Exists(sourceItem.SrtPath))
 			{
 				item.AudioPath = sourceItem.AudioPath;
@@ -3051,6 +3166,7 @@ namespace VideoBatchMerger.ScriptBatch
 			{
 				item.AudioPath = _cachedPreviewAudioPath;
 				item.SrtPath = _cachedPreviewSrtPath;
+				item.TtsCacheKey = currentScriptKey;
 			}
 
 			string previewDir = Path.Combine(Path.GetTempPath(), "VideoBatchStudio_Previews");
@@ -3231,19 +3347,16 @@ namespace VideoBatchMerger.ScriptBatch
 		{
 			if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
 			if (_stickerImageCache.TryGetValue(path, out var img)) return img;
+			if (string.Equals(Path.GetExtension(path), ".gif", StringComparison.OrdinalIgnoreCase)
+				&& !_stickerPreviewFailed.Contains(path) && new FileInfo(path).Length > 3_000_000)
+			{
+				if (_stickerPreviewPending.Add(path)) _ = PrepareStickerPreviewAsync(path);
+				return null;
+			}
 			try
 			{
 				var loaded = Image.FromFile(path);
-				if (ImageAnimator.CanAnimate(loaded))
-				{
-					ImageAnimator.Animate(loaded, (s, e) =>
-					{
-						if (IsHandleCreated && !IsDisposed)
-						{
-							_previewCanvas?.Invalidate();
-						}
-					});
-				}
+				StartStickerAnimation(path, loaded);
 				_stickerImageCache[path] = loaded;
 				return loaded;
 			}
@@ -3251,6 +3364,129 @@ namespace VideoBatchMerger.ScriptBatch
 			{
 				return null;
 			}
+		}
+
+		private void StartStickerAnimation(string path, Image image)
+		{
+			if (!ImageAnimator.CanAnimate(image)) return;
+			EventHandler handler = (_, _) =>
+			{
+				if (IsHandleCreated && !IsDisposed && _previewCanvas != null && _previewCanvas.Visible)
+					_previewCanvas.Invalidate();
+			};
+			_stickerAnimationHandlers[path] = handler;
+			ImageAnimator.Animate(image, handler);
+		}
+
+		private async Task PrepareStickerPreviewAsync(string path)
+		{
+			byte[] bytes = await Task.Run(() =>
+			{
+				string proxyPath = Path.Combine(Path.GetTempPath(), "vbs_gif_preview_" + Guid.NewGuid().ToString("N") + ".gif");
+				try
+				{
+					const string filter = "[0:v]fps=10,scale=360:-1:flags=fast_bilinear,split[a][b];[a]palettegen=reserve_transparent=1[p];[b][p]paletteuse=alpha_threshold=128";
+					var psi = new ProcessStartInfo
+					{
+						FileName = ScriptBatchComposer.FindFfmpegExe(),
+						Arguments = $"-hide_banner -loglevel error -y -i {ScriptBatchComposer.QuoteArg(path)} -filter_complex {ScriptBatchComposer.QuoteArg(filter)} -loop 0 {ScriptBatchComposer.QuoteArg(proxyPath)}",
+						UseShellExecute = false,
+						CreateNoWindow = true
+					};
+					using var process = Process.Start(psi);
+					if (process == null) return null;
+					if (!process.WaitForExit(12000))
+					{
+						try { process.Kill(); } catch { }
+						return null;
+					}
+					return process.ExitCode == 0 && File.Exists(proxyPath) ? File.ReadAllBytes(proxyPath) : null;
+				}
+				catch { return null; }
+				finally { try { File.Delete(proxyPath); } catch { } }
+			});
+
+			if (IsDisposed) return;
+			_stickerPreviewPending.Remove(path);
+			if (bytes == null)
+			{
+				_stickerPreviewFailed.Add(path);
+				_previewCanvas?.Invalidate();
+				return;
+			}
+			try
+			{
+				var stream = new MemoryStream(bytes, writable: false);
+				var image = Image.FromStream(stream);
+				_stickerPreviewStreams[path] = stream;
+				_stickerImageCache[path] = image;
+				StartStickerAnimation(path, image);
+				_previewCanvas?.Invalidate();
+			}
+			catch
+			{
+				_stickerPreviewFailed.Add(path);
+			}
+		}
+
+		private Control BuildTitleSection()
+		{
+			var plan = _settings.ScriptTitlePlan ?? (_settings.ScriptTitlePlan = new MergeTitlePlan());
+			var panel = new Panel { AutoSize = true, Width = 310, Margin = new Padding(0, 4, 0, 4) };
+			var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+			var enabled = new CheckBox { Text = "启用独立视频标题", Checked = plan.Enabled, ForeColor = TextPrimary, AutoSize = true };
+			enabled.CheckedChanged += (_, _) => { plan.Enabled = enabled.Checked; SaveSettings(); UpdatePreview(); };
+			flow.Controls.Add(enabled);
+			flow.Controls.Add(new Label { Text = "标题文字（可用 {文案标题}、{文案代码}）", ForeColor = TextMuted, AutoSize = true });
+			var titleText = new TextBox { Width = 295, Height = 46, Multiline = true, BackColor = InputBg, ForeColor = TextPrimary, Text = plan.MainTitleTemplate ?? string.Empty };
+			titleText.TextChanged += (_, _) => { plan.MainTitleTemplate = titleText.Text; SaveSettings(); UpdatePreview(); };
+			flow.Controls.Add(titleText);
+			flow.Controls.Add(new Label { Text = "副标题（可选）", ForeColor = TextMuted, AutoSize = true });
+			var subText = new TextBox { Width = 295, BackColor = InputBg, ForeColor = TextPrimary, Text = plan.SubTitleTemplate ?? string.Empty };
+			subText.TextChanged += (_, _) => { plan.SubTitleTemplate = subText.Text; SaveSettings(); UpdatePreview(); };
+			flow.Controls.Add(subText);
+			flow.Controls.Add(new Label { Text = "标题预设样式", ForeColor = TextMuted, AutoSize = true });
+			var lightIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+			{
+				"cinematic_white", "youtube_bold_pop", "variety_cartoon", "mint_glass",
+				"tech_glass", "red_alert", "traditional_chinese", "blockbuster_sans"
+			};
+			var styles = MergeTitleStyleCatalog.Styles.Where(style => lightIds.Contains(style.Id)).ToList();
+			var styleBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 295, DropDownWidth = 540, BackColor = InputBg, ForeColor = TextPrimary };
+			styleBox.Items.AddRange(styles.Select(style => (object)style.Name).ToArray());
+			int styleIndex = styles.FindIndex(style => style.Id == plan.StyleId);
+			styleBox.SelectedIndex = styleIndex >= 0 ? styleIndex : 0;
+			styleBox.SelectedIndexChanged += (_, _) => { if (styleBox.SelectedIndex < 0) return; plan.StyleId = styles[styleBox.SelectedIndex].Id; SaveSettings(); UpdatePreview(); };
+			flow.Controls.Add(styleBox);
+			var positionRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+			positionRow.Controls.Add(new Label { Text = "位置", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(0, 5, 5, 0) });
+			var positionBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, BackColor = InputBg, ForeColor = TextPrimary };
+			positionBox.Items.AddRange(new object[] { "顶部", "居中偏上", "居中", "居中偏下", "底部" });
+			positionBox.SelectedItem = positionBox.Items.Cast<string>().FirstOrDefault(value => value == plan.Position) ?? "居中偏上";
+			positionBox.SelectedIndexChanged += (_, _) => { plan.Position = positionBox.SelectedItem?.ToString(); SaveSettings(); UpdatePreview(); };
+			positionRow.Controls.Add(positionBox);
+			flow.Controls.Add(positionRow);
+			var sizeRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+			sizeRow.Controls.Add(new Label { Text = "字号倍数", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(0, 5, 5, 0) });
+			var sizeInput = new NumericUpDown { DecimalPlaces = 2, Increment = 0.05m, Minimum = 0.20m, Maximum = 2.50m, Value = Math.Max(0.20m, Math.Min(2.50m, (decimal)plan.FontSizeScale)), Width = 70, BackColor = InputBg, ForeColor = TextPrimary };
+			sizeInput.ValueChanged += (_, _) => { plan.FontSizeScale = (float)sizeInput.Value; SaveSettings(); UpdatePreview(); };
+			sizeRow.Controls.Add(sizeInput);
+			flow.Controls.Add(sizeRow);
+			var durationRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+			durationRow.Controls.Add(new Label { Text = "显示秒数 (0=全程)", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(0, 5, 5, 0) });
+			var durationInput = new NumericUpDown { DecimalPlaces = 1, Increment = 0.5m, Minimum = 0, Maximum = 120, Value = Math.Max(0, Math.Min(120, (decimal)plan.DurationSeconds)), Width = 70, BackColor = InputBg, ForeColor = TextPrimary };
+			durationInput.ValueChanged += (_, _) => { plan.DurationSeconds = (double)durationInput.Value; SaveSettings(); UpdatePreview(); };
+			durationRow.Controls.Add(durationInput);
+			flow.Controls.Add(durationRow);
+			var offsetRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+			offsetRow.Controls.Add(new Label { Text = "上下微调 px", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(0, 5, 5, 0) });
+			var offsetInput = new NumericUpDown { Minimum = -500, Maximum = 500, Value = Math.Max(-500, Math.Min(500, plan.CustomOffsetY)), Width = 70, BackColor = InputBg, ForeColor = TextPrimary };
+			offsetInput.ValueChanged += (_, _) => { plan.CustomOffsetY = (int)offsetInput.Value; SaveSettings(); UpdatePreview(); };
+			offsetRow.Controls.Add(offsetInput);
+			flow.Controls.Add(offsetRow);
+			flow.Controls.Add(new Label { Text = "标题仅使用本栏参数；字幕和水印设置互不影响。", ForeColor = TextMuted, AutoSize = true });
+			panel.Controls.Add(flow);
+			return panel;
 		}
 
 		private Control BuildGifStickerSection()
@@ -3384,6 +3620,7 @@ namespace VideoBatchMerger.ScriptBatch
 				if (_selectedSticker == null) return;
 				_selectedSticker.XPercent = val;
 				_lblStickerX.Text = $"↔️ 水平位置 (X): {val}%";
+				_previewCanvas?.StopSelectedStickerMotion();
 			}, () => { SaveSettings(); RefreshStickerList(); });
 			dFlow.Controls.Add(_trkStickerX);
 
@@ -3395,6 +3632,7 @@ namespace VideoBatchMerger.ScriptBatch
 				if (_selectedSticker == null) return;
 				_selectedSticker.YPercent = val;
 				_lblStickerY.Text = $"↕️ 垂直位置 (Y): {val}%";
+				_previewCanvas?.StopSelectedStickerMotion();
 			}, () => { SaveSettings(); RefreshStickerList(); });
 			dFlow.Controls.Add(_trkStickerY);
 
@@ -3538,6 +3776,30 @@ namespace VideoBatchMerger.ScriptBatch
 
 			_pnlStickerMotionParams = new Panel { AutoSize = true, Width = 310, Margin = new Padding(0, 0, 0, 6) };
 			var motionFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+			_lblStickerStartX = new Label { Text = "起点 X: 50%", ForeColor = TextPrimary, AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
+			motionFlow.Controls.Add(_lblStickerStartX);
+			_trkStickerStartX = new TrackBar { Minimum = -30, Maximum = 130, Value = 50, Width = 310, Height = 26, TickStyle = TickStyle.None };
+			WireLiveTrackBar(_trkStickerStartX, val =>
+			{
+				if (_isSyncingStickerDetails || _selectedSticker == null) return;
+				_selectedSticker.XPercent = val;
+				_lblStickerStartX.Text = $"起点 X: {val}%";
+				_previewCanvas?.StopSelectedStickerMotion();
+				SyncStickerDetailsFromModel();
+			}, () => { SaveSettings(); RefreshStickerList(); });
+			motionFlow.Controls.Add(_trkStickerStartX);
+			_lblStickerStartY = new Label { Text = "起点 Y: 50%", ForeColor = TextPrimary, AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
+			motionFlow.Controls.Add(_lblStickerStartY);
+			_trkStickerStartY = new TrackBar { Minimum = -30, Maximum = 130, Value = 50, Width = 310, Height = 26, TickStyle = TickStyle.None };
+			WireLiveTrackBar(_trkStickerStartY, val =>
+			{
+				if (_isSyncingStickerDetails || _selectedSticker == null) return;
+				_selectedSticker.YPercent = val;
+				_lblStickerStartY.Text = $"起点 Y: {val}%";
+				_previewCanvas?.StopSelectedStickerMotion();
+				SyncStickerDetailsFromModel();
+			}, () => { SaveSettings(); RefreshStickerList(); });
+			motionFlow.Controls.Add(_trkStickerStartY);
 			_lblStickerEndX = new Label { Text = "终点 X: 50%", ForeColor = TextPrimary, AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
 			motionFlow.Controls.Add(_lblStickerEndX);
 			_trkStickerEndX = new TrackBar { Minimum = -30, Maximum = 130, Value = 50, Width = 310, Height = 26, TickStyle = TickStyle.None };
@@ -3546,6 +3808,7 @@ namespace VideoBatchMerger.ScriptBatch
 				if (_isSyncingStickerDetails || _selectedSticker == null) return;
 				_selectedSticker.EndXPercent = val;
 				_lblStickerEndX.Text = $"终点 X: {val}%";
+				_previewCanvas?.StopSelectedStickerMotion();
 			}, () => { SaveSettings(); RefreshStickerList(); });
 			motionFlow.Controls.Add(_trkStickerEndX);
 			_lblStickerEndY = new Label { Text = "终点 Y: 20%", ForeColor = TextPrimary, AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
@@ -3556,6 +3819,7 @@ namespace VideoBatchMerger.ScriptBatch
 				if (_isSyncingStickerDetails || _selectedSticker == null) return;
 				_selectedSticker.EndYPercent = val;
 				_lblStickerEndY.Text = $"终点 Y: {val}%";
+				_previewCanvas?.StopSelectedStickerMotion();
 			}, () => { SaveSettings(); RefreshStickerList(); });
 			motionFlow.Controls.Add(_trkStickerEndY);
 			var moveTimeRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
@@ -3573,7 +3837,7 @@ namespace VideoBatchMerger.ScriptBatch
 			btnReplayMotion.Click += (_, _) => _previewCanvas?.PlaySelectedStickerMotion();
 			moveTimeRow.Controls.Add(btnReplayMotion);
 			motionFlow.Controls.Add(moveTimeRow);
-			motionFlow.Controls.Add(new Label { Text = "预览区拖动贴纸设起点；终点用上方滑块微调。", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(0, 2, 0, 0) });
+			motionFlow.Controls.Add(new Label { Text = "拖动预览中的贴纸设起点，拖动橙色圆点设终点；滑块可微调画面外坐标。", ForeColor = TextMuted, AutoSize = true, Margin = new Padding(0, 2, 0, 0) });
 			_pnlStickerMotionParams.Controls.Add(motionFlow);
 			dFlow.Controls.Add(_pnlStickerMotionParams);
 
@@ -3654,6 +3918,10 @@ namespace VideoBatchMerger.ScriptBatch
 				_lblStickerX.Text = $"↔️ 起点 X: {_trkStickerX.Value}%";
 				_trkStickerY.Value = Math.Max(-30, Math.Min(130, (int)Math.Round(_selectedSticker.YPercent)));
 				_lblStickerY.Text = $"↕️ 起点 Y: {_trkStickerY.Value}%";
+				_trkStickerStartX.Value = _trkStickerX.Value;
+				_lblStickerStartX.Text = $"起点 X: {_trkStickerStartX.Value}%";
+				_trkStickerStartY.Value = _trkStickerY.Value;
+				_lblStickerStartY.Text = $"起点 Y: {_trkStickerStartY.Value}%";
 				_trkStickerScale.Value = Math.Max(5, Math.Min(90, (int)Math.Round(_selectedSticker.ScalePercent)));
 				_lblStickerScale.Text = $"🔍 缩放大小: {_trkStickerScale.Value}%";
 				_trkStickerRotate.Value = Math.Max(-180, Math.Min(180, (int)Math.Round(_selectedSticker.RotationAngle)));
@@ -3828,11 +4096,25 @@ namespace VideoBatchMerger.ScriptBatch
 		private sealed class PreviewCanvasBox : Control
 		{
 			private readonly ScriptBatchStudioPanel _panel;
+			private Image _scaledBackgroundSource;
+			private Bitmap _scaledBackground;
+			private Size _scaledBackgroundSize;
+			private Bitmap _watermarkLayer;
+			private Bitmap _scaledWatermark;
+			private Size _scaledWatermarkSize;
+			private Point _scaledWatermarkOffset;
+			private string _watermarkCacheKey;
+			private Bitmap _titleLayer;
+			private Bitmap _scaledTitle;
+			private Size _scaledTitleSize;
+			private Point _scaledTitleOffset;
+			private string _titleCacheKey;
 			private readonly System.Windows.Forms.Timer _subtitlePreviewTimer;
 			private readonly Stopwatch _subtitlePreviewClock = Stopwatch.StartNew();
 			private readonly Stopwatch _motionPreviewClock = new Stopwatch();
 			private bool _isMotionPreviewPlaying;
 			private bool _isDraggingSticker = false;
+			private bool _isDraggingMotionEnd = false;
 			private bool _isRotatingSticker = false;
 			private GifStickerItem _activeSticker = null;
 			private Rectangle _lastScreenRect;
@@ -3852,11 +4134,23 @@ namespace VideoBatchMerger.ScriptBatch
 				_subtitlePreviewTimer.Start();
 			}
 
+			protected override void OnVisibleChanged(EventArgs e)
+			{
+				base.OnVisibleChanged(e);
+				if (_subtitlePreviewTimer != null) _subtitlePreviewTimer.Enabled = Visible;
+			}
+
 			public void PlaySelectedStickerMotion()
 			{
 				if (_panel._selectedSticker == null || _panel._selectedSticker.MotionStyle == 0) return;
 				_isMotionPreviewPlaying = true;
 				_motionPreviewClock.Restart();
+				Invalidate();
+			}
+
+			public void StopSelectedStickerMotion()
+			{
+				_isMotionPreviewPlaying = false;
 				Invalidate();
 			}
 
@@ -3993,8 +4287,133 @@ namespace VideoBatchMerger.ScriptBatch
 
 			protected override void Dispose(bool disposing)
 			{
-				if (disposing) _subtitlePreviewTimer?.Dispose();
+				if (disposing)
+				{
+					_subtitlePreviewTimer?.Dispose();
+					_scaledBackground?.Dispose();
+					_scaledWatermark?.Dispose();
+					_watermarkLayer?.Dispose();
+					_scaledTitle?.Dispose();
+					_titleLayer?.Dispose();
+				}
 				base.Dispose(disposing);
+			}
+
+			private void DrawCachedWatermark(Graphics graphics, Rectangle screenRect)
+			{
+				var settings = _panel._settings;
+				if (!settings.WatermarkEnabled) return;
+
+				string imagePath = settings.WatermarkImagePath ?? string.Empty;
+				string imageVersion = File.Exists(imagePath)
+					? File.GetLastWriteTimeUtc(imagePath).Ticks.ToString() : string.Empty;
+				string key = string.Join("\u001f", new[]
+				{
+					settings.CanvasWidth.ToString(), settings.CanvasHeight.ToString(),
+					settings.WatermarkType.ToString(), settings.WatermarkText ?? string.Empty,
+					settings.WatermarkFontFamily ?? string.Empty, settings.WatermarkTextColorHex ?? string.Empty,
+					settings.WatermarkTextOpacity.ToString(), settings.WatermarkFontSize.ToString(),
+					imagePath, imageVersion, settings.WatermarkImageScalePercent.ToString(),
+					settings.WatermarkImageOpacity.ToString(), settings.WatermarkPosition.ToString(),
+					settings.WatermarkOffsetX.ToString(), settings.WatermarkOffsetY.ToString()
+				});
+				if (key != _watermarkCacheKey)
+				{
+					var layer = ScriptBatchComposer.CreateWatermarkLayer(settings, settings.CanvasWidth, settings.CanvasHeight);
+					_watermarkLayer?.Dispose();
+					_watermarkLayer = layer;
+					_scaledWatermark?.Dispose();
+					_scaledWatermark = null;
+					_scaledWatermarkSize = Size.Empty;
+					_watermarkCacheKey = key;
+				}
+				if (_watermarkLayer == null) return;
+				if (_scaledWatermarkSize != screenRect.Size)
+				{
+					using var scaled = new Bitmap(screenRect.Width, screenRect.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+					using (var scaleGraphics = Graphics.FromImage(scaled))
+					{
+						scaleGraphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+						scaleGraphics.DrawImage(_watermarkLayer, new Rectangle(Point.Empty, scaled.Size));
+					}
+					var bounds = FindAlphaBounds(scaled);
+					_scaledWatermark?.Dispose();
+					_scaledWatermark = bounds.IsEmpty ? null : scaled.Clone(bounds, scaled.PixelFormat);
+					_scaledWatermarkOffset = bounds.Location;
+					_scaledWatermarkSize = screenRect.Size;
+				}
+				if (_scaledWatermark != null)
+					graphics.DrawImageUnscaled(_scaledWatermark, screenRect.X + _scaledWatermarkOffset.X, screenRect.Y + _scaledWatermarkOffset.Y);
+			}
+
+			private static Rectangle FindAlphaBounds(Bitmap image)
+			{
+				var full = new Rectangle(Point.Empty, image.Size);
+				var data = image.LockBits(full, System.Drawing.Imaging.ImageLockMode.ReadOnly, image.PixelFormat);
+				try
+				{
+					int stride = Math.Abs(data.Stride);
+					var pixels = new byte[stride * image.Height];
+					System.Runtime.InteropServices.Marshal.Copy(data.Scan0, pixels, 0, pixels.Length);
+					int left = image.Width, top = image.Height, right = -1, bottom = -1;
+					for (int y = 0; y < image.Height; y++)
+					{
+						for (int x = 0; x < image.Width; x++)
+						{
+							if (pixels[y * stride + x * 4 + 3] == 0) continue;
+							left = Math.Min(left, x);
+							top = Math.Min(top, y);
+							right = Math.Max(right, x);
+							bottom = Math.Max(bottom, y);
+						}
+					}
+					return right < left ? Rectangle.Empty : Rectangle.FromLTRB(left, top, right + 1, bottom + 1);
+				}
+				finally { image.UnlockBits(data); }
+			}
+
+			private void DrawCachedTitle(Graphics graphics, Rectangle screenRect)
+			{
+				var plan = _panel._settings.ScriptTitlePlan;
+				if (plan?.Enabled != true) return;
+				var item = _panel._grid?.SelectedRows.Count > 0 ? _panel._grid.SelectedRows[0].Tag as ScriptBatchItem : null;
+				string titleText = ScriptBatchComposer.ResolveScriptTitleText(plan.MainTitleTemplate, item);
+				if (string.IsNullOrWhiteSpace(titleText)) return;
+				string key = string.Join("\u001f", new[]
+				{
+				_panel._settings.CanvasWidth.ToString(), _panel._settings.CanvasHeight.ToString(),
+					titleText, plan.SubTitleTemplate ?? string.Empty, plan.StyleId ?? string.Empty,
+					plan.Position ?? string.Empty, plan.FontSizeScale.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+					plan.CustomOffsetY.ToString()
+				});
+				if (key != _titleCacheKey)
+				{
+					var layer = MergeTitleStyleCatalog.RenderTitleBitmap(plan,
+						_panel._settings.CanvasWidth, _panel._settings.CanvasHeight, titleText, plan.SubTitleTemplate ?? string.Empty);
+					_titleLayer?.Dispose();
+					_titleLayer = layer;
+					_scaledTitle?.Dispose();
+					_scaledTitle = null;
+					_scaledTitleSize = Size.Empty;
+					_titleCacheKey = key;
+				}
+				if (_titleLayer == null) return;
+				if (_scaledTitleSize != screenRect.Size)
+				{
+					using var scaled = new Bitmap(screenRect.Width, screenRect.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+					using (var scaleGraphics = Graphics.FromImage(scaled))
+					{
+						scaleGraphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+						scaleGraphics.DrawImage(_titleLayer, new Rectangle(Point.Empty, scaled.Size));
+					}
+					var bounds = FindAlphaBounds(scaled);
+					_scaledTitle?.Dispose();
+					_scaledTitle = bounds.IsEmpty ? null : scaled.Clone(bounds, scaled.PixelFormat);
+					_scaledTitleOffset = bounds.Location;
+					_scaledTitleSize = screenRect.Size;
+				}
+				if (_scaledTitle != null)
+					graphics.DrawImageUnscaled(_scaledTitle, screenRect.X + _scaledTitleOffset.X, screenRect.Y + _scaledTitleOffset.Y);
 			}
 
 			protected override void OnPaint(PaintEventArgs e)
@@ -4090,21 +4509,34 @@ namespace VideoBatchMerger.ScriptBatch
 				if (_panel._cachedFootageThumbnail != null)
 				{
 					var thumb = _panel._cachedFootageThumbnail;
-					float thumbAspect = thumb.Width / (float)thumb.Height;
-					Rectangle srcRect;
-					if (thumbAspect > targetAspect)
+					if (!ReferenceEquals(_scaledBackgroundSource, thumb) || _scaledBackgroundSize != screenRect.Size)
 					{
-						int srcW = (int)(thumb.Height * targetAspect);
-						int srcX = (thumb.Width - srcW) / 2;
-						srcRect = new Rectangle(srcX, 0, srcW, thumb.Height);
+						float thumbAspect = thumb.Width / (float)thumb.Height;
+						Rectangle srcRect;
+						if (thumbAspect > targetAspect)
+						{
+							int srcW = (int)(thumb.Height * targetAspect);
+							int srcX = (thumb.Width - srcW) / 2;
+							srcRect = new Rectangle(srcX, 0, srcW, thumb.Height);
+						}
+						else
+						{
+							int srcH = (int)(thumb.Width / targetAspect);
+							int srcY = (thumb.Height - srcH) / 2;
+							srcRect = new Rectangle(0, srcY, thumb.Width, srcH);
+						}
+						var scaled = new Bitmap(screenRect.Width, screenRect.Height);
+						using (var bgGraphics = Graphics.FromImage(scaled))
+						{
+							bgGraphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+							bgGraphics.DrawImage(thumb, new Rectangle(Point.Empty, scaled.Size), srcRect, GraphicsUnit.Pixel);
+						}
+						_scaledBackground?.Dispose();
+						_scaledBackground = scaled;
+						_scaledBackgroundSource = thumb;
+						_scaledBackgroundSize = screenRect.Size;
 					}
-					else
-					{
-						int srcH = (int)(thumb.Width / targetAspect);
-						int srcY = (thumb.Height - srcH) / 2;
-						srcRect = new Rectangle(0, srcY, thumb.Width, srcH);
-					}
-					g.DrawImage(thumb, screenRect, srcRect, GraphicsUnit.Pixel);
+					g.DrawImageUnscaled(_scaledBackground, screenRect.Location);
 				}
 				else
 				{
@@ -4315,79 +4747,9 @@ namespace VideoBatchMerger.ScriptBatch
 					}
 				}
 
-				// 2.4 绘制水印预览 (当且仅当勾选启用时纯净渲染，还原最终成片)
-				if (_panel._settings.WatermarkEnabled)
-				{
-					float wmCanvasW = screenW;
-					float wmCanvasH = screenH;
-					int wmPos = _panel._settings.WatermarkPosition;
-					float offX = (_panel._settings.WatermarkOffsetX * scale);
-					float offY = (_panel._settings.WatermarkOffsetY * scale);
-
-					if (_panel._settings.WatermarkType == 0) // 文字水印
-					{
-						string wmText = string.IsNullOrWhiteSpace(_panel._settings.WatermarkText) ? "Voice: ElevenLabs" : _panel._settings.WatermarkText;
-						float wmFontSize = Math.Max(8f, _panel._settings.WatermarkFontSize * scale);
-						string wmFontName = string.IsNullOrWhiteSpace(_panel._settings.WatermarkFontFamily) ? "Arial" : _panel._settings.WatermarkFontFamily;
-						using var wmFont = new Font(wmFontName, wmFontSize, FontStyle.Bold, GraphicsUnit.Pixel);
-
-						float maxWmWidth = Math.Max(60f, wmCanvasW * 0.85f - offX);
-						var stringFormat = new StringFormat
-						{
-							Alignment = (wmPos == 0 || wmPos == 1) ? StringAlignment.Far :
-										((wmPos == 4 || wmPos == 5) ? StringAlignment.Center : StringAlignment.Near),
-							LineAlignment = StringAlignment.Near,
-							FormatFlags = StringFormatFlags.LineLimit
-						};
-
-						var sz = g.MeasureString(wmText, wmFont, (int)maxWmWidth, stringFormat);
-						float itemW = Math.Min(maxWmWidth, sz.Width + 2);
-						float itemH = sz.Height + 2;
-
-						PointF pt = ScriptBatchComposer.CalculateWatermarkPosition(wmPos, wmCanvasW, wmCanvasH, itemW, itemH, offX, offY);
-						float actualX = screenX + pt.X;
-						float actualY = screenY + pt.Y;
-						var textRect = new RectangleF(actualX, actualY, itemW, itemH);
-
-						int alpha = (int)Math.Max(35, Math.Min(255, _panel._settings.WatermarkTextOpacity * 2.55));
-						Color baseCol = ScriptBatchComposer.ParseColor(_panel._settings.WatermarkTextColorHex, Color.White);
-						Color textCol = Color.FromArgb(alpha, baseCol.R, baseCol.G, baseCol.B);
-						Color shadowCol = Color.FromArgb((int)(alpha * 0.7), 0, 0, 0);
-
-						using (var shadowBrush = new SolidBrush(shadowCol))
-						{
-							g.DrawString(wmText, wmFont, shadowBrush, new RectangleF(actualX + 1, actualY + 1, itemW, itemH), stringFormat);
-						}
-						using (var wmBrush = new SolidBrush(textCol))
-						{
-							g.DrawString(wmText, wmFont, wmBrush, textRect, stringFormat);
-						}
-					}
-					else // 图片水印
-					{
-						if (!string.IsNullOrWhiteSpace(_panel._settings.WatermarkImagePath) && File.Exists(_panel._settings.WatermarkImagePath))
-						{
-							try
-							{
-								using var img = Image.FromFile(_panel._settings.WatermarkImagePath);
-								float imgScale = Math.Max(5, Math.Min(60, _panel._settings.WatermarkImageScalePercent)) / 100f;
-								float targetW = wmCanvasW * imgScale;
-								float targetH = img.Height * (targetW / img.Width);
-
-								PointF pt = ScriptBatchComposer.CalculateWatermarkPosition(wmPos, wmCanvasW, wmCanvasH, targetW, targetH, offX, offY);
-								float actualX = screenX + pt.X;
-								float actualY = screenY + pt.Y;
-
-								float opacity = Math.Max(0.2f, Math.Min(1.0f, _panel._settings.WatermarkImageOpacity / 100f));
-								var colMatrix = new System.Drawing.Imaging.ColorMatrix { Matrix33 = opacity };
-								using var attr = new System.Drawing.Imaging.ImageAttributes();
-								attr.SetColorMatrix(colMatrix, System.Drawing.Imaging.ColorMatrixFlag.Default, System.Drawing.Imaging.ColorAdjustType.Bitmap);
-								g.DrawImage(img, new Rectangle((int)actualX, (int)actualY, (int)targetW, (int)targetH), 0, 0, img.Width, img.Height, GraphicsUnit.Pixel, attr);
-							}
-							catch { }
-						}
-					}
-				}
+				// 2.4 与导出共用同一张水印图层，预览只按屏幕尺寸缩小。
+				DrawCachedWatermark(g, screenRect);
+				DrawCachedTitle(g, screenRect);
 
 				// 2.5 绘制 GIF 动图贴纸 (支持多贴纸、旋转、缩放、不透明度、选中高亮框与旋转控制手柄)
 				if (_panel._settings.GifStickers != null && _panel._settings.GifStickers.Count > 0)
@@ -4409,9 +4771,14 @@ namespace VideoBatchMerger.ScriptBatch
 						float centerY = screenY + (screenH * (stickerY / 100f));
 						if (stk == _panel._selectedSticker && stk.MotionStyle != 0 && !_isMotionPreviewPlaying)
 						{
-						using var pathPen = new Pen(Color.FromArgb(145, 59, 130, 246), 1.4f) { DashStyle = DashStyle.Dash };
-						g.DrawLine(pathPen, centerX, centerY,
-							screenX + screenW * stk.EndXPercent / 100f, screenY + screenH * stk.EndYPercent / 100f);
+							float endX = screenX + screenW * stk.EndXPercent / 100f;
+							float endY = screenY + screenH * stk.EndYPercent / 100f;
+							using var pathPen = new Pen(Color.FromArgb(190, 59, 130, 246), 2f) { DashStyle = DashStyle.Dash };
+							using var startBrush = new SolidBrush(Color.FromArgb(59, 130, 246));
+							using var endBrush = new SolidBrush(Color.FromArgb(255, 156, 42));
+							g.DrawLine(pathPen, centerX, centerY, endX, endY);
+							g.FillEllipse(startBrush, centerX - 6, centerY - 6, 12, 12);
+							g.FillEllipse(endBrush, endX - 9, endY - 9, 18, 18);
 						}
 
 						var state = g.Save();
@@ -4522,6 +4889,20 @@ namespace VideoBatchMerger.ScriptBatch
 				base.OnMouseDown(e);
 				if (e.Button != MouseButtons.Left) return;
 				if (_lastScreenRect.Width <= 0 || _lastScreenRect.Height <= 0) return;
+				if (_panel._selectedSticker != null && _panel._selectedSticker.Enabled && _panel._selectedSticker.MotionStyle != 0)
+				{
+					var sticker = _panel._selectedSticker;
+					float endX = _lastScreenRect.X + _lastScreenRect.Width * sticker.EndXPercent / 100f;
+					float endY = _lastScreenRect.Y + _lastScreenRect.Height * sticker.EndYPercent / 100f;
+					if (Math.Abs(e.X - endX) <= 14 && Math.Abs(e.Y - endY) <= 14)
+					{
+						_isMotionPreviewPlaying = false;
+						_isDraggingMotionEnd = true;
+						_activeSticker = sticker;
+						Capture = true;
+						return;
+					}
+				}
 
 				// 优先检测是否点中了当前选中贴纸的顶部旋转手柄
 				if (_panel._selectedSticker != null && _panel._selectedSticker.Enabled)
@@ -4593,6 +4974,14 @@ namespace VideoBatchMerger.ScriptBatch
 			protected override void OnMouseMove(MouseEventArgs e)
 			{
 				base.OnMouseMove(e);
+				if (_isDraggingMotionEnd && _activeSticker != null && _lastScreenRect.Width > 0 && _lastScreenRect.Height > 0)
+				{
+					_activeSticker.EndXPercent = (float)Math.Round(Math.Max(-30f, Math.Min(130f, (e.X - _lastScreenRect.X) * 100f / _lastScreenRect.Width)));
+					_activeSticker.EndYPercent = (float)Math.Round(Math.Max(-30f, Math.Min(130f, (e.Y - _lastScreenRect.Y) * 100f / _lastScreenRect.Height)));
+					_panel.SyncStickerDetailsFromModel();
+					Invalidate();
+					return;
+				}
 
 				if (_isDraggingSticker && _activeSticker != null && _lastScreenRect.Width > 0 && _lastScreenRect.Height > 0)
 				{
@@ -4624,6 +5013,16 @@ namespace VideoBatchMerger.ScriptBatch
 				if (_panel._selectedSticker != null && _lastScreenRect.Width > 0)
 				{
 					var selStk = _panel._selectedSticker;
+					if (selStk.MotionStyle != 0)
+					{
+						float endX = _lastScreenRect.X + _lastScreenRect.Width * selStk.EndXPercent / 100f;
+						float endY = _lastScreenRect.Y + _lastScreenRect.Height * selStk.EndYPercent / 100f;
+						if (Math.Abs(e.X - endX) <= 14 && Math.Abs(e.Y - endY) <= 14)
+						{
+							Cursor = Cursors.Hand;
+							return;
+						}
+					}
 					var selImg = _panel.GetOrLoadStickerImage(selStk.FilePath);
 					if (selImg != null)
 					{
@@ -4657,9 +5056,10 @@ namespace VideoBatchMerger.ScriptBatch
 			protected override void OnMouseUp(MouseEventArgs e)
 			{
 				base.OnMouseUp(e);
-				if (_isDraggingSticker || _isRotatingSticker)
+				if (_isDraggingSticker || _isRotatingSticker || _isDraggingMotionEnd)
 				{
 					_isDraggingSticker = false;
+					_isDraggingMotionEnd = false;
 					_isRotatingSticker = false;
 					_activeSticker = null;
 					Capture = false;

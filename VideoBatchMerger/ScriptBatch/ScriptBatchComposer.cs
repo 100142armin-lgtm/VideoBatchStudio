@@ -134,8 +134,12 @@ namespace VideoBatchMerger.ScriptBatch
 
 			try
 			{
+				string voice = string.IsNullOrWhiteSpace(item.VoiceKey)
+					? (settings.TtsEngine == "chatterbox" ? "chatterbox:" + settings.ChatterboxLanguage
+						: (settings.TtsEngine == "elevenlabs" ? settings.ElevenLabsVoice : settings.DefaultVoice)) : item.VoiceKey;
+				string cacheKey = ScriptBatchTtsEngine.GetSynthesisCacheKey(settings, item.ScriptText, voice);
 				// 1. TTS 语音生成与原生字幕 (若预览缓存中已有匹配的音频与字幕，直接秒级复用)
-				if (!string.IsNullOrEmpty(item.AudioPath) && File.Exists(item.AudioPath) &&
+				if (item.TtsCacheKey == cacheKey && !string.IsNullOrEmpty(item.AudioPath) && File.Exists(item.AudioPath) &&
 				    !string.IsNullOrEmpty(item.SrtPath) && File.Exists(item.SrtPath))
 				{
 					progressCallback?.Invoke(35, "已复用缓存配音与词级字幕，正在极速重排画面...");
@@ -144,12 +148,18 @@ namespace VideoBatchMerger.ScriptBatch
 				else
 				{
 					TtsResult ttsResult;
-					string voice = string.IsNullOrWhiteSpace(item.VoiceKey) ? (string.Equals(settings.TtsEngine, "elevenlabs", StringComparison.OrdinalIgnoreCase) ? settings.ElevenLabsVoice : settings.DefaultVoice) : item.VoiceKey;
-					bool isLocalClone = (voice != null && (voice.StartsWith("local:") || voice.EndsWith(".pth") || voice.EndsWith(".wav") || voice.EndsWith(".mp3")))
-					                    || string.Equals(settings.TtsEngine, "local_xtts", StringComparison.OrdinalIgnoreCase);
+					bool isChatterbox = string.Equals(settings.TtsEngine, "chatterbox", StringComparison.OrdinalIgnoreCase);
+					bool isLocalClone = !isChatterbox && ((voice != null && (voice.StartsWith("local:") || voice.EndsWith(".pth") || voice.EndsWith(".wav") || voice.EndsWith(".mp3")))
+					                    || string.Equals(settings.TtsEngine, "local_xtts", StringComparison.OrdinalIgnoreCase));
 					bool isElevenLabs = string.Equals(settings.TtsEngine, "elevenlabs", StringComparison.OrdinalIgnoreCase) && !isLocalClone;
 
-					if (isLocalClone)
+					if (isChatterbox)
+					{
+						item.Status = "Chatterbox 本地配音中";
+						ttsResult = await ChatterboxEngine.SynthesizeAsync(item.ScriptText, voice, settings, tempDir, item.Id, ct,
+							message => progressCallback?.Invoke(20, message));
+					}
+					else if (isLocalClone)
 					{
 						progressCallback?.Invoke(15, "正在调用本地 RTX 5060 离线大模型生成声音克隆...");
 						item.Status = "本地独显克隆合成中";
@@ -229,6 +239,7 @@ namespace VideoBatchMerger.ScriptBatch
 					}
 
 					item.AudioPath = ttsResult.AudioPath;
+					item.TtsCacheKey = cacheKey;
 					item.SrtPath = ttsResult.SrtPath;
 					if (previewOutputPath != null && !string.IsNullOrWhiteSpace(outputDir))
 					{
@@ -272,6 +283,18 @@ namespace VideoBatchMerger.ScriptBatch
 					watermarkPngPath = Path.Combine(tempDir, $"watermark_{item.Id}.png");
 					BuildWatermarkLayer(settings, settings.CanvasWidth, settings.CanvasHeight, watermarkPngPath);
 				}
+				string titlePngPath = null;
+				if (settings.ScriptTitlePlan?.Enabled == true)
+				{
+					string titleText = ResolveScriptTitleText(settings.ScriptTitlePlan.MainTitleTemplate, item);
+					if (!string.IsNullOrWhiteSpace(titleText))
+					{
+						titlePngPath = Path.Combine(tempDir, $"title_{item.Id}.png");
+						using var titleBitmap = MergeTitleStyleCatalog.RenderTitleBitmap(settings.ScriptTitlePlan,
+							settings.CanvasWidth, settings.CanvasHeight, titleText, settings.ScriptTitlePlan.SubTitleTemplate ?? string.Empty);
+						titleBitmap.Save(titlePngPath, System.Drawing.Imaging.ImageFormat.Png);
+					}
+				}
 
 				// 4. 准备背景画面与混剪
 				progressCallback?.Invoke(60, "智能选取画面素材并对齐时长...");
@@ -302,6 +325,7 @@ namespace VideoBatchMerger.ScriptBatch
 					footagePool,
 					tempDir,
 					watermarkPngPath,
+					titlePngPath,
 					finalOutputPath,
 					progressCallback,
 					ct,
@@ -355,17 +379,34 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 		}
 
+		public static string ResolveScriptTitleText(string template, ScriptBatchItem item)
+		{
+			if (string.IsNullOrWhiteSpace(template)) return string.Empty;
+			return template.Replace("{文案标题}", item?.DisplayTitle ?? string.Empty)
+				.Replace("{文案代码}", item?.ScriptCode ?? string.Empty);
+		}
+
 		public static void BuildWatermarkLayer(ScriptBatchSettings settings, int canvasW, int canvasH, string outPngPath)
 		{
+			try
+			{
+				using var bmp = CreateWatermarkLayer(settings, canvasW, canvasH);
+				if (bmp != null) bmp.Save(outPngPath, System.Drawing.Imaging.ImageFormat.Png);
+			}
+			catch { }
+		}
+
+		public static Bitmap CreateWatermarkLayer(ScriptBatchSettings settings, int canvasW, int canvasH)
+		{
+			Bitmap bmp = null;
 			try
 			{
 				int w = canvasW > 0 ? canvasW : 1080;
 				int h = canvasH > 0 ? canvasH : 1920;
 
-				using (var bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+				bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+				using (var g = Graphics.FromImage(bmp))
 				{
-					using (var g = Graphics.FromImage(bmp))
-					{
 						g.Clear(Color.Transparent);
 						g.SmoothingMode = SmoothingMode.AntiAlias;
 						g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
@@ -439,11 +480,10 @@ namespace VideoBatchMerger.ScriptBatch
 								}
 							}
 						}
-					}
-					bmp.Save(outPngPath, System.Drawing.Imaging.ImageFormat.Png);
 				}
+				return bmp;
 			}
-			catch { }
+			catch { bmp?.Dispose(); return null; }
 		}
 
 		public static PointF CalculateWatermarkPosition(int pos, float canvasW, float canvasH, float itemW, float itemH, float offX, float offY)
@@ -1148,6 +1188,7 @@ namespace VideoBatchMerger.ScriptBatch
 			List<string> footagePool,
 			string tempDir,
 			string watermarkPngPath,
+			string titlePngPath,
 			string outputPath,
 			Action<int, string> progressCallback,
 			CancellationToken ct,
@@ -1239,6 +1280,16 @@ namespace VideoBatchMerger.ScriptBatch
 				inputArgs.Append($"-i {QuoteArg(watermarkPngPath)} ");
 				filterComplex.Append($"[{currentV}][{wmInputIdx}:v]overlay=0:0[v_wm];");
 				currentV = "v_wm";
+			}
+			if (!string.IsNullOrEmpty(titlePngPath) && File.Exists(titlePngPath))
+			{
+				int titleInputIdx = nextInputIdx++;
+				inputArgs.Append($"-loop 1 -i {QuoteArg(titlePngPath)} ");
+				string duration = settings.ScriptTitlePlan.DurationSeconds > 0.05
+					? $":enable='lt(t,{settings.ScriptTitlePlan.DurationSeconds.ToString("0.###", CultureInfo.InvariantCulture)})'"
+					: string.Empty;
+				filterComplex.Append($"[{currentV}][{titleInputIdx}:v]overlay=0:0{duration}:shortest=0[v_title];");
+				currentV = "v_title";
 			}
 
 			// 叠加 GIF 动图贴纸 (支持多贴纸、循环/单次、缩放、任意角度旋转、不透明度、起始/持续出现时间)

@@ -378,6 +378,9 @@ internal sealed class MainForm : Form
 
 	private TextBox _deliverOutputFolder;
 	private TextBox _deliverOutputFileName;
+	private ComboBox _deliverNamingMode;
+	private Label _deliverFileNamePreview;
+	private ComboBox _deliverAudioMode;
 	private ComboBox _deliverFormatCombo;
 	private ComboBox _deliverResolutionCombo;
 	private ComboBox _deliverQualityCombo;
@@ -1323,6 +1326,15 @@ internal sealed class MainForm : Form
 		ToolTip updateTip = new ToolTip();
 		updateTip.SetToolTip(_checkUpdateButton, "检查最新版本与团队功能更新");
 		navRight.Controls.Add(_checkUpdateButton);
+		Button componentsButton = MakeButton("组件 / 模型", 86);
+		componentsButton.Height = 28;
+		componentsButton.Font = new Font(Font.FontFamily, 8.25f);
+		componentsButton.Margin = new Padding(4, 0, 0, 0);
+		componentsButton.Click += delegate
+		{
+			using (var setup = new Components.ComponentSetupForm()) setup.ShowDialog(this);
+		};
+		navRight.Controls.Add(componentsButton);
 		navRight.Width = navRight.PreferredSize.Width;
 		_bottomNavBar.Controls.Add(navRight);
 
@@ -1395,6 +1407,9 @@ internal sealed class MainForm : Form
 		base.Shown += delegate
 		{
 			CenterNavButtons();
+			if (File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Setup", "components.json")) &&
+				Components.ComponentManager.BasicFilesMissing(AppDomain.CurrentDomain.BaseDirectory))
+				BeginInvoke((Action)delegate { using (var setup = new Components.ComponentSetupForm()) setup.ShowDialog(this); });
 		};
 
 		tableLayoutPanel.Controls.Add(_bottomNavBar, 0, 1);
@@ -4042,7 +4057,7 @@ internal sealed class MainForm : Form
 			Width = 292,
 			Height = 22,
 			Text = "☑ 智剪 / 切气口 / 导出成片时自动执行人声提纯降噪",
-			Checked = true,
+			Checked = false,
 			ForeColor = Color.FromArgb(52, 211, 153),
 			Font = new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold)
 		};
@@ -4816,7 +4831,7 @@ internal sealed class MainForm : Form
 			Location = new Point(10, 22),
 			AutoSize = true,
 			Text = "🎙️ 导出时自动人声净化降噪 (与AI智剪联动)",
-			Checked = true,
+			Checked = false,
 			ForeColor = Color.FromArgb(226, 232, 240)
 		};
 		_cutEditDenoiseCheckBox.CheckedChanged += delegate
@@ -6160,9 +6175,9 @@ internal sealed class MainForm : Form
 		};
 
 		// Group 1: Output Destination
-		GroupBox destGroup = MakeGroupBox("📁 成片保存目录与文件命名", 0, 0, 480, 110);
+		GroupBox destGroup = MakeGroupBox("📁 成片保存目录与文件命名", 0, 0, 480, 200);
 		destGroup.Dock = DockStyle.Top;
-		destGroup.Height = 110;
+		destGroup.Height = 200;
 
 		destGroup.Controls.Add(MakeLabel("保存目录:", 16, 28));
 		_deliverOutputFolder = new TextBox
@@ -6191,20 +6206,48 @@ internal sealed class MainForm : Form
 		};
 		destGroup.Controls.Add(browseFolderBtn);
 
-		destGroup.Controls.Add(MakeLabel("成片文件名:", 16, 68));
+		destGroup.Controls.Add(MakeLabel("命名方式:", 16, 68));
+		_deliverNamingMode = new ComboBox
+		{
+			Location = new Point(105, 64), Width = 350,
+			DropDownStyle = ComboBoxStyle.DropDownList
+		};
+		_deliverNamingMode.Items.AddRange(new object[] { "原素材名称 + _已剪辑（推荐）", "自定义名称 / 命名模板" });
+		_deliverNamingMode.SelectedIndex = 0;
+		destGroup.Controls.Add(_deliverNamingMode);
+		destGroup.Controls.Add(MakeLabel("自定义名:", 16, 103));
 		_deliverOutputFileName = new TextBox
 		{
-			Location = new Point(105, 64),
+			Location = new Point(105, 99),
 			Width = 350,
-			Text = "交付成片_{timestamp}.mp4"
+			Text = "{原名}_已剪辑",
+			Enabled = false
 		};
 		destGroup.Controls.Add(_deliverOutputFileName);
+		_deliverFileNamePreview = new Label
+		{
+			Location = new Point(16, 136), Size = new Size(440, 22), AutoEllipsis = true,
+			ForeColor = Color.FromArgb(125, 211, 252)
+		};
+		destGroup.Controls.Add(_deliverFileNamePreview);
+		var namingHelp = MakeLabel("支持 {原名}、{timestamp}；重名自动加序号，不覆盖原片。", 16, 165);
+		destGroup.Controls.Add(namingHelp);
+		_deliverNamingMode.SelectedIndexChanged += delegate { RefreshDeliverFileNamePreview(); };
+		_deliverOutputFileName.TextChanged += delegate { RefreshDeliverFileNamePreview(); };
+		destGroup.Resize += delegate
+		{
+			int right = Math.Max(260, destGroup.ClientSize.Width - 16);
+			browseFolderBtn.Left = right - browseFolderBtn.Width;
+			_deliverOutputFolder.Width = Math.Max(80, browseFolderBtn.Left - _deliverOutputFolder.Left - 8);
+			_deliverNamingMode.Width = _deliverOutputFileName.Width = Math.Max(140, right - 105);
+			_deliverFileNamePreview.Width = Math.Max(140, right - 16);
+		};
 		leftScroll.Controls.Add(destGroup);
 
 		// Group 2: Encoding Profile
-		GroupBox profileGroup = MakeGroupBox("⚙️ 编码规格与画质基准 (Encoding Profile)", 0, 118, 480, 240);
+		GroupBox profileGroup = MakeGroupBox("⚙️ 编码规格与画质基准 (Encoding Profile)", 0, 208, 480, 305);
 		profileGroup.Dock = DockStyle.Top;
-		profileGroup.Height = 240;
+		profileGroup.Height = 305;
 
 		profileGroup.Controls.Add(MakeLabel("封装格式:", 16, 28));
 		_deliverFormatCombo = new ComboBox
@@ -6220,6 +6263,7 @@ internal sealed class MainForm : Form
 			"MKV (.mkv - Matroska 全功能无损容器)"
 		});
 		_deliverFormatCombo.SelectedIndex = 0;
+		_deliverFormatCombo.SelectedIndexChanged += delegate { RefreshDeliverFileNamePreview(); };
 		profileGroup.Controls.Add(_deliverFormatCombo);
 
 		profileGroup.Controls.Add(MakeLabel("分辨率规格:", 16, 68));
@@ -6284,13 +6328,23 @@ internal sealed class MainForm : Form
 		};
 		_deliverAudioBitrateCombo.Items.AddRange(new object[]
 		{
-			"320 kbps (录音室无损高音质)",
+			"320 kbps (AAC 高码率)",
 			"192 kbps (高品质立体声，推荐)",
 			"128 kbps (标准网络音频)",
 			"静音 (无音频流输出)"
 		});
 		_deliverAudioBitrateCombo.SelectedIndex = 1;
 		profileGroup.Controls.Add(_deliverAudioBitrateCombo);
+		profileGroup.Controls.Add(MakeLabel("音频处理:", 16, 228));
+		_deliverAudioMode = new ComboBox
+		{
+			Location = new Point(90, 224), Width = 365, DropDownStyle = ComboBoxStyle.DropDownList
+		};
+		_deliverAudioMode.Items.AddRange(new object[] { "优先保留原音轨（仅加标题时不改变声音）", "重新编码音频（使用所选码率）" });
+		_deliverAudioMode.SelectedIndex = 0;
+		profileGroup.Controls.Add(_deliverAudioMode);
+		profileGroup.Controls.Add(MakeLabel("剪切、混音或启用音效时自动按设置处理；静音优先。", 16, 267));
+		RefreshDeliverFileNamePreview();
 		leftScroll.Controls.Add(profileGroup);
 
 		// Group 3: Project Summary Card
@@ -13038,6 +13092,7 @@ internal sealed class MainForm : Form
 
 	private void UpdateDeliverSummary()
 	{
+		RefreshDeliverFileNamePreview();
 		if (_deliverProjectSummary == null) return;
 		if (string.IsNullOrEmpty(_cutEditSourcePath) || !File.Exists(_cutEditSourcePath))
 		{
@@ -14526,6 +14581,31 @@ internal sealed class MainForm : Form
 		}
 	}
 
+	private string GetDeliverNamingSource()
+	{
+		// A denoising preview uses a temporary path; keep the original material's name.
+		if (!string.IsNullOrEmpty(_cutEditOriginalRawSourcePath) &&
+			(_cutEditSourcePath ?? "").IndexOf("_denoised_", StringComparison.OrdinalIgnoreCase) >= 0)
+			return _cutEditOriginalRawSourcePath;
+		var firstVideo = _cutEditSegments.Where(s => s.IsKept && (s.TrackId ?? "").StartsWith("V"))
+			.OrderBy(s => s.TimelineStartSeconds).FirstOrDefault();
+		return firstVideo?.SourcePath ?? _cutEditSourcePath;
+	}
+
+	private void RefreshDeliverFileNamePreview()
+	{
+		if (_deliverNamingMode == null || _deliverOutputFileName == null || _deliverFileNamePreview == null) return;
+		bool custom = _deliverNamingMode.SelectedIndex == 1;
+		_deliverOutputFileName.Enabled = custom;
+		string ext = _deliverFormatCombo?.SelectedIndex == 1 ? ".mov" : _deliverFormatCombo?.SelectedIndex == 2 ? ".mkv" : ".mp4";
+		try
+		{
+			_deliverFileNamePreview.Text = "文件名预览：" + DeliveryExportRules.BuildFileName(GetDeliverNamingSource(), custom,
+				_deliverOutputFileName.Text, ext, DateTime.Now);
+		}
+		catch (ArgumentException ex) { _deliverFileNamePreview.Text = ex.Message; }
+	}
+
 	private void StartDeliverExport()
 	{
 		if (string.IsNullOrEmpty(_cutEditSourcePath) || !File.Exists(_cutEditSourcePath))
@@ -14558,19 +14638,23 @@ internal sealed class MainForm : Form
 			}
 		}
 
-		string rawFileName = _deliverOutputFileName.Text.Trim();
-		if (string.IsNullOrEmpty(rawFileName)) rawFileName = "交付成片_{timestamp}.mp4";
-		string timeStamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-		string finalFileName = rawFileName.Replace("{timestamp}", timeStamp).Replace("{time}", timeStamp);
-
 		int formatIdx = _deliverFormatCombo.SelectedIndex;
 		string ext = (formatIdx == 1) ? ".mov" : ((formatIdx == 2) ? ".mkv" : ".mp4");
-		string currentExt = Path.GetExtension(finalFileName);
-		if (string.IsNullOrEmpty(currentExt) || !string.Equals(currentExt, ext, StringComparison.OrdinalIgnoreCase))
+		string targetOutPath;
+		try
 		{
-			finalFileName = Path.ChangeExtension(finalFileName, ext);
+			string finalFileName = DeliveryExportRules.BuildFileName(GetDeliverNamingSource(),
+				_deliverNamingMode.SelectedIndex == 1, _deliverOutputFileName.Text, ext, DateTime.Now);
+			targetOutPath = DeliveryExportRules.GetAvailableOutputPath(outFolder, finalFileName);
 		}
-		string targetOutPath = Path.Combine(outFolder, finalFileName);
+		catch (Exception ex)
+		{
+			MessageBox.Show(this, ex.Message, "请检查成片名称", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			return;
+		}
+		// Snapshot clips before rendering, so changing the editor cannot alter a running job.
+		kept = kept.Select(s => s.Clone()).ToList();
+		SaveUserSettings();
 
 		string ffmpeg = FindFfmpeg();
 		if (string.IsNullOrEmpty(ffmpeg))
@@ -14598,8 +14682,9 @@ internal sealed class MainForm : Form
 				int audioVolume = _cutEditAudioVolume;
 				bool denoiseAudio = false;
 				int denoiseMode = 1;
-				bool loudnormAudio = true;
+				bool loudnormAudio = false;
 				bool bgmDucking = true;
+				bool preferOriginalAudio = true;
 				int voiceMorphIdx = 0;
 				int visualFxIdx = 0;
 				int colorGradeIdx = 0;
@@ -14612,6 +14697,7 @@ internal sealed class MainForm : Form
 					qualityIndex = _deliverQualityCombo?.SelectedIndex ?? 1;
 					fpsIndex = _deliverFpsCombo?.SelectedIndex ?? 0;
 					audioBitrateIndex = _deliverAudioBitrateCombo?.SelectedIndex ?? 1;
+					preferOriginalAudio = _deliverAudioMode?.SelectedIndex != 1;
 					denoiseMode = GetCurrentAiDenoiseMode();
 					bool alreadyDenoisedInPlace = kept.All(s => (s.SourcePath ?? "").IndexOf("_denoised_", StringComparison.OrdinalIgnoreCase) >= 0);
 					denoiseAudio = !alreadyDenoisedInPlace && ((_cutEditDenoiseCheckBox?.Checked == true) || (_cutEditAiAutoDenoiseCheckBox?.Checked == true && denoiseMode > 0));
@@ -14743,6 +14829,15 @@ internal sealed class MainForm : Form
 				StringBuilder fg = new StringBuilder();
 				bool outputAudio = !audioMuted && audioBitrateIndex != 3;
 				float volFactor = (float)audioVolume / 100.0f;
+				var sourceInfo = new Dictionary<string, VideoInfo>(StringComparer.OrdinalIgnoreCase);
+				foreach (string path in srcMap.Keys)
+					sourceInfo[path] = IsImage(path) ? new VideoInfo() : Probe(ffmpeg, path);
+				string originalAudioSource = !string.IsNullOrEmpty(keptVideo[0].SourcePath) ? keptVideo[0].SourcePath : _cutEditSourcePath;
+				bool copyOriginalAudio = outputAudio && preferOriginalAudio &&
+					DeliveryExportRules.CanCopyOriginalAudio(keptVideo, keptAudio, _cutEditSourcePath,
+						sourceInfo[originalAudioSource], ext, audioVolume, denoiseAudio, loudnormAudio, voiceMorphIdx, bgmDucking);
+				if (keptAudio.Count == 0 && !keptVideo.Any(s => sourceInfo[string.IsNullOrEmpty(s.SourcePath) ? _cutEditSourcePath : s.SourcePath].HasAudio))
+					outputAudio = false;
 
 				// 1. Process Video Clips with Transitions
 				for (int i = 0; i < keptVideo.Count; i++)
@@ -14802,7 +14897,7 @@ internal sealed class MainForm : Form
 
 				// 2. Process Audio Streams (A1 Voice + A2 BGM multi-track mixing + Denoise/Loudnorm/VoiceMorph/BGM Ducking)
 				string curA = "[a_concat]";
-				if (outputAudio)
+				if (outputAudio && !copyOriginalAudio)
 				{
 					if (keptAudio.Count > 0)
 					{
@@ -14889,7 +14984,7 @@ internal sealed class MainForm : Form
 							string et = s.EndSeconds.ToString("0.000", CultureInfo.InvariantCulture);
 							string segDurStr = s.Duration.ToString("0.000", CultureInfo.InvariantCulture);
 
-							if (isImg)
+							if (isImg || !sourceInfo[sp].HasAudio)
 							{
 								fg.Append($"aevalsrc=0:d={segDurStr}:s=44100[a{i}];");
 							}
@@ -15020,7 +15115,7 @@ internal sealed class MainForm : Form
 				else if (audioBitrateIndex == 2) audioBitrate = "128k";
 
 				StringBuilder args = new StringBuilder();
-				args.Append("-hide_banner -y ");
+				args.Append("-hide_banner -n ");
 				foreach (var inp in inputs) args.Append(inp).Append(" ");
 
 				if (fg.Length > 0)
@@ -15032,7 +15127,9 @@ internal sealed class MainForm : Form
 					args.Append($"-map {QuoteArg(finalV)} ");
 					if (outputAudio)
 					{
-						args.Append($"-map {QuoteArg(curA)} ");
+						args.Append(copyOriginalAudio
+							? $"-map {srcMap[originalAudioSource]}:a:0 "
+							: $"-map {QuoteArg(curA)} ");
 					}
 				}
 				else
@@ -15049,7 +15146,7 @@ internal sealed class MainForm : Form
 
 				if (outputAudio)
 				{
-					args.Append($"-c:a aac -b:a {audioBitrate} ");
+					args.Append(copyOriginalAudio ? "-c:a copy " : $"-c:a aac -b:a {audioBitrate} ");
 				}
 				else
 				{
@@ -15079,7 +15176,7 @@ internal sealed class MainForm : Form
 					});
 				}, out lastError);
 
-				if (File.Exists(targetOutPath) && new FileInfo(targetOutPath).Length > 0)
+				if (exitCode == 0 && File.Exists(targetOutPath) && new FileInfo(targetOutPath).Length > 0)
 				{
 					_deliverLastExportPath = targetOutPath;
 					FileInfo fi = new FileInfo(targetOutPath);
@@ -15089,7 +15186,8 @@ internal sealed class MainForm : Form
 					BeginInvoke((MethodInvoker)delegate
 					{
 						_deliverProgressBar.Value = 100;
-						_deliverStatusLabel.Text = $"🎉 交付成功！成片文件大小: {mb:0.0} MB，时长: {FormatDuration(totalDur)}";
+						string audioResult = !outputAudio ? "无音频" : copyOriginalAudio ? "原音轨无损保留" : "音频已按剪辑设置处理";
+						_deliverStatusLabel.Text = $"🎉 交付成功！{mb:0.0} MB，时长: {FormatDuration(totalDur)} | {audioResult}";
 						_deliverStartButton.Enabled = true;
 						_deliverOpenFolderButton.Enabled = true;
 						_deliverPlayOutputButton.Enabled = true;
@@ -29652,6 +29750,7 @@ internal sealed class MainForm : Form
 			}
 		}
 		videoInfo.HasAudio = Regex.IsMatch(input, "Audio:\\s*", RegexOptions.IgnoreCase);
+		videoInfo.AudioCodec = Regex.Match(input, @"Audio:\s*([A-Za-z0-9_]+)", RegexOptions.IgnoreCase).Groups[1].Value.ToLowerInvariant();
 		return videoInfo;
 	}
 
@@ -30319,6 +30418,16 @@ internal sealed class MainForm : Form
 			PutSetting(values, "format.version", "3");
 			PutSetting(values, "ui.dark_mode", _isDarkMode);
 			PutSetting(values, "ui.tab", _tabs.SelectedIndex);
+			PutSetting(values, "deliver.namingMode", _deliverNamingMode.SelectedIndex);
+			PutSetting(values, "deliver.customName", _deliverOutputFileName.Text);
+			PutSetting(values, "deliver.outputFolder", _deliverOutputFolder.Text);
+			PutSetting(values, "deliver.format", _deliverFormatCombo.SelectedIndex);
+			PutSetting(values, "deliver.audioMode", _deliverAudioMode.SelectedIndex);
+			PutSetting(values, "deliver.audioBitrate", _deliverAudioBitrateCombo.SelectedIndex);
+			PutSetting(values, "cutEdit.denoise", _cutEditDenoiseCheckBox.Checked);
+			PutSetting(values, "cutEdit.denoiseMode", _cutEditAiDenoiseModeCombo.SelectedIndex);
+			PutSetting(values, "cutEdit.loudnorm", _cutEditLoudnormCheckBox.Checked);
+			PutSetting(values, "cutEdit.voiceMorph", _cutEditVoiceMorphCombo.SelectedIndex);
 			SaveNumericSetting(values, "merge.groupSize", _groupSize);
 			SaveNumericSetting(values, "merge.maxRepeats", _maxRepeatsPerSource);
 			SaveNumericSetting(values, "merge.maxOutputs", _maxOutputCount);
@@ -30542,6 +30651,17 @@ internal sealed class MainForm : Form
 		try
 		{
 			Dictionary<string, string> values = ReadSettingsFile(userSettingsPath);
+			LoadComboIndexSetting(values, "deliver.namingMode", _deliverNamingMode);
+			LoadTextSetting(values, "deliver.customName", _deliverOutputFileName);
+			LoadTextSetting(values, "deliver.outputFolder", _deliverOutputFolder);
+			LoadComboIndexSetting(values, "deliver.format", _deliverFormatCombo);
+			LoadComboIndexSetting(values, "deliver.audioMode", _deliverAudioMode);
+			LoadComboIndexSetting(values, "deliver.audioBitrate", _deliverAudioBitrateCombo);
+			LoadComboIndexSetting(values, "cutEdit.denoiseMode", _cutEditAiDenoiseModeCombo);
+			LoadCheckSetting(values, "cutEdit.denoise", _cutEditDenoiseCheckBox);
+			LoadCheckSetting(values, "cutEdit.loudnorm", _cutEditLoudnormCheckBox);
+			LoadComboIndexSetting(values, "cutEdit.voiceMorph", _cutEditVoiceMorphCombo);
+			RefreshDeliverFileNamePreview();
 			_isDarkMode = true;
 			int num = GetIntSetting(values, "ui.tab", 0);
 			if (GetIntSetting(values, "format.version", 1) < 2 && num >= 3)

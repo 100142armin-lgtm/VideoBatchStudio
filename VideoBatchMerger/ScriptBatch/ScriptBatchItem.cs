@@ -17,6 +17,7 @@ namespace VideoBatchMerger.ScriptBatch
 		public string Status { get; set; } = "等待中";
 		public int ProgressPercent { get; set; } = 0;
 		public string AudioPath { get; set; } = string.Empty;
+		public string TtsCacheKey { get; set; } = string.Empty;
 		public string SrtPath { get; set; } = string.Empty;
 		public string AssPath { get; set; } = string.Empty;
 		public string VideoOutputPath { get; set; } = string.Empty;

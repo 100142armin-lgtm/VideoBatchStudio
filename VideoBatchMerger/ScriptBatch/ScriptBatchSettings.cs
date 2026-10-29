@@ -79,6 +79,12 @@ namespace VideoBatchMerger.ScriptBatch
 		public string DefaultVoice { get; set; } = "pt-PT-DuarteNeural";
 		public string ElevenLabsVoice { get; set; } = "pNInz6obpgDQGcFmaJgB"; // 默认 Adam (原版母本音色)
 		public string ElevenLabsCustomVoiceId { get; set; } = string.Empty;
+		public string ChatterboxLanguage { get; set; } = "pt";
+		public string ChatterboxReferenceAudio { get; set; } = string.Empty;
+		public bool ChatterboxReferenceAuthorized { get; set; } = false;
+		public double ChatterboxExaggeration { get; set; } = 0.65;
+		public double ChatterboxCfg { get; set; } = 0.35;
+		public int ChatterboxKeepAliveMinutes { get; set; } = 15;
 		public List<ClonedVoiceItem> ClonedVoices { get; set; } = new List<ClonedVoiceItem>();
 
 		public string SpeechRate { get; set; } = "+0%";
@@ -153,6 +159,16 @@ namespace VideoBatchMerger.ScriptBatch
 
 		// GIF 动图贴纸 (支持多贴纸、旋转、缩放、出现时间)
 		public List<GifStickerItem> GifStickers { get; set; } = new List<GifStickerItem>();
+
+		// 视频标题独立图层，不读取字幕或水印参数。
+		public MergeTitlePlan ScriptTitlePlan { get; set; } = new MergeTitlePlan
+		{
+			Enabled = false,
+			StyleId = "cinematic_white",
+			MainTitleTemplate = "今日的话语",
+			Position = "居中偏上",
+			DurationSeconds = 4.0
+		};
 
 		public string FootageFolderPath { get; set; } = string.Empty;
 		public string OutputFolderPath { get; set; } = string.Empty;
@@ -296,6 +312,7 @@ namespace VideoBatchMerger.ScriptBatch
 						if (loaded.SubtitleScrollPanelOpacity <= 0) loaded.SubtitleScrollPanelOpacity = 62;
 						if (string.IsNullOrWhiteSpace(loaded.SubtitleFontFamily)) loaded.SubtitleFontFamily = "Arial Rounded MT Bold";
 						if (string.IsNullOrWhiteSpace(loaded.WatermarkFontFamily)) loaded.WatermarkFontFamily = "Arial";
+						if (loaded.ScriptTitlePlan == null) loaded.ScriptTitlePlan = new ScriptBatchSettings().ScriptTitlePlan;
 						return loaded;
 					}
 				}

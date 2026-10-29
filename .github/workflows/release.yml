@@ -1,162 +1,68 @@
-name: Build and Release
+name: Build, Validate and Publish Team Package
 
 on:
+  workflow_dispatch:
   push:
-    branches:
-      - main
-    tags:
-      - 'v*'
+    branches: [main]
+    tags: ['v*']
+
+concurrency:
+  group: team-release
+  cancel-in-progress: false
 
 jobs:
   build:
-    if: "${{ startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && github.event.head_commit.message == 'fix: republish v9.4.0 hotfix without version bump') }}"
     runs-on: windows-latest
+    timeout-minutes: 90
     permissions:
-      id-token: write
       contents: write
-      attestations: write
-
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '10.0.x'
-
-      - name: Build VideoBatchStudio
+      - name: Build
         shell: pwsh
         run: |
-          dotnet build -c Release VideoBatchStudio.csproj
-          $binDir = if (Test-Path "bin_out/Release/net48/VideoBatchStudio.exe") { "bin_out/Release/net48" } else { "bin/Release/net48" }
-          if (-not (Test-Path "$binDir/VideoBatchStudio.exe")) {
-            throw "Build output VideoBatchStudio.exe not found!"
-          }
-
-      - name: Package Release Assets
+          dotnet build VideoBatchStudio.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+      - name: Install and verify all required portable components
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path release_assets | Out-Null
-          New-Item -ItemType Directory -Force -Path staging/VideoBatchStudio | Out-Null
-
-          $binDir = if (Test-Path "bin_out/Release/net48/VideoBatchStudio.exe") { "bin_out/Release/net48" } else { "bin/Release/net48" }
-
-          # Copy entire build output (executable, WebView2 DLLs, runtimes, web_preview, config)
-          Copy-Item -Path "$binDir/*" -Destination "staging/VideoBatchStudio/" -Recurse -Force
-          Copy-Item -Path "$binDir/VideoBatchStudio.exe" -Destination "release_assets/VideoBatchStudio.exe" -Force
-
-          # Ensure both win-x64 and win-x86 WebView2Loader.dll are present (prevent 0x8007000B BadImageFormatException)
-          $wv64 = Get-ChildItem -Path "$env:USERPROFILE\.nuget\packages\microsoft.web.webview2" -Filter "WebView2Loader.dll" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "win-x64\\native\\" } | Select-Object -First 1
-          if ($wv64) {
-            New-Item -ItemType Directory -Force -Path "staging/VideoBatchStudio/runtimes/win-x64/native" | Out-Null
-            Copy-Item -Path $wv64.FullName -Destination "staging/VideoBatchStudio/runtimes/win-x64/native/WebView2Loader.dll" -Force
-          }
-
-          # Copy python worker for free Edge-TTS
-          if (Test-Path "VideoBatchMerger/ScriptBatch/edge_tts_worker.py") {
-            Copy-Item -Path "VideoBatchMerger/ScriptBatch/edge_tts_worker.py" -Destination "staging/VideoBatchStudio/edge_tts_worker.py" -Force
-          }
-
-          # Ensure web_preview HTML & JS canvas assets are in place
-          if (Test-Path "web_preview") {
-            New-Item -ItemType Directory -Force -Path "staging/VideoBatchStudio/web_preview" | Out-Null
-            Copy-Item -Path "web_preview/*" -Destination "staging/VideoBatchStudio/web_preview/" -Recurse -Force
-          }
-
-          # Clean any sensitive or personal development cache
-          Remove-Item -Path "staging/VideoBatchStudio/*settings.json" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "staging/VideoBatchStudio/*keys.json" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "staging/VideoBatchStudio/*.key" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "staging/VideoBatchStudio/*.pdb" -Force -ErrorAction SilentlyContinue
-
-          # Ensure all staging files use UTF-8 safe ASCII filenames in zip archive to prevent corrupt characters on English/US runners
-          if (Test-Path "双击启动软件.bat") {
-            Copy-Item -Path "双击启动软件.bat" -Destination "staging/VideoBatchStudio/双击启动软件.bat" -Force
-            Copy-Item -Path "双击启动软件.bat" -Destination "staging/VideoBatchStudio/Start_VideoBatchStudio.bat" -Force
-          }
-
-          # Copy fonts and documentation
-          if (Test-Path "fonts") {
-            Copy-Item -Path "fonts" -Destination "staging/VideoBatchStudio/fonts" -Recurse -Force
-          }
-          Copy-Item -Path "完整使用说明.md" -Destination "staging/VideoBatchStudio/完整使用说明.md" -Force -ErrorAction SilentlyContinue
-          Copy-Item -Path "完整使用说明.md" -Destination "staging/VideoBatchStudio/INSTRUCTIONS.md" -Force -ErrorAction SilentlyContinue
-          Copy-Item -Path "使用说明.txt" -Destination "staging/VideoBatchStudio/使用说明.txt" -Force -ErrorAction SilentlyContinue
-          Copy-Item -Path "使用说明.txt" -Destination "staging/VideoBatchStudio/README_CN.txt" -Force -ErrorAction SilentlyContinue
-          Copy-Item -Path "THIRD_PARTY_NOTICES.txt" -Destination "staging/VideoBatchStudio/" -Force -ErrorAction SilentlyContinue
-          Copy-Item -Path "README.md" -Destination "staging/VideoBatchStudio/" -Force -ErrorAction SilentlyContinue
-
-          # Ensure FFmpeg and FFprobe are bundled
-          $ffmpegCmd = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
-          if (-not $ffmpegCmd) {
-            Write-Host "Installing FFmpeg via choco..."
-            choco install ffmpeg -y --no-progress
-            $ffmpegCmd = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
-          }
-          if ($ffmpegCmd) {
-            Copy-Item -Path $ffmpegCmd.Source -Destination "staging/VideoBatchStudio/ffmpeg.exe" -Force
-            Write-Host "Bundled FFmpeg from: $($ffmpegCmd.Source)"
-          } elseif (Test-Path "C:\ProgramData\chocolatey\bin\ffmpeg.exe") {
-            Copy-Item -Path "C:\ProgramData\chocolatey\bin\ffmpeg.exe" -Destination "staging/VideoBatchStudio/ffmpeg.exe" -Force
-          }
-          $ffprobeCmd = Get-Command ffprobe.exe -ErrorAction SilentlyContinue
-          if ($ffprobeCmd) {
-            Copy-Item -Path $ffprobeCmd.Source -Destination "staging/VideoBatchStudio/ffprobe.exe" -Force
-            Write-Host "Bundled FFprobe from: $($ffprobeCmd.Source)"
-          } elseif (Test-Path "C:\ProgramData\chocolatey\bin\ffprobe.exe") {
-            Copy-Item -Path "C:\ProgramData\chocolatey\bin\ffprobe.exe" -Destination "staging/VideoBatchStudio/ffprobe.exe" -Force
-          }
-
-          # Download and bundle yt-dlp.exe
-          try {
-            Write-Host "Downloading yt-dlp.exe for portable bundle..."
-            Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "staging/VideoBatchStudio/yt-dlp.exe" -TimeoutSec 60
-            Write-Host "Bundled yt-dlp.exe successfully"
-          } catch {
-            Write-Host "yt-dlp download failed: $_"
-          }
-
-          # Download and bundle whisper CPU engine into staging/whisper
-          try {
-            Write-Host "Downloading whisper-bin-x64.zip for portable bundle..."
-            New-Item -ItemType Directory -Force -Path "staging/VideoBatchStudio/whisper" | Out-Null
-            Invoke-WebRequest -Uri "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.0/whisper-bin-x64.zip" -OutFile "whisper_temp.zip" -TimeoutSec 90
-            Expand-Archive -Path "whisper_temp.zip" -DestinationPath "staging/VideoBatchStudio/whisper" -Force
-            Remove-Item "whisper_temp.zip" -Force -ErrorAction SilentlyContinue
-            Write-Host "Bundled whisper CPU engine successfully"
-          } catch {
-            Write-Host "whisper engine download failed: $_"
-          }
-
-          # Download and bundle ggml-base.bin model into staging/whisper/models
-          try {
-            Write-Host "Downloading ggml-base.bin for portable bundle..."
-            New-Item -ItemType Directory -Force -Path "staging/VideoBatchStudio/whisper/models" | Out-Null
-            Invoke-WebRequest -Uri "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" -OutFile "staging/VideoBatchStudio/whisper/models/ggml-base.bin" -TimeoutSec 180
-            Write-Host "Bundled ggml-base.bin model successfully"
-          } catch {
-            Write-Host "ggml-base.bin download failed: $_"
-          }
-
-          # Create Portable Zip
-          Compress-Archive -Path "staging/VideoBatchStudio/*" -DestinationPath "release_assets/VideoBatchStudio_Portable.zip" -Force
-
-          Write-Host "Generated release assets:"
-          Get-ChildItem -Path release_assets | Select-Object Name, Length
-
-      - name: Attest Build Provenance
-        uses: actions/attest-build-provenance@v2
+          ./Setup/Package-Release.ps1 -BuildDirectory bin_out/Release/net48 -OutputDirectory release_assets
+      - name: Keep validated artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          subject-path: 'release_assets/*'
-
-      - name: Create or Update Release
-        if: startsWith(github.ref, 'refs/tags/')
+          name: VideoBatchStudio-team-package
+          path: |
+            release_assets/VideoBatchStudio.exe
+            release_assets/VideoBatchStudio_Portable.zip
+            release_assets/SHA256SUMS.txt
+          compression-level: 0
+          retention-days: 7
+      - name: Publish current version without changing its version number
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ github.sha }}
         run: |
-          $tag = "${{ github.ref_name }}"
-          Write-Host "Publishing release assets for tag $tag..."
-          gh release upload $tag release_assets/VideoBatchStudio.exe release_assets/VideoBatchStudio_Portable.zip --clobber
-          Write-Host "Successfully overwritten release assets for $tag."
+          $metadata = Get-Content version.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $tag = 'v' + $metadata.version
+          $PSNativeCommandUseErrorActionPreference = $false
+          gh release view $tag --json tagName *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --target $env:RELEASE_COMMIT --title ('VideoBatchStudio ' + $metadata.version) --notes 'Complete team package with verified components and one-click model setup.' --latest
+            if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
+          }
+          gh release upload $tag release_assets/VideoBatchStudio.exe release_assets/VideoBatchStudio_Portable.zip release_assets/SHA256SUMS.txt --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+          $release = gh api ('repos/' + $env:GH_REPO + '/releases/tags/' + $tag) | ConvertFrom-Json
+          foreach ($name in @('VideoBatchStudio.exe','VideoBatchStudio_Portable.zip','SHA256SUMS.txt')) {
+            $asset = $release.assets | Where-Object name -eq $name
+            $hash = (Get-FileHash -LiteralPath ('release_assets/' + $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if (-not $asset -or $asset.digest -ne ('sha256:' + $hash)) { throw ('Published asset hash mismatch: ' + $name) }
+          }
+          Write-Output ('Verified release: ' + $release.html_url)

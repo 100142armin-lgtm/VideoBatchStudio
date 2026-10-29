@@ -19,4 +19,6 @@ internal sealed class VideoInfo
 	public bool HasVideo;
 
 	public bool HasAudio;
+
+	public string AudioCodec = "";
 }

@@ -45,9 +45,6 @@ public static class TranscribeEngine
 	{
 		string cli = Path.Combine(GetCudaInstallDir(), "whisper-cli.exe");
 		if (File.Exists(cli) && File.Exists(Path.Combine(GetCudaInstallDir(), "ggml-cuda.dll"))) return cli;
-		string dCli = @"D:\工具\视频拼接\VideoBatchStudio\whisper\cuda\whisper-cli.exe";
-		string dCuda = @"D:\工具\视频拼接\VideoBatchStudio\whisper\cuda\ggml-cuda.dll";
-		if (File.Exists(dCli) && File.Exists(dCuda)) return dCli;
 		return string.Empty;
 	}
 
@@ -68,12 +65,9 @@ public static class TranscribeEngine
 		string[] candidates = new string[]
 		{
 			Path.Combine(appDir, "whisper", "cuda", "whisper-cli.exe"),
-			@"D:\工具\视频拼接\VideoBatchStudio\whisper\cuda\whisper-cli.exe",
 			Path.Combine(appDir, "whisper", "whisper-cli.exe"),
 			Path.Combine(appDir, "whisper-cli.exe"),
 			Path.Combine(appDir, "whisper", "main.exe"),
-			@"D:\工具\视频拼接\VideoBatchStudio\whisper\whisper-cli.exe",
-			@"D:\工具\视频拼接\VideoBatchStudio\whisper\main.exe"
 		};
 
 		foreach (var path in candidates)
@@ -110,8 +104,6 @@ public static class TranscribeEngine
 			Path.Combine(appDir, "whisper", "models"),
 			Path.Combine(appDir, "whisper"),
 			Path.Combine(appDir, "models"),
-			@"D:\工具\视频拼接\VideoBatchStudio\whisper\models",
-			@"D:\工具\视频拼接\VideoBatchStudio\whisper"
 		};
 
 		foreach (var dir in searchDirs)
@@ -292,177 +284,36 @@ public static class TranscribeEngine
 	}
 
 	/// <summary>下载并安装 NVIDIA 显卡加速版 whisper 引擎到 whisper\cuda</summary>
-	public static async Task<bool> InstallCudaBuildAsync(Action<string> logCallback, CancellationToken ct)
+public static Task<bool> InstallCudaBuildAsync(Action<string> logCallback, CancellationToken ct)
 	{
-		string cudaDir = GetCudaInstallDir();
-		string zip = Path.Combine(GetWhisperInstallDir(), "_cuda_dl.zip");
-		string tmpExtract = Path.Combine(GetWhisperInstallDir(), "_cuda_extract");
-		try
-		{
-			if (!File.Exists(zip) || new FileInfo(zip).Length < 10_000_000)
-			{
-				logCallback?.Invoke("[显卡引擎] 正在下载 NVIDIA CUDA 加速版 Whisper 引擎 (约 60MB)...");
-				bool ok = await DownloadWithMirrorAsync(CudaBuildUrl, zip, logCallback, ct);
-				if (!ok) throw new InvalidOperationException("显卡加速引擎下载未完成，请检查网络");
-			}
-			if (Directory.Exists(tmpExtract)) Directory.Delete(tmpExtract, true);
-			Directory.CreateDirectory(tmpExtract);
-			string fullTmpExtract = Path.GetFullPath(tmpExtract);
-			if (!fullTmpExtract.EndsWith(Path.DirectorySeparatorChar.ToString()))
-				fullTmpExtract += Path.DirectorySeparatorChar;
-
-			using (var archive = System.IO.Compression.ZipFile.OpenRead(zip))
-			{
-				foreach (var entry in archive.Entries)
-				{
-					string entryDest = Path.GetFullPath(Path.Combine(fullTmpExtract, entry.FullName));
-					if (!entryDest.StartsWith(fullTmpExtract, StringComparison.OrdinalIgnoreCase))
-					{
-						throw new InvalidOperationException("检测到异常压缩包路径，存在 Zip Slip 路径穿越风险");
-					}
-					if (string.IsNullOrEmpty(entry.Name))
-					{
-						Directory.CreateDirectory(entryDest);
-						continue;
-					}
-					Directory.CreateDirectory(Path.GetDirectoryName(entryDest));
-					using (var es = entry.Open())
-					using (var os = File.Create(entryDest))
-					{
-						es.CopyTo(os);
-					}
-				}
-			}
-			string cli = Directory.GetFiles(tmpExtract, "whisper-cli.exe", SearchOption.AllDirectories).FirstOrDefault();
-			if (cli == null) throw new InvalidOperationException("压缩包中未找到 whisper-cli.exe");
-			string srcDir = Path.GetDirectoryName(cli);
-			Directory.CreateDirectory(cudaDir);
-			foreach (var f in Directory.GetFiles(srcDir))
-			{
-				File.Copy(f, Path.Combine(cudaDir, Path.GetFileName(f)), true);
-			}
-			logCallback?.Invoke("[显卡引擎] CUDA 加速引擎安装完成！");
-			return !string.IsNullOrEmpty(FindCudaWhisperCliPath());
-		}
-		catch (Exception ex)
-		{
-			logCallback?.Invoke($"[显卡引擎安装失败] {ex.Message}（自动降级为通用 CPU 模式）");
-			return false;
-		}
-		finally
-		{
-			try { if (Directory.Exists(tmpExtract)) Directory.Delete(tmpExtract, true); } catch { }
-			try { if (File.Exists(zip)) File.Delete(zip); } catch { }
-		}
+		return InstallManagedComponentAsync("whisper-cuda", logCallback, ct);
 	}
 
 	/// <summary>下载并安装通用 CPU 版 whisper 离线推理引擎到 whisper 目录（全机型免显卡兼容）</summary>
-	public static async Task<bool> InstallCpuBuildAsync(Action<string> logCallback, CancellationToken ct)
+public static Task<bool> InstallCpuBuildAsync(Action<string> logCallback, CancellationToken ct)
 	{
-		string whisperDir = GetWhisperInstallDir();
-		string zip = Path.Combine(whisperDir, "_cpu_dl.zip");
-		string tmpExtract = Path.Combine(whisperDir, "_cpu_extract");
-		try
-		{
-			if (!File.Exists(zip) || new FileInfo(zip).Length < 3_000_000)
-			{
-				logCallback?.Invoke("[CPU引擎] 正在下载通用 CPU 版 Whisper 离线推理引擎 (约 15MB)...");
-				bool ok = await DownloadWithMirrorAsync(CpuBuildUrl, zip, logCallback, ct);
-				if (!ok) throw new InvalidOperationException("CPU 引擎下载未能成功完成，请检查网络连接");
-			}
-
-			if (Directory.Exists(tmpExtract)) Directory.Delete(tmpExtract, true);
-			Directory.CreateDirectory(tmpExtract);
-			string fullTmpExtract = Path.GetFullPath(tmpExtract);
-			if (!fullTmpExtract.EndsWith(Path.DirectorySeparatorChar.ToString()))
-				fullTmpExtract += Path.DirectorySeparatorChar;
-
-			using (var archive = System.IO.Compression.ZipFile.OpenRead(zip))
-			{
-				foreach (var entry in archive.Entries)
-				{
-					string entryDest = Path.GetFullPath(Path.Combine(fullTmpExtract, entry.FullName));
-					if (!entryDest.StartsWith(fullTmpExtract, StringComparison.OrdinalIgnoreCase))
-					{
-						throw new InvalidOperationException("检测到异常压缩包路径，存在 Zip Slip 路径穿越风险");
-					}
-					if (string.IsNullOrEmpty(entry.Name))
-					{
-						Directory.CreateDirectory(entryDest);
-						continue;
-					}
-					Directory.CreateDirectory(Path.GetDirectoryName(entryDest));
-					using (var es = entry.Open())
-					using (var os = File.Create(entryDest))
-					{
-						es.CopyTo(os);
-					}
-				}
-			}
-
-			string cli = Directory.GetFiles(tmpExtract, "whisper-cli.exe", SearchOption.AllDirectories).FirstOrDefault()
-				?? Directory.GetFiles(tmpExtract, "main.exe", SearchOption.AllDirectories).FirstOrDefault();
-			if (cli == null) throw new InvalidOperationException("压缩包中未找到 whisper-cli.exe 或 main.exe");
-
-			string srcDir = Path.GetDirectoryName(cli);
-			Directory.CreateDirectory(whisperDir);
-			foreach (var f in Directory.GetFiles(srcDir))
-			{
-				File.Copy(f, Path.Combine(whisperDir, Path.GetFileName(f)), true);
-			}
-
-			string mainExe = Path.Combine(whisperDir, "main.exe");
-			string whisperCliExe = Path.Combine(whisperDir, "whisper-cli.exe");
-			if (File.Exists(mainExe) && !File.Exists(whisperCliExe))
-			{
-				File.Copy(mainExe, whisperCliExe, true);
-			}
-
-			logCallback?.Invoke("[CPU引擎] 通用 CPU 推理引擎已安装就绪！");
-			return !string.IsNullOrEmpty(FindWhisperCliPath());
-		}
-		catch (Exception ex)
-		{
-			logCallback?.Invoke($"[CPU引擎安装失败] {ex.Message}");
-			return false;
-		}
-		finally
-		{
-			try { if (Directory.Exists(tmpExtract)) Directory.Delete(tmpExtract, true); } catch { }
-			try { if (File.Exists(zip)) File.Delete(zip); } catch { }
-		}
+		return InstallManagedComponentAsync("whisper-cpu", logCallback, ct);
 	}
 
 	/// <summary>高速下载多语种 AI 语音识别模型</summary>
-	public static async Task<bool> DownloadModelAsync(string modelKeyOrFileName, Action<string> logCallback, CancellationToken ct)
+public static Task<bool> DownloadModelAsync(string modelKeyOrFileName, Action<string> logCallback, CancellationToken ct)
 	{
-		string fileName = modelKeyOrFileName;
-		if (!fileName.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
-		{
-			var m = Models.FirstOrDefault(x => x.Key.Equals(modelKeyOrFileName, StringComparison.OrdinalIgnoreCase));
-			if (m != null) fileName = m.FileName;
-			else fileName = $"ggml-{modelKeyOrFileName}.bin";
-		}
+		var model = Models.FirstOrDefault(m => m.Key.Equals(modelKeyOrFileName, StringComparison.OrdinalIgnoreCase) || m.FileName.Equals(modelKeyOrFileName, StringComparison.OrdinalIgnoreCase));
+		if (model == null) throw new ArgumentException("未知模型，请从软件模型列表选择。");
+		return InstallManagedComponentAsync("whisper-" + model.Key, logCallback, ct);
+	}
 
-		string modelsDir = Path.Combine(GetWhisperInstallDir(), "models");
-		Directory.CreateDirectory(modelsDir);
-		string dest = Path.Combine(modelsDir, fileName);
-
-		if (File.Exists(dest) && new FileInfo(dest).Length > 10_000_000)
+	private static async Task<bool> InstallManagedComponentAsync(string id, Action<string> log, CancellationToken ct)
+	{
+		try
 		{
-			logCallback?.Invoke($"[模型检测] 本地已存在模型文件: {fileName}");
-			return true;
+			var manager = new Components.ComponentManager();
+			var spec = manager.Components.Single(c => c.Id == id);
+			if (await manager.CheckAsync(spec, ct) != "已就绪") await manager.InstallAsync(spec, log, ct);
+			return await manager.CheckAsync(spec, ct) == "已就绪";
 		}
-
-		logCallback?.Invoke($"[模型拉取] 正在从高速镜像拉取 {fileName} 语音模型...");
-		string url = $"https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/{fileName}";
-		bool ok = await DownloadWithMirrorAsync(url, dest, logCallback, ct);
-		if (ok && File.Exists(dest) && new FileInfo(dest).Length > 10_000_000)
-		{
-			logCallback?.Invoke($"[模型就绪] {fileName} 下载并校验成功！");
-			return true;
-		}
-		return false;
+		catch (OperationCanceledException) { throw; }
+		catch (Exception ex) { log?.Invoke("[组件安装失败] " + ex.Message); return false; }
 	}
 
 	public sealed class OnlineAudioResult
