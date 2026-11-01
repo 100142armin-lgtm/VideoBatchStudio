@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "9.5.2";
+	public const string CurrentAppVersion = "9.6.0";
 
 	public const int WorkspaceMerge = 0;
 	public const int WorkspaceSplit = 1;
@@ -30002,8 +30002,6 @@ internal sealed class MainForm : Form
 			string asmFfmpeg = Path.Combine(asmDir, "ffmpeg.exe");
 			if (File.Exists(asmFfmpeg)) return asmFfmpeg;
 		}
-		string dPath = @"D:\工具\视频拼接\VideoBatchStudio\ffmpeg.exe";
-		if (File.Exists(dPath)) return dPath;
 		string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 		string wingetPath = Path.Combine(localAppData, @"Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.1-full_build\bin\ffmpeg.exe");
 		if (File.Exists(wingetPath)) return wingetPath;

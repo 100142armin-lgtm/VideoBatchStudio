@@ -73,15 +73,9 @@ namespace VideoBatchMerger.ScriptBatch
 			string cand1 = Path.Combine(asmDir, "ffmpeg.exe");
 			if (File.Exists(cand1)) return cand1;
 
-			string dPath = @"D:\工具\视频拼接\VideoBatchStudio\ffmpeg.exe";
-			if (File.Exists(dPath)) return dPath;
-
 			string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 			string wingetPath = Path.Combine(localApp, @"Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.1-full_build\bin\ffmpeg.exe");
 			if (File.Exists(wingetPath)) return wingetPath;
-
-			string devPath = @"C:\Users\PcVkH\.gemini\antigravity\scratch\VideoBatchStudio\ffmpeg.exe";
-			if (File.Exists(devPath)) return devPath;
 
 			return "ffmpeg.exe";
 		}
@@ -1268,7 +1262,7 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 
 			// 压制 ASS 字幕 与 水印叠加
-			string escapedAssPath = item.AssPath.Replace("\\", "/").Replace(":", "\\:");
+			string escapedAssPath = item.AssPath.Replace("\\", "/").Replace(":", "\\:").Replace("'", "'\\''");
 			bool hasWatermark = !string.IsNullOrEmpty(watermarkPngPath) && File.Exists(watermarkPngPath);
 
 			filterComplex.Append($"[rawv]ass='{escapedAssPath}'[v_sub];");

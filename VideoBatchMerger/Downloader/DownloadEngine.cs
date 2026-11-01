@@ -35,9 +35,6 @@ public sealed class DownloadEngine
 		string p1 = Path.Combine(appDir, "yt-dlp.exe");
 		if (File.Exists(p1)) return p1;
 
-		string p2 = @"D:\工具\视频拼接\VideoBatchStudio\yt-dlp.exe";
-		if (File.Exists(p2)) return p2;
-
 		string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 		string p3 = Path.Combine(localApp, @"Microsoft\WinGet\Packages\yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe\yt-dlp.exe");
 		if (File.Exists(p3)) return p3;
@@ -66,9 +63,6 @@ public sealed class DownloadEngine
 		string p1 = Path.Combine(appDir, "ffmpeg.exe");
 		if (File.Exists(p1)) return p1;
 
-		string p2 = @"D:\工具\视频拼接\VideoBatchStudio\ffmpeg.exe";
-		if (File.Exists(p2)) return p2;
-
 		string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 		string p3 = Path.Combine(localApp, @"Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.1-full_build\bin\ffmpeg.exe");
 		if (File.Exists(p3)) return p3;
@@ -95,9 +89,6 @@ public sealed class DownloadEngine
 		string appDir = AppDomain.CurrentDomain.BaseDirectory;
 		string p1 = Path.Combine(appDir, "ffprobe.exe");
 		if (File.Exists(p1)) return p1;
-
-		string p2 = @"D:\工具\视频拼接\VideoBatchStudio\ffprobe.exe";
-		if (File.Exists(p2)) return p2;
 
 		string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 		string p3 = Path.Combine(localApp, @"Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.1-full_build\bin\ffprobe.exe");

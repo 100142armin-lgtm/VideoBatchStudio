@@ -1,8 +1,8 @@
-# 视频批处理工具 (VideoBatchStudio) V9.5.2
+# 视频批处理工具 (VideoBatchStudio) V9.6.0
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(64--bit)-blue.svg)
 ![Runtime](https://img.shields.io/badge/.NET-Framework%204.8-brightgreen.svg)
-![Version](https://img.shields.io/badge/Version-V9.5.2-orange.svg)
+![Version](https://img.shields.io/badge/Version-V9.6.0-orange.svg)
 ![License](https://img.shields.io/badge/License-Proprietary%20%2F%20Team%20Edition-lightgrey.svg)
 
 **VideoBatchStudio (视频批处理工作台)** 是一套面向短视频矩阵团队、出海影视制作与电商营销的高性能 Windows 音视频全流程批量生产系统。软件集成了 **10 大核心生产力工作区**，内嵌免安装独立运行环境与轻量字幕模型，支持开箱即用、一键扩展 AI 离线模型与全自动无感更新。
@@ -14,7 +14,7 @@
 软件提供**开箱即用**的完整便携包，无需复杂的技术配置或环境搭建，新手即可轻松上手。
 
 ### 1. 下载与解压
-* 从 [GitHub Releases](https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v9.5.2) 下载最新版本的 **`VideoBatchStudio_Portable.zip`**（约 430 MB）。
+* 从 [GitHub Releases](https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v9.6.0) 下载最新版本的 **`VideoBatchStudio_Portable.zip`**（约 430 MB）。
 * **重要**：下载后请**完整解压**到电脑的个人文件夹（如 `D:\VideoBatchStudio\` 或桌面）。**切勿在压缩包内直接双击运行！**
 
 ### 2. 双击启动

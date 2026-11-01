@@ -46,6 +46,12 @@ namespace VideoBatchMerger.ScriptBatch
 			"elevenlabs_keys.json"
 		);
 
+		private static readonly string AppDataSettingsPath = Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+			"VideoBatchStudio",
+			"elevenlabs_keys.json"
+		);
+
 		private static readonly HttpClient s_http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
 
 		public List<ElevenLabsKeyItem> Keys { get; } = new List<ElevenLabsKeyItem>();
@@ -83,14 +89,9 @@ namespace VideoBatchMerger.ScriptBatch
 			var pool = new ElevenLabsKeyPool();
 			try
 			{
-				string path = SettingsPath;
-				if (!File.Exists(path))
-				{
-					string alt = Path.Combine(@"C:\Users\PcVkH\.gemini\antigravity\scratch\VideoBatchStudio", "elevenlabs_keys.json");
-					if (File.Exists(alt)) path = alt;
-				}
+				string path = File.Exists(SettingsPath) ? SettingsPath : (File.Exists(AppDataSettingsPath) ? AppDataSettingsPath : null);
 
-				if (File.Exists(path))
+				if (!string.IsNullOrEmpty(path))
 				{
 					string json = File.ReadAllText(path, Encoding.UTF8);
 					var serializer = new JavaScriptSerializer();
@@ -116,10 +117,24 @@ namespace VideoBatchMerger.ScriptBatch
 				{
 					var serializer = new JavaScriptSerializer();
 					string json = serializer.Serialize(Keys);
-					File.WriteAllText(SettingsPath, json, Encoding.UTF8);
+					bool saved = false;
+					try
+					{
+						File.WriteAllText(SettingsPath, json, Encoding.UTF8);
+						saved = true;
+					}
+					catch { }
 
-					string alt = Path.Combine(@"C:\Users\PcVkH\.gemini\antigravity\scratch\VideoBatchStudio", "elevenlabs_keys.json");
-					try { File.WriteAllText(alt, json, Encoding.UTF8); } catch { }
+					if (!saved)
+					{
+						try
+						{
+							string dir = Path.GetDirectoryName(AppDataSettingsPath);
+							if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+							File.WriteAllText(AppDataSettingsPath, json, Encoding.UTF8);
+						}
+						catch { }
+					}
 				}
 				catch { }
 			}

@@ -2178,12 +2178,6 @@ namespace VideoBatchMerger.ScriptBatch
 				_webViewPreview.NavigationCompleted += OnWebViewNavigationCompleted;
 
 				string htmlPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "web_preview", "preview.html");
-				if (!File.Exists(htmlPath))
-				{
-					string altPath = Path.Combine(@"C:\Users\PcVkH\.gemini\antigravity\scratch\VideoBatchStudio\web_preview", "preview.html");
-					if (File.Exists(altPath)) htmlPath = altPath;
-				}
-
 				if (File.Exists(htmlPath))
 				{
 					_webViewPreview.CoreWebView2.Navigate(new Uri(htmlPath).AbsoluteUri);

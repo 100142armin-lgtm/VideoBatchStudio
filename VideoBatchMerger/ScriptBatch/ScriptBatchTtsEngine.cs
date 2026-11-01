@@ -100,12 +100,6 @@ namespace VideoBatchMerger.ScriptBatch
 			string cand2 = Path.Combine(baseDir, "ScriptBatch", "auditions", $"{voiceKey}.mp3");
 			if (File.Exists(cand2)) return cand2;
 
-			string devPath = Path.Combine(@"C:\Users\PcVkH\.gemini\antigravity\scratch\VideoBatchStudio\auditions", $"{voiceKey}.mp3");
-			if (File.Exists(devPath)) return devPath;
-
-			string dPath = Path.Combine(@"D:\工具\视频拼接\VideoBatchStudio\auditions", $"{voiceKey}.mp3");
-			if (File.Exists(dPath)) return dPath;
-
 			return string.Empty;
 		}
 
@@ -187,8 +181,6 @@ namespace VideoBatchMerger.ScriptBatch
 		{
 			string portable = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "edge_runtime", "python", "python.exe");
 			if (File.Exists(portable)) return portable;
-			string direct = @"C:\Users\PcVkH\AppData\Local\Programs\Python\Python312\python.exe";
-			if (File.Exists(direct)) return direct;
 
 			string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 			string standardPy312 = Path.Combine(localApp, @"Programs\Python\Python312\python.exe");
@@ -216,9 +208,6 @@ namespace VideoBatchMerger.ScriptBatch
 
 			string cand2 = Path.Combine(baseDir, "edge_tts_worker.py");
 			if (File.Exists(cand2)) return cand2;
-
-			string devPath = @"C:\Users\PcVkH\.gemini\antigravity\scratch\VideoBatchStudio\VideoBatchMerger\ScriptBatch\edge_tts_worker.py";
-			if (File.Exists(devPath)) return devPath;
 
 			return cand1;
 		}

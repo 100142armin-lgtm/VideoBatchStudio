@@ -340,6 +340,7 @@ internal sealed class UpdateNotificationForm : Form
 
 	private static bool IsApprovedUpdateUrl(string value)
 	{
+		if (string.IsNullOrWhiteSpace(value)) return false;
 		if (!Uri.TryCreate(value, UriKind.Absolute, out Uri uri) || uri.Scheme != Uri.UriSchemeHttps) return false;
 		string host = uri.Host.TrimEnd('.').ToLowerInvariant();
 		return host == "github.com" || host == "ghfast.top" || host == "ghproxy.net" || host == "objects.githubusercontent.com" || host == "cdn.jsdelivr.net" || host == "raw.gitmirror.com";
@@ -502,6 +503,11 @@ internal sealed class UpdateNotificationForm : Form
 
 	private async Task PerformDownloadStreamAsync(string url, string destinationFile, CancellationToken ct)
 	{
+		if (!IsApprovedUpdateUrl(url))
+		{
+			throw new InvalidOperationException("拒绝从非受信任或不安全的来源下载更新包: " + url);
+		}
+
 		var req = (HttpWebRequest)WebRequest.Create(url);
 		req.Method = "GET";
 		req.UserAgent = "Mozilla/5.0 (Windows NT 10; Win64; x64) VideoBatchStudio AutoUpdater";

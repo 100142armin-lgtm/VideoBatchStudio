@@ -104,6 +104,9 @@ namespace VideoBatchMerger.ScriptBatch
 		public int FootageStrategy { get; set; } = 0; // 0: 随机拼接, 1: 顺序拼接, 2: 单素材循环且批次去重
 
 		// 字幕样式与排版 (全自由定制 + 永久记忆)
+		// These preferences affect only the settings dialog, never the rendered video.
+		public int SubtitleEditorUiScalePercent { get; set; } = 125;
+		public bool SubtitleEditorAutoScale { get; set; } = true;
 		public string SubtitleFontFamily { get; set; } = "Arial Rounded MT Bold";
 		public int SubtitleFontSize { get; set; } = 86; // 36 ~ 140 px 连续可调
 		public bool SubtitleBold { get; set; } = true;
@@ -271,9 +274,7 @@ namespace VideoBatchMerger.ScriptBatch
 				var candidates = new[]
 				{
 					AppDataSettingsFilePath,
-					SettingsFilePath,
-					Path.Combine(@"D:\工具\视频拼接\VideoBatchStudio", "script_batch_settings.json"),
-					Path.Combine(@"C:\Users\PcVkH\.gemini\antigravity\scratch\VideoBatchStudio", "script_batch_settings.json")
+					SettingsFilePath
 				};
 
 				string bestPath = null;
@@ -334,9 +335,7 @@ namespace VideoBatchMerger.ScriptBatch
 				var targets = new[]
 				{
 					SettingsFilePath,
-					AppDataSettingsFilePath,
-					Path.Combine(@"D:\工具\视频拼接\VideoBatchStudio", "script_batch_settings.json"),
-					Path.Combine(@"C:\Users\PcVkH\.gemini\antigravity\scratch\VideoBatchStudio", "script_batch_settings.json")
+					AppDataSettingsFilePath
 				};
 
 				foreach (var t in targets)

@@ -13,7 +13,8 @@ namespace VideoBatchMerger.ScriptBatch
 	{
 		public static string FindPythonExe()
 		{
-			string venvPy = @"D:\工具\视频拼接\VideoBatchStudio\local_ai_env\Scripts\python.exe";
+			string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+			string venvPy = Path.Combine(baseDir, "local_ai_env", "Scripts", "python.exe");
 			if (File.Exists(venvPy)) return venvPy;
 
 			string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -28,12 +29,6 @@ namespace VideoBatchMerger.ScriptBatch
 			string cand1 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "xtts_worker.py");
 			if (File.Exists(cand1)) return cand1;
 
-			string cand2 = @"D:\工具\视频拼接\VideoBatchStudio\xtts_worker.py";
-			if (File.Exists(cand2)) return cand2;
-
-			string cand3 = @"C:\Users\PcVkH\.gemini\antigravity\scratch\VideoBatchStudio\xtts_worker.py";
-			if (File.Exists(cand3)) return cand3;
-
 			return cand1;
 		}
 
@@ -42,10 +37,7 @@ namespace VideoBatchMerger.ScriptBatch
 			string cand1 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"xtts_models\v2.0.2");
 			if (Directory.Exists(cand1)) return cand1;
 
-			string cand2 = @"D:\工具\视频拼接\VideoBatchStudio\xtts_models\v2.0.2";
-			if (Directory.Exists(cand2)) return cand2;
-
-			return cand2;
+			return cand1;
 		}
 
 		public static string GetClonedVoicesDir()
@@ -113,9 +105,6 @@ namespace VideoBatchMerger.ScriptBatch
 		{
 			string p1 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cloned_voices", "priest_voice.latent.pth");
 			if (File.Exists(p1)) return p1;
-
-			string p2 = @"D:\工具\视频拼接\VideoBatchStudio\cloned_voices\priest_voice.latent.pth";
-			if (File.Exists(p2)) return p2;
 
 			// 备用寻找任意一个 .pth
 			string vDir = GetClonedVoicesDir();
