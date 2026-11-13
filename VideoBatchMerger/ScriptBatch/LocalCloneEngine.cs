@@ -68,12 +68,16 @@ namespace VideoBatchMerger.ScriptBatch
 
 			if (File.Exists(safe)) return safe;
 
-			// 2. 检查 cloned_voices 目录
+			// 2. 检查 cloned_voices 目录 (限制在目录边界内，防止路径穿越)
 			string vDir = GetClonedVoicesDir();
-			string cand1 = Path.Combine(vDir, safe);
-			if (File.Exists(cand1)) return cand1;
-			if (File.Exists(cand1 + ".pth")) return cand1 + ".pth";
-			if (File.Exists(cand1 + ".latent.pth")) return cand1 + ".latent.pth";
+			string safeFileName = Path.GetFileName(safe);
+			if (!string.IsNullOrWhiteSpace(safeFileName))
+			{
+				string cand1 = Path.Combine(vDir, safeFileName);
+				if (File.Exists(cand1)) return cand1;
+				if (File.Exists(cand1 + ".pth")) return cand1 + ".pth";
+				if (File.Exists(cand1 + ".latent.pth")) return cand1 + ".latent.pth";
+			}
 
 			// 3. 在克隆库中根据关键字模糊匹配
 			if (Directory.Exists(vDir))
@@ -156,7 +160,7 @@ namespace VideoBatchMerger.ScriptBatch
 			};
 			File.WriteAllText(cfgPath, new JavaScriptSerializer().Serialize(configObj), new UTF8Encoding(false));
 
-			string args = $"\"{workerScript}\" --config \"{cfgPath}\"";
+			string args = $"{ScriptBatchComposer.QuoteArg(workerScript)} --config {ScriptBatchComposer.QuoteArg(cfgPath)}";
 
 			var psi = new ProcessStartInfo
 			{
@@ -249,7 +253,7 @@ namespace VideoBatchMerger.ScriptBatch
 			};
 			File.WriteAllText(cfgPath, new JavaScriptSerializer().Serialize(configObj), new UTF8Encoding(false));
 
-			string args = $"\"{workerScript}\" --config \"{cfgPath}\"";
+			string args = $"{ScriptBatchComposer.QuoteArg(workerScript)} --config {ScriptBatchComposer.QuoteArg(cfgPath)}";
 
 			LogClone($"Synthesizing Task #{taskId} with speaker: '{resolvedSpeaker}', text len: {text?.Length}");
 

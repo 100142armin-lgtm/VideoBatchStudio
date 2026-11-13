@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -40,8 +41,10 @@ namespace VideoBatchMerger.ScriptBatch
 	{
 		private static readonly object s_lock = new object();
 		private static ElevenLabsKeyPool s_instance;
+		private const string DpapiPrefix = "dpapi:";
+		private static readonly byte[] s_dpapiEntropy = Encoding.UTF8.GetBytes("VideoBatchStudio.ElevenLabsKeyPool.v1");
 
-		private static readonly string SettingsPath = Path.Combine(
+		private static readonly string LegacySettingsPath = Path.Combine(
 			AppDomain.CurrentDomain.BaseDirectory,
 			"elevenlabs_keys.json"
 		);
@@ -84,12 +87,56 @@ namespace VideoBatchMerger.ScriptBatch
 			catch { }
 		}
 
+		private static string ProtectApiKey(string plainKey)
+		{
+			if (string.IsNullOrWhiteSpace(plainKey)) return string.Empty;
+			if (plainKey.StartsWith(DpapiPrefix, StringComparison.Ordinal)) return plainKey;
+			try
+			{
+				byte[] raw = Encoding.UTF8.GetBytes(plainKey.Trim());
+				byte[] encrypted = ProtectedData.Protect(raw, s_dpapiEntropy, DataProtectionScope.CurrentUser);
+				return DpapiPrefix + Convert.ToBase64String(encrypted);
+			}
+			catch
+			{
+				return string.Empty;
+			}
+		}
+
+		private static string UnprotectApiKey(string storedKey, out bool wasPlaintext)
+		{
+			wasPlaintext = false;
+			if (string.IsNullOrWhiteSpace(storedKey)) return string.Empty;
+			string trimmed = storedKey.Trim();
+			if (!trimmed.StartsWith(DpapiPrefix, StringComparison.Ordinal))
+			{
+				wasPlaintext = true;
+				return trimmed;
+			}
+			try
+			{
+				byte[] encrypted = Convert.FromBase64String(trimmed.Substring(DpapiPrefix.Length));
+				byte[] raw = ProtectedData.Unprotect(encrypted, s_dpapiEntropy, DataProtectionScope.CurrentUser);
+				return Encoding.UTF8.GetString(raw);
+			}
+			catch
+			{
+				return string.Empty;
+			}
+		}
+
 		public static ElevenLabsKeyPool Load()
 		{
 			var pool = new ElevenLabsKeyPool();
+			bool needsMigrationSave = false;
+			bool loadedFromLegacyPath = false;
+
 			try
 			{
-				string path = File.Exists(SettingsPath) ? SettingsPath : (File.Exists(AppDataSettingsPath) ? AppDataSettingsPath : null);
+				string path = File.Exists(AppDataSettingsPath)
+					? AppDataSettingsPath
+					: (File.Exists(LegacySettingsPath) ? LegacySettingsPath : null);
+				loadedFromLegacyPath = string.Equals(path, LegacySettingsPath, StringComparison.OrdinalIgnoreCase);
 
 				if (!string.IsNullOrEmpty(path))
 				{
@@ -98,7 +145,48 @@ namespace VideoBatchMerger.ScriptBatch
 					var items = serializer.Deserialize<List<ElevenLabsKeyItem>>(json);
 					if (items != null)
 					{
-						pool.Keys.AddRange(items);
+						foreach (var item in items)
+						{
+							if (item == null) continue;
+							string plain = UnprotectApiKey(item.ApiKey, out bool wasPlaintext);
+							if (string.IsNullOrWhiteSpace(plain)) continue;
+							if (wasPlaintext) needsMigrationSave = true;
+							item.ApiKey = plain;
+							if (!pool.Keys.Any(k => string.Equals(k.ApiKey, plain, StringComparison.OrdinalIgnoreCase)))
+							{
+								pool.Keys.Add(item);
+							}
+						}
+					}
+				}
+
+				// 支持从环境变量 ELEVENLABS_API_KEYS / ELEVENLABS_API_KEY 读取密钥
+				string envKeys = Environment.GetEnvironmentVariable("ELEVENLABS_API_KEYS")
+					?? Environment.GetEnvironmentVariable("ELEVENLABS_API_KEY");
+				if (!string.IsNullOrWhiteSpace(envKeys))
+				{
+					var delimiters = new[] { '\r', '\n', ',', ';', '\t' };
+					foreach (var token in envKeys.Split(delimiters, StringSplitOptions.RemoveEmptyEntries))
+					{
+						string clean = token.Trim().Trim('"', '\'');
+						if (clean.Length >= 10 && !pool.Keys.Any(k => string.Equals(k.ApiKey, clean, StringComparison.OrdinalIgnoreCase)))
+						{
+							pool.Keys.Add(new ElevenLabsKeyItem
+							{
+								ApiKey = clean,
+								Status = "未检测",
+								StatusDetail = "来自环境变量"
+							});
+						}
+					}
+				}
+
+				if (needsMigrationSave || loadedFromLegacyPath)
+				{
+					pool.Save();
+					if (File.Exists(LegacySettingsPath) && File.Exists(AppDataSettingsPath))
+					{
+						try { File.Delete(LegacySettingsPath); } catch { }
 					}
 				}
 			}
@@ -115,12 +203,29 @@ namespace VideoBatchMerger.ScriptBatch
 			{
 				try
 				{
+					var persistedItems = Keys
+						.Where(k => k != null && !string.IsNullOrWhiteSpace(k.ApiKey))
+						.Select(k => new ElevenLabsKeyItem
+						{
+							ApiKey = ProtectApiKey(k.ApiKey),
+							Status = k.Status,
+							Tier = k.Tier,
+							CharacterCount = k.CharacterCount,
+							CharacterLimit = k.CharacterLimit,
+							StatusDetail = k.StatusDetail,
+							LastChecked = k.LastChecked
+						})
+						.Where(k => !string.IsNullOrWhiteSpace(k.ApiKey))
+						.ToList();
+
 					var serializer = new JavaScriptSerializer();
-					string json = serializer.Serialize(Keys);
+					string json = serializer.Serialize(persistedItems);
 					bool saved = false;
 					try
 					{
-						File.WriteAllText(SettingsPath, json, Encoding.UTF8);
+						string dir = Path.GetDirectoryName(AppDataSettingsPath);
+						if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+						File.WriteAllText(AppDataSettingsPath, json, Encoding.UTF8);
 						saved = true;
 					}
 					catch { }
@@ -129,9 +234,7 @@ namespace VideoBatchMerger.ScriptBatch
 					{
 						try
 						{
-							string dir = Path.GetDirectoryName(AppDataSettingsPath);
-							if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
-							File.WriteAllText(AppDataSettingsPath, json, Encoding.UTF8);
+							File.WriteAllText(LegacySettingsPath, json, Encoding.UTF8);
 						}
 						catch { }
 					}

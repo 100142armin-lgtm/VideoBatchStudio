@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "9.6.0";
+	public const string CurrentAppVersion = "9.7.0";
 
 	public const int WorkspaceMerge = 0;
 	public const int WorkspaceSplit = 1;
@@ -52,10 +52,12 @@ internal sealed class MainForm : Form
 	public const int WorkspaceDeliver = 7;
 	public const int WorkspaceTranscribe = 8;
 	public const int WorkspaceScriptBatch = 9;
+	public const int WorkspaceTextToSpeech = 10;
 
 	private VideoBatchMerger.Downloader.DownloaderPanel _downloaderPanel;
 	private VideoBatchMerger.Transcriber.TranscribePanel _transcribePanel;
 	private VideoBatchMerger.ScriptBatch.ScriptBatchStudioPanel _scriptBatchPanel;
+	private VideoBatchMerger.ScriptBatch.TextToSpeechStudioPanel _ttsStudioPanel;
 	private Button _checkUpdateButton;
 	private Button _themeToggleButton = null;
 	private readonly List<Button> _navButtons = new List<Button>();
@@ -1293,6 +1295,7 @@ internal sealed class MainForm : Form
 		_tabs.TabPages.Add(BuildDeliverTab());      // 7
 		_tabs.TabPages.Add(BuildTranscribeTab());   // 8 (智能字幕)
 		_tabs.TabPages.Add(BuildScriptBatchTab());  // 9 (文案成片)
+		_tabs.TabPages.Add(BuildTextToSpeechTab()); // 10 (文字转语音)
 		tableLayoutPanel.Controls.Add(_tabs, 0, 0);
 
 		_bottomNavBar = new Panel();
@@ -1362,6 +1365,7 @@ internal sealed class MainForm : Form
 		navCenter.Controls.Add(MakeNavButton("📥 视频下载", WorkspaceDownload));
 		navCenter.Controls.Add(MakeNavButton("🎙️ 智能字幕", WorkspaceTranscribe));
 		navCenter.Controls.Add(MakeNavButton("📝 文案成片", WorkspaceScriptBatch));
+		navCenter.Controls.Add(MakeNavButton("🔊 文字转语音", WorkspaceTextToSpeech));
 		navCenter.Controls.Add(MakeNavButton("▦ 视频拼屏", WorkspaceSplitScreen));
 		navCenter.Controls.Add(MakeNavButton("🎬 视频剪辑", WorkspaceCutEdit));
 		navCenter.Controls.Add(MakeNavButton("🚀 导出交付", WorkspaceDeliver));
@@ -6080,6 +6084,16 @@ internal sealed class MainForm : Form
 		_scriptBatchPanel = new VideoBatchMerger.ScriptBatch.ScriptBatchStudioPanel(this);
 		_scriptBatchPanel.Dock = DockStyle.Fill;
 		tabPage.Controls.Add(_scriptBatchPanel);
+		return tabPage;
+	}
+
+	private TabPage BuildTextToSpeechTab()
+	{
+		TabPage tabPage = new TabPage("文字转语音");
+		tabPage.BackColor = CanvasColor;
+		_ttsStudioPanel = new VideoBatchMerger.ScriptBatch.TextToSpeechStudioPanel(this);
+		_ttsStudioPanel.Dock = DockStyle.Fill;
+		tabPage.Controls.Add(_ttsStudioPanel);
 		return tabPage;
 	}
 
@@ -21420,6 +21434,7 @@ internal sealed class MainForm : Form
 
 		foreach (Control control in root.Controls)
 		{
+			if (control is VideoBatchMerger.ScriptBatch.TextToSpeechStudioPanel) continue;
 			if (control is TabPage tabPage)
 			{
 				tabPage.BackColor = (tabPage.Parent == _tabs) ? CanvasColor : SurfaceColor;

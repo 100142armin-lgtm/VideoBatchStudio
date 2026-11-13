@@ -1,16 +1,16 @@
 {
-  "version": "9.6.0",
-  "releaseDate": "2026-11-01",
-  "title": "VideoBatchStudio V9.6.0 全面安全加固 + 字幕设计器增强 + 团队多机零配置运行",
-  "changelog": [
-    "【应用安全·全面加固防护】完成全模块系统级安全审计，修复 ASS 字幕滤镜参数单引号转义，强化自动更新器白名单校验，杜绝注入与非安全下发风险",
-    "【多机运行·纯动态寻径适配】彻底清除旧版开发机硬编码绝对路径，自适应当前运行目录与用户专属 AppData，团队成员及小白解压即用、零报错",
-    "【字幕样式·设计器深度交互】全新优化字幕样式编辑器调色盘与高级样式预览，强化颜色拾取、描边厚度与阴影光效同步渲染，所见即所得",
-    "【声音克隆·Chatterbox 本地推理】无缝集成 Chatterbox 本地声音克隆模型与组件生命周期管理器，实现模型依赖一键校验、断点续传与离线高保真克隆",
-    "【自动更新·双通道极速分发】优化官方 GitHub Releases 与 Anycast CDN 极速双通道，支持全自动无感静默更新与 SHA256 完整性双重防篡改校验"
-  ],
-  "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v9.6.0",
-  "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.6.0/VideoBatchStudio_Portable.zip",
-  "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.6.0/VideoBatchStudio_Portable.zip",
-  "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.6.0/VideoBatchStudio.exe"
+    "version":  "9.7.0",
+    "releaseDate":  "2026-11-11",
+    "title":  "VideoBatchStudio V9.7.0 配音工坊全屏自适应 + 5维音频自检 + 童声音色库 + 安全加固升级",
+    "changelog":  [
+                      "【配音工坊·全屏自适应与丝滑拖拽】右侧参数面板随窗口全屏自动等比例缩放，修复滚动条鼠标拖拽实时联动响应",
+                      "【五维自检·失败原因与解决方案】文字转语音新增 5 维质量自检弹窗（文案/音频/SRT一致性、清晰度、流畅度防卡顿结巴）与排障向导",
+                      "【音色扩充·男女童声与近场试听】主讲音色下拉菜单新增葡语/英语/中文男童与女童音色，试听按钮紧邻音色选单并按模型智能显隐克隆设置",
+                      "【安全加固·DPAPI加密与组件升级】API 密钥升级 Windows DPAPI 加密存储，升级 Whisper 识别引擎至最新 b5454 并强化全链路 SHA256 校验"
+                  ],
+    "downloadUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v9.7.0",
+    "portableZipUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.7.0/VideoBatchStudio_Portable.zip",
+    "fastPortableZipUrl":  "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.7.0/VideoBatchStudio_Portable.zip",
+    "exeUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.7.0/VideoBatchStudio.exe",
+    "sha256":  "0972f932f58d9c9c956d251c9b1b28d682f9169e1c14356f4dcf3b9ddd02e220"
 }

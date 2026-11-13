@@ -154,9 +154,44 @@ async def synthesize(args):
     if not text:
         return {"success": False, "error": "Empty text provided."}
 
-    voice = args.voice or "pt-BR-AntonioNeural"
+    voice = args.voice or "pt-PT-DuarteNeural"
+    # Automatic mapping for deprecated Microsoft voices
+    deprecated_map = {
+        "pt-PT-FernandaNeural": "pt-PT-RaquelNeural",
+        "pt-BR-FabioNeural": "pt-BR-AntonioNeural",
+    }
+    voice = deprecated_map.get(voice, voice)
+
+    # Child voice neural timbre mapping (Boy / Girl voices for Portuguese & English)
+    # Uses native multilingual neural models with child fundamental frequency (F0) shift
+    # so WordBoundary timestamps remain 100% exact while producing authentic boy/girl timbre.
+    child_voice_profiles = {
+        "pt-PT-BoyChildNeural": ("fr-FR-RemyMultilingualNeural", 20, 4),
+        "pt-PT-GirlChildNeural": ("en-US-AvaMultilingualNeural", 25, 4),
+        "pt-BR-BoyChildNeural": ("de-DE-FlorianMultilingualNeural", 21, 4),
+        "pt-BR-GirlChildNeural": ("pt-BR-ThalitaMultilingualNeural", 24, 4),
+        "en-US-BoyChildNeural": ("en-US-BrianMultilingualNeural", 22, 4),
+    }
+
+    def add_offset_str(val_str, delta, unit):
+        try:
+            num = int(re.sub(r'[^0-9+\-]', '', val_str or "0") or "0")
+        except Exception:
+            num = 0
+        total = num + delta
+        return f"+{total}{unit}" if total >= 0 else f"{total}{unit}"
+
     rate = args.rate or "+0%"
     pitch = args.pitch or "+0Hz"
+    base_fallback_pitch = "+0Hz"
+
+    if voice in child_voice_profiles:
+        base_voice, pitch_delta_hz, rate_delta_pct = child_voice_profiles[voice]
+        voice = base_voice
+        pitch = add_offset_str(pitch, pitch_delta_hz, "Hz")
+        rate = add_offset_str(rate, rate_delta_pct, "%")
+        base_fallback_pitch = f"+{pitch_delta_hz}Hz"
+
     volume = args.volume or "+0%"
     # Force WordBoundary so Edge-TTS delivers fine-grained word timestamps
     boundary = "WordBoundary"
@@ -168,42 +203,61 @@ async def synthesize(args):
     if output_srt:
         os.makedirs(os.path.dirname(output_srt), exist_ok=True)
 
-    communicate = edge_tts.Communicate(
-        text=text,
-        voice=voice,
-        rate=rate,
-        volume=volume,
-        pitch=pitch,
-        boundary=boundary
-    )
-
     words = []
     submaker = edge_tts.SubMaker()
     total_audio_bytes = 0
+    last_err = None
 
-    with open(output_audio, "wb") as af:
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                af.write(chunk["data"])
-                total_audio_bytes += len(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
-                words.append({
-                    "offset": chunk["offset"],
-                    "duration": chunk["duration"],
-                    "text": chunk["text"]
-                })
-                try:
-                    submaker.feed(chunk)
-                except Exception:
-                    pass
-            elif chunk["type"] == "SentenceBoundary":
-                try:
-                    submaker.feed(chunk)
-                except Exception:
-                    pass
+    attempts = [
+        (voice, rate, pitch),
+        (voice, rate, pitch),
+        (voice, rate, base_fallback_pitch),
+    ]
+
+    for attempt_idx, (cur_voice, cur_rate, cur_pitch) in enumerate(attempts):
+        words = []
+        submaker = edge_tts.SubMaker()
+        total_audio_bytes = 0
+        try:
+            communicate = edge_tts.Communicate(
+                text=text,
+                voice=cur_voice,
+                rate=cur_rate,
+                volume=volume,
+                pitch=cur_pitch,
+                boundary=boundary
+            )
+            with open(output_audio, "wb") as af:
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        af.write(chunk["data"])
+                        total_audio_bytes += len(chunk["data"])
+                    elif chunk["type"] == "WordBoundary":
+                        words.append({
+                            "offset": chunk["offset"],
+                            "duration": chunk["duration"],
+                            "text": chunk["text"]
+                        })
+                        try:
+                            submaker.feed(chunk)
+                        except Exception:
+                            pass
+                    elif chunk["type"] == "SentenceBoundary":
+                        try:
+                            submaker.feed(chunk)
+                        except Exception:
+                            pass
+            if total_audio_bytes > 256:
+                voice = cur_voice
+                break
+        except Exception as ex:
+            last_err = ex
+            if attempt_idx < len(attempts) - 1:
+                await asyncio.sleep(0.6 * (attempt_idx + 1))
 
     if total_audio_bytes == 0:
-        return {"success": False, "error": "Zero audio bytes synthesized. Check network connection."}
+        err_detail = str(last_err) if last_err else "Zero audio bytes synthesized. Check network connection."
+        return {"success": False, "error": err_detail}
 
     # Generate SRT if requested
     if output_srt:

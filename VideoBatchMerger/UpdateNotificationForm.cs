@@ -6,6 +6,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,6 +25,7 @@ internal sealed class UpdateNotificationForm : Form
 	private readonly string _newVer;
 	private readonly string _fastPortableZipUrl;
 	private readonly string _portableZipUrl;
+	private readonly string _expectedSha256;
 
 	private Label _lblStatus;
 	private ProgressBar _pbProgress;
@@ -40,10 +42,12 @@ internal sealed class UpdateNotificationForm : Form
 		IEnumerable<string> changelog,
 		string downloadUrl,
 		string fastPortableZipUrl = null,
-		string portableZipUrl = null)
+		string portableZipUrl = null,
+		string expectedSha256 = null)
 	{
 		_currentVer = currentVer;
 		_newVer = newVer;
+		_expectedSha256 = expectedSha256?.Trim();
 		_fastPortableZipUrl = string.IsNullOrWhiteSpace(fastPortableZipUrl)
 			? $"https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v{newVer}/VideoBatchStudio_Portable.zip"
 			: IsApprovedUpdateUrl(fastPortableZipUrl) ? fastPortableZipUrl : $"https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v{newVer}/VideoBatchStudio_Portable.zip";
@@ -267,6 +271,17 @@ internal sealed class UpdateNotificationForm : Form
 			// 2. 解压并在后台启动替换脚本
 			await Task.Run(() =>
 			{
+				if (!string.IsNullOrWhiteSpace(_expectedSha256) && _expectedSha256.Length == 64)
+				{
+					using var sha256 = SHA256.Create();
+					using var fs = File.OpenRead(tempZip);
+					string actualHash = BitConverter.ToString(sha256.ComputeHash(fs)).Replace("-", "").ToLowerInvariant();
+					if (!string.Equals(actualHash, _expectedSha256, StringComparison.OrdinalIgnoreCase))
+					{
+						throw new InvalidDataException("更新包 SHA256 完整性校验不通过，已拒绝解压安装！");
+					}
+				}
+
 				if (Directory.Exists(tempExtractDir)) Directory.Delete(tempExtractDir, true);
 				Directory.CreateDirectory(tempExtractDir);
 
@@ -405,6 +420,11 @@ internal sealed class UpdateNotificationForm : Form
 			{
 				try
 				{
+					if (((entry.ExternalAttributes >> 16) & 0xf000) == 0xa000)
+					{
+						throw new InvalidDataException($"拒绝解压包含符号链接的更新包条目: {entry.FullName}");
+					}
+
 					string rawName = entry.FullName.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
 					char[] invalidChars = Path.GetInvalidPathChars();
 					string cleanName = new string(rawName.Where(c => !invalidChars.Contains(c) && c != '?' && c != '*' && c != '"' && c != '<' && c != '>' && c != '|').ToArray());
@@ -503,21 +523,49 @@ internal sealed class UpdateNotificationForm : Form
 
 	private async Task PerformDownloadStreamAsync(string url, string destinationFile, CancellationToken ct)
 	{
-		if (!IsApprovedUpdateUrl(url))
+		string currentUrl = url;
+		HttpWebResponse response = null;
+		try
 		{
-			throw new InvalidOperationException("拒绝从非受信任或不安全的来源下载更新包: " + url);
-		}
+			for (int hop = 0; hop <= 5; hop++)
+			{
+				if (!IsApprovedUpdateUrl(currentUrl))
+				{
+					throw new InvalidOperationException("拒绝从非受信任或不安全的来源下载更新包: " + currentUrl);
+				}
 
-		var req = (HttpWebRequest)WebRequest.Create(url);
-		req.Method = "GET";
-		req.UserAgent = "Mozilla/5.0 (Windows NT 10; Win64; x64) VideoBatchStudio AutoUpdater";
-		req.Timeout = 20000;
-		req.ReadWriteTimeout = 30000;
-		req.Proxy = WebRequest.DefaultWebProxy;
-		req.Proxy.Credentials = CredentialCache.DefaultCredentials;
+				var req = (HttpWebRequest)WebRequest.Create(currentUrl);
+				req.Method = "GET";
+				req.AllowAutoRedirect = false;
+				req.UserAgent = "Mozilla/5.0 (Windows NT 10; Win64; x64) VideoBatchStudio AutoUpdater";
+				req.Timeout = 20000;
+				req.ReadWriteTimeout = 30000;
+				req.Proxy = WebRequest.DefaultWebProxy;
+				if (req.Proxy != null) req.Proxy.Credentials = CredentialCache.DefaultCredentials;
 
-		using (var response = (HttpWebResponse)await req.GetResponseAsync())
-		{
+				response = (HttpWebResponse)await req.GetResponseAsync();
+				int code = (int)response.StatusCode;
+				if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308)
+				{
+					string loc = response.Headers["Location"];
+					response.Dispose();
+					response = null;
+					if (string.IsNullOrWhiteSpace(loc))
+						throw new InvalidOperationException($"更新服务器重定向未返回有效 Location (HTTP {code})");
+					Uri nextUri = Uri.TryCreate(loc, UriKind.Absolute, out Uri abs)
+						? abs
+						: new Uri(new Uri(currentUrl), loc);
+					currentUrl = nextUri.ToString();
+					continue;
+				}
+				break;
+			}
+
+			if (response == null)
+			{
+				throw new InvalidOperationException("更新包下载重定向次数过多。");
+			}
+
 			if (response.StatusCode != HttpStatusCode.OK)
 			{
 				throw new Exception($"服务器返回异常状态: {(int)response.StatusCode}");
@@ -562,6 +610,10 @@ internal sealed class UpdateNotificationForm : Form
 					}
 				}
 			}
+		}
+		finally
+		{
+			response?.Dispose();
 		}
 	}
 

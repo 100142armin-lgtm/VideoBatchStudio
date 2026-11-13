@@ -35,8 +35,8 @@ public static class TranscribeEngine
 		new ModelInfo { Key = "large", FileName = "ggml-large-v3-q5_0.bin", Display = "最高精度 Large-v3 (口音/噪音最稳)", SizeText = "1.08GB" },
 	};
 
-	public const string CudaBuildUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.0/whisper-cublas-12.4.0-bin-x64.zip";
-	public const string CpuBuildUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.0/whisper-bin-x64.zip";
+	public const string CudaBuildUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-win-cuda-12.4.0-x64.zip";
+	public const string CpuBuildUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip";
 
 	public static string GetCudaInstallDir() => Path.Combine(GetWhisperInstallDir(), "cuda");
 
@@ -155,7 +155,12 @@ public static class TranscribeEngine
 		using var client = new HttpClient(handler) { Timeout = TimeSpan.FromHours(2) };
 		client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 VideoBatchStudio");
 
-		string currentUrl = url;
+		if (!Uri.TryCreate(url, UriKind.Absolute, out Uri initialUri) || initialUri.Scheme != Uri.UriSchemeHttps)
+		{
+			throw new InvalidOperationException($"拒绝从非 HTTPS 地址下载组件或模型: {url}");
+		}
+
+		string currentUrl = initialUri.ToString();
 		HttpResponseMessage resp = null;
 		int redirectCount = 0;
 		const int maxRedirects = 10;
@@ -184,6 +189,10 @@ public static class TranscribeEngine
 					}
 
 					Uri nextUri = location.IsAbsoluteUri ? location : new Uri(new Uri(currentUrl), location);
+					if (nextUri.Scheme != Uri.UriSchemeHttps)
+					{
+						throw new InvalidOperationException($"拒绝不安全的非 HTTPS 重定向目标: {nextUri}");
+					}
 					currentUrl = nextUri.ToString();
 
 					resp.Dispose();

@@ -2170,6 +2170,7 @@ namespace VideoBatchMerger.ScriptBatch
 				_webViewPreview.CoreWebView2.Settings.IsStatusBarEnabled = false;
 				_webViewPreview.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
 				_webViewPreview.CoreWebView2.Settings.AreDevToolsEnabled = false;
+				_webViewPreview.CoreWebView2.Settings.AreHostObjectsAllowed = false;
 
 				_webViewPreview.WebMessageReceived -= OnWebViewMessageReceived;
 				_webViewPreview.WebMessageReceived += OnWebViewMessageReceived;
@@ -2177,10 +2178,13 @@ namespace VideoBatchMerger.ScriptBatch
 				_webViewPreview.NavigationCompleted -= OnWebViewNavigationCompleted;
 				_webViewPreview.NavigationCompleted += OnWebViewNavigationCompleted;
 
-				string htmlPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "web_preview", "preview.html");
+				string webPreviewDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "web_preview");
+				string htmlPath = Path.Combine(webPreviewDir, "preview.html");
 				if (File.Exists(htmlPath))
 				{
-					_webViewPreview.CoreWebView2.Navigate(new Uri(htmlPath).AbsoluteUri);
+					_webViewPreview.CoreWebView2.SetVirtualHostNameToFolderMapping(
+						"app-preview.local", webPreviewDir, CoreWebView2HostResourceAccessKind.DenyCors);
+					_webViewPreview.CoreWebView2.Navigate("https://app-preview.local/preview.html");
 				}
 			}
 			catch (Exception ex)
@@ -2216,6 +2220,12 @@ namespace VideoBatchMerger.ScriptBatch
 		{
 			try
 			{
+				if (string.IsNullOrEmpty(e.Source) ||
+				    !e.Source.StartsWith("https://app-preview.local/", StringComparison.OrdinalIgnoreCase))
+				{
+					return;
+				}
+
 				string json = e.WebMessageAsJson;
 				if (string.IsNullOrEmpty(json)) return;
 
@@ -3238,6 +3248,9 @@ namespace VideoBatchMerger.ScriptBatch
 						await _videoPreviewView.EnsureCoreWebView2Async(playbackEnvironment);
 						_videoPreviewView.CoreWebView2.Settings.IsStatusBarEnabled = false;
 						_videoPreviewView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+						_videoPreviewView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+						_videoPreviewView.CoreWebView2.Settings.AreHostObjectsAllowed = false;
+						_videoPreviewView.CoreWebView2.Settings.IsWebMessageEnabled = false;
 					}
 					_videoPreviewView.CoreWebView2.SetVirtualHostNameToFolderMapping(
 						"preview.local", previewDir, CoreWebView2HostResourceAccessKind.Allow);

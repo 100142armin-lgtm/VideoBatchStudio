@@ -177,6 +177,15 @@ namespace VideoBatchMerger.ScriptBatch
 		public string OutputFolderPath { get; set; } = string.Empty;
 		public string HardwareEncoder { get; set; } = "auto"; // auto, nvenc, qsv, cpu
 
+		// 文字转语音 (TTS Studio) 独立板块专属配置
+		public string TtsStudioOutputFolderPath { get; set; } = string.Empty;
+		public bool TtsStudioExportSrt { get; set; } = false; // 用户自定义：勾选则同步导出SRT，不勾选仅导出MP3
+		public int TtsStudioSpeakingStyle { get; set; } = 0; // 0: 短视频爆款口播, 1: 真人日常唠嗑, 2: 深度磁性解说, 3: 快节奏干货带货, 4: 自定义
+		public bool TtsStudioNaturalBreathing { get; set; } = true; // 智能标点气口与呼吸停顿
+		public bool TtsStudioWarmBroadcastEq { get; set; } = true; // 广播级电容麦温润人声增强 (320Kbps MP3)
+		public double TtsStudioLayoutLeftRatio { get; set; } = 0.38;
+		public double TtsStudioLayoutRightRatio { get; set; } = 0.28;
+
 		/// <summary>
 		/// 兼容解析 #RRGGBB 与 ASS &H00BBGGRR 颜色字符串为 GDI+ Color
 		/// </summary>

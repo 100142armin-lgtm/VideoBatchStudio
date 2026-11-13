@@ -26,6 +26,8 @@ namespace VideoBatchMerger.ScriptBatch
 			new VoiceOption("IKne3meq5aSn9XLyUdCD", "✨ Charlie (自然自信 · 随性讲述男声)", "Multilingual", "男声", "随性自然"),
 			new VoiceOption("N2lVS1w4EtoT3dr4eOWO", "✨ Callum (激昂坚定 · 爆发力男声)", "Multilingual", "男声", "力量激昂"),
 			new VoiceOption("TX3LPaxmHKxFdv7VOQHJ", "✨ Liam (年轻现代 · 清晰坚定男声)", "Multilingual", "男声", "清澈坚定"),
+			new VoiceOption("g5CIjZEefAph4nQFvHAz", "🧒 Ethan (清澈纯真 · 多语种故事男童) ★童声", "Multilingual", "男童", "纯真男童"),
+			new VoiceOption("jBpfuIE2acCO8z3wKNLl", "👧 Gigi (灵动甜美 · 多语种天使女童) ★童声", "Multilingual", "女童", "甜美女童"),
 			new VoiceOption("CustomVoice", "🔧 自定义克隆 Voice ID (在下方输入框填写)", "Custom", "自定义", "专属克隆")
 		};
 
@@ -40,6 +42,8 @@ namespace VideoBatchMerger.ScriptBatch
 			{ "IKne3meq5aSn9XLyUdCD", "https://storage.googleapis.com/eleven-public-prod/previews/models/IKne3meq5aSn9XLyUdCD.mp3" }, // Charlie
 			{ "N2lVS1w4EtoT3dr4eOWO", "https://storage.googleapis.com/eleven-public-prod/previews/models/N2lVS1w4EtoT3dr4eOWO.mp3" }, // Callum
 			{ "TX3LPaxmHKxFdv7VOQHJ", "https://storage.googleapis.com/eleven-public-prod/previews/models/TX3LPaxmHKxFdv7VOQHJ.mp3" }, // Liam
+			{ "g5CIjZEefAph4nQFvHAz", "https://storage.googleapis.com/eleven-public-prod/previews/voices/g5CIjZEefAph4nQFvHAz/e7a8fa56-48e3-4449-907b-02960f0c694b.mp3" }, // Ethan
+			{ "jBpfuIE2acCO8z3wKNLl", "https://storage.googleapis.com/eleven-public-prod/previews/models/jBpfuIE2acCO8z3wKNLl.mp3" }, // Gigi
 			{ "VR6AewLTigWG4xSOukaG", "https://storage.googleapis.com/eleven-public-prod/previews/models/VR6AewLTigWG4xSOukaG.mp3" }, // Arnold
 			{ "2EiwWnXFnvU5JabPnv8n", "https://storage.googleapis.com/eleven-public-prod/previews/models/2EiwWnXFnvU5JabPnv8n.mp3" }  // Clyde
 		};

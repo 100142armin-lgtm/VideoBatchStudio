@@ -139,6 +139,7 @@ internal static class UpdateChecker
 
 				string fastPortableZipUrl = ExtractJsonString(json, "fastPortableZipUrl");
 				string portableZipUrl = ExtractJsonString(json, "portableZipUrl");
+				string expectedSha256 = ExtractJsonString(json, "sha256");
 
 				List<string> changelog = ExtractJsonArray(json, "changelog");
 				if (changelog.Count == 0)
@@ -174,7 +175,7 @@ internal static class UpdateChecker
 						owner.BeginInvoke((MethodInvoker)delegate
 						{
 							if (owner.IsDisposed) return;
-							using (var form = new UpdateNotificationForm(currentVersion, remoteVersion, releaseTitle, releaseDate, changelog, downloadUrl, fastPortableZipUrl, portableZipUrl))
+							using (var form = new UpdateNotificationForm(currentVersion, remoteVersion, releaseTitle, releaseDate, changelog, downloadUrl, fastPortableZipUrl, portableZipUrl, expectedSha256))
 							{
 								form.ShowDialog(owner);
 							}

@@ -171,7 +171,7 @@ public sealed class ComponentManager
 		using (var handler = new HttpClientHandler { AllowAutoRedirect = false })
 		using (var http = new HttpClient(handler) { Timeout = TimeSpan.FromHours(2) })
 		{
-			http.DefaultRequestHeaders.UserAgent.ParseAdd("VideoBatchStudio/9.5.2");
+			http.DefaultRequestHeaders.UserAgent.ParseAdd("VideoBatchStudio/9.7.0");
 			for (int attempt = 0; attempt < 3; attempt++)
 			{
 				try

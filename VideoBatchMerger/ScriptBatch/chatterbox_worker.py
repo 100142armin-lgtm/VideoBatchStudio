@@ -41,21 +41,28 @@ def emit(message):
     print(json.dumps(message, ensure_ascii=False), flush=True)
 
 
-def split_script(text, maximum=220):
+def split_script(text, maximum=165):
     """Keep sentences intact when possible; bound each generation below its token limit."""
     parts = re.split(r"(?<=[.!?;。！？；])\s+|[\r\n]+", text.strip())
     chunks = []
     current = ""
     for part in parts:
-        for token in part.split():
-            if len(token) > maximum:
-                raise ValueError("文案包含过长的单词，请先检查文案。")
-            candidate = (current + " " + token).strip()
-            if len(candidate) > maximum:
+        # If a single sentence is still longer than maximum, allow secondary split on commas/colons
+        subparts = [part] if len(part) <= maximum else re.split(r"(?<=[,:，：])\s+", part)
+        for sub in subparts:
+            for token in sub.split():
+                if len(token) > maximum:
+                    raise ValueError("文案包含过长的单词，请先检查文案。")
+                candidate = (current + " " + token).strip()
+                if len(candidate) > maximum:
+                    if current:
+                        chunks.append(current)
+                    current = token
+                else:
+                    current = candidate
+            if current and len(current) >= maximum * 0.65:
                 chunks.append(current)
-                current = token
-            else:
-                current = candidate
+                current = ""
         if current:
             chunks.append(current)
             current = ""
@@ -94,7 +101,18 @@ def map_aligned_words(text, aligned, duration):
         start = max(0.0, matches[0][2])
         end = min(duration, matches[-1][3])
         if end <= start:
-            raise ValueError("有单词未能可靠对齐，请降低情绪强度后重试: " + token)
+            # Handle natural Portuguese/Romance vowel liaison (e.g. 'a', 'o', 'e', 'de', 'um')
+            # where forced alignment assigns a zero-width boundary between adjacent words.
+            if words and words[-1]["end"] - words[-1]["start"] > 0.12:
+                nudge = min(0.04, (words[-1]["end"] - words[-1]["start"]) * 0.25)
+                words[-1]["end"] = round(words[-1]["end"] - nudge, 4)
+                start = words[-1]["end"]
+            end = min(duration, start + 0.06)
+            if end <= start and duration > 0.05:
+                start = max(0.0, duration - 0.05)
+                end = duration
+            if end <= start:
+                raise ValueError("有单词未能可靠对齐，请降低情绪强度后重试: " + token)
         words.append({"text": token, "start": round(start, 4), "end": round(end, 4)})
         cursor += count
     return words
@@ -204,10 +222,12 @@ def generate_aligned_part(request, chunk, number, count, output, reference, prog
     for attempt in range(3):
         progress(f"本地配音 {number + 1}/{count}" + (f"（对齐重试 {attempt}）" if attempt else ""))
         torch.manual_seed(int(request.get("seed", 42)) + number * 101 + attempt)
+        base_exag = min(1.5, max(0.0, float(request.get("exaggeration", .65))))
+        cur_exag = max(0.28, base_exag - 0.10 * attempt) if attempt > 0 else base_exag
         with torch.inference_mode():
             wav = _tts.generate(chunk, language_id=request.get("language", "pt"),
                                 audio_prompt_path=reference if number == 0 and attempt == 0 and reference else None,
-                                exaggeration=min(1.5, max(0.0, float(request.get("exaggeration", .65)))),
+                                exaggeration=cur_exag,
                                 cfg_weight=min(1.0, max(0.0, float(request.get("cfg", .35))))).squeeze().cpu().numpy()
         with wave.open(str(temporary), "wb") as stream:
             stream.setnchannels(1)
