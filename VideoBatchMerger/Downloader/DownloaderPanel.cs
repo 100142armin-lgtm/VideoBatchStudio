@@ -6,6 +6,9 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -54,6 +57,7 @@ internal sealed class DownloaderPanel : UserControl
 	private CheckBox _chkPlaylistFolder;
 
 	private TextBox _txtUrls;
+	private bool _hasDefaultSampleUrls = true;
 	private Label _urlCountBadge;
 	private Button _btnReadClipboard;
 	private Button _btnClearUrls;
@@ -503,7 +507,7 @@ internal sealed class DownloaderPanel : UserControl
 		platformBadges.Controls.Add(CreateMiniPlatformTag("全网解析", Color.FromArgb(71, 85, 105)));
 		titleRow.Controls.Add(platformBadges);
 
-		_txtUrls = new TextBox
+		_txtUrls = new SmartUrlTextBox(HandleSmartPasteIntoTextBox)
 		{
 			Multiline = true,
 			ScrollBars = ScrollBars.Both,
@@ -515,6 +519,7 @@ internal sealed class DownloaderPanel : UserControl
 			Font = new Font("Consolas", 9f)
 		};
 		_txtUrls.Text = "https://www.facebook.com/reel/1116404280831830\r\nhttps://www.youtube.com/watch?v=XqJMIE6_9gY\r\nhttps://www.youtube.com/shorts/bqLBK7GuPCk\r\nhttps://www.tiktok.com/@lucia.gove/video/7617254633341308178\r\nhttps://drive.google.com/file/d/1msP8BcsLRbFe5G8b67roWlkJTYN5fIoL/view";
+		_hasDefaultSampleUrls = true;
 		_txtUrls.TextChanged += (s, e) =>
 		{
 			int count = GetUrlsFromInput().Length;
@@ -538,7 +543,11 @@ internal sealed class DownloaderPanel : UserControl
 		_btnReadClipboard.Location = new Point(0, 4);
 		btnBottomArea.Controls.Add(_btnReadClipboard);
 
-		_btnClearUrls = MakeTechButton("🗑 清空", 70, 30, Color.FromArgb(28, 42, 68), (s, e) => _txtUrls.Clear());
+		_btnClearUrls = MakeTechButton("🗑 清空", 70, 30, Color.FromArgb(28, 42, 68), (s, e) =>
+		{
+			_hasDefaultSampleUrls = false;
+			_txtUrls.Clear();
+		});
 		_btnClearUrls.Location = new Point(132, 4);
 		btnBottomArea.Controls.Add(_btnClearUrls);
 
@@ -985,18 +994,523 @@ internal sealed class DownloaderPanel : UserControl
 
 	private void ReadClipboardUrls()
 	{
-		if (Clipboard.ContainsText())
+		if (ExtractClipboardUrls(out List<string> extractedUrls, out string fallbackText, out string diagMsg))
 		{
-			string text = Clipboard.GetText();
-			if (!string.IsNullOrWhiteSpace(text))
+			string toInsert = extractedUrls.Count > 0
+				? string.Join("\r\n", extractedUrls)
+				: fallbackText.Trim();
+
+			if (!string.IsNullOrWhiteSpace(toInsert))
 			{
-				if (string.IsNullOrWhiteSpace(_txtUrls.Text))
-					_txtUrls.Text = text.Trim();
+				if (_hasDefaultSampleUrls || string.IsNullOrWhiteSpace(_txtUrls.Text))
+				{
+					_hasDefaultSampleUrls = false;
+					_txtUrls.Text = toInsert;
+				}
 				else
-					_txtUrls.AppendText("\r\n" + text.Trim());
-				LogMessage("[剪贴板] 成功从剪贴板读取并添加链接。");
+				{
+					_txtUrls.AppendText("\r\n" + toInsert);
+				}
+
+				if (extractedUrls.Count > 0)
+					LogMessage(diagMsg);
+				else
+					LogMessage("[剪贴板] 成功从剪贴板读取并添加内容。");
 			}
 		}
+	}
+
+	private bool HandleSmartPasteIntoTextBox()
+	{
+		if (!ExtractClipboardUrls(out List<string> extractedUrls, out string _, out string diagMsg))
+			return false;
+
+		if (extractedUrls.Count == 0)
+			return false;
+
+		string joined = string.Join("\r\n", extractedUrls);
+		if (_hasDefaultSampleUrls)
+		{
+			_hasDefaultSampleUrls = false;
+			_txtUrls.Text = joined;
+			_txtUrls.SelectionStart = _txtUrls.TextLength;
+			_txtUrls.SelectionLength = 0;
+		}
+		else if (_txtUrls.SelectionLength > 0)
+		{
+			_txtUrls.SelectedText = joined;
+		}
+		else if (string.IsNullOrWhiteSpace(_txtUrls.Text))
+		{
+			_txtUrls.Text = joined;
+			_txtUrls.SelectionStart = _txtUrls.TextLength;
+		}
+		else
+		{
+			int sel = _txtUrls.SelectionStart;
+			bool needLeadingNewline = sel > 0 && _txtUrls.Text[sel - 1] != '\n' && _txtUrls.Text[sel - 1] != '\r';
+			_txtUrls.SelectedText = (needLeadingNewline ? "\r\n" : "") + joined;
+		}
+
+		LogMessage(diagMsg);
+		return true;
+	}
+
+	[DllImport("user32.dll", SetLastError = true)]
+	private static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+	[DllImport("user32.dll", SetLastError = true)]
+	private static extern bool CloseClipboard();
+
+	[DllImport("user32.dll", SetLastError = true)]
+	private static extern IntPtr GetClipboardData(uint uFormat);
+
+	[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+	private static extern uint RegisterClipboardFormat(string lpszFormat);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern IntPtr GlobalLock(IntPtr hMem);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	private static extern bool GlobalUnlock(IntPtr hMem);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern UIntPtr GlobalSize(IntPtr hMem);
+
+	private static bool ExtractClipboardUrls(out List<string> extractedUrls, out string rawFallbackText, out string diagnosticSummary)
+	{
+		extractedUrls = new List<string>();
+		rawFallbackText = string.Empty;
+		diagnosticSummary = string.Empty;
+
+		try
+		{
+			IDataObject dataObj = Clipboard.GetDataObject();
+			if (dataObj == null)
+				return false;
+
+			var orderedUrls = new List<string>();
+
+			// 辅助方法：从一段已解码文本中提取所有候选视频链接（在单个单元格内部去重，但跨单元格保留顺序与数量）
+			List<string> ExtractUrlsFromCellFragment(string fragment)
+			{
+				var cellUrls = new List<string>();
+				var cellSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+				if (string.IsNullOrWhiteSpace(fragment))
+					return cellUrls;
+
+				void TryAddCellUrl(string rawCandidate)
+				{
+					string cleaned = NormalizeAndUnwrapClipboardUrl(rawCandidate);
+					if (!string.IsNullOrWhiteSpace(cleaned) && !IsIgnoredClipboardMetaUrl(cleaned))
+					{
+						if (cellSet.Add(cleaned))
+							cellUrls.Add(cleaned);
+					}
+				}
+
+				// 先对 HTML 实体 (&quot; &amp; &#39;) 与常见 JSON 转义 (\/ \u0026 \u003d) 解码，
+				// 确保 Google Sheets 的 data-sheets-hyperlinkruns="{&quot;1&quot;:0,&quot;2&quot;:&quot;https://...&quot;}" 能够完整还原
+				string decoded = DecodeHtmlAndJsonEscapes(fragment);
+
+				// 1) 提取常见超链接属性
+				foreach (Match m in Regex.Matches(decoded, @"(?:href|data-href|data-sheets-hyperlink|data-url|data-chip-url)\s*=\s*[""'](?<u1>[^""']+)[""']|(?:href|data-href|data-sheets-hyperlink|data-url|data-chip-url)\s*=\s*(?<u2>[^\s>""']+)", RegexOptions.IgnoreCase))
+				{
+					string val = m.Groups["u1"].Success ? m.Groups["u1"].Value : m.Groups["u2"].Value;
+					TryAddCellUrl(val);
+				}
+
+				// 2) 提取 HYPERLINK("https://...", "...") 公式
+				foreach (Match m in Regex.Matches(decoded, @"HYPERLINK\s*\(\s*[""'](?<u>https?://[^""']+)[""']", RegexOptions.IgnoreCase))
+				{
+					TryAddCellUrl(m.Groups["u"].Value);
+				}
+
+				// 3) 兜底扫描该单元格内所有 https?:// 链接（覆盖 Google Sheets 巧克力胶囊 data-sheets-hyperlinkruns / JSON 载荷 / 混排文本）
+				foreach (Match m in Regex.Matches(decoded, @"https?://[^\x00-\x20""'<>\\})\]]+", RegexOptions.IgnoreCase))
+				{
+					TryAddCellUrl(m.Value);
+				}
+
+				return cellUrls;
+			}
+
+			// 1. 优先直接从 Win32 剪贴板读取原始 UTF-8 HTML 字节流，彻底规避 .NET Framework 4.8 DataObject.GetData(DataFormats.Html) 中文字符截断 Bug
+			string htmlContent = TryReadRawClipboardFormatUtf8("HTML Format")
+				?? TryReadClipboardFormatAsUtf8String(dataObj, DataFormats.Html)
+				?? TryReadClipboardFormatAsUtf8String(dataObj, "HTML Format")
+				?? TryReadClipboardFormatAsUtf8String(dataObj, "text/html");
+
+			int tdCellCount = 0;
+			if (!string.IsNullOrWhiteSpace(htmlContent))
+			{
+				// 剥离 CF_HTML 头部元信息（避免误把 SourceURL:https://docs.google.com/spreadsheets/... 当成下载链接）
+				string htmlBody = StripCfHtmlHeader(htmlContent);
+
+				// 按表格单元格 <td>...</td> 逐格提取：
+				// 同一单元格内 data-sheets-hyperlink 与 <a href> 重复的链接会自动合并为 1 条；
+				// 不同单元格之间即使链接相同也按用户复制的单元格数量保留，不会吞掉行数！
+				MatchCollection tdMatches = Regex.Matches(htmlBody, @"<td\b[^>]*>(?:(?!</?td\b)[\s\S])*?</td>", RegexOptions.IgnoreCase);
+				if (tdMatches.Count > 0)
+				{
+					tdCellCount = tdMatches.Count;
+					foreach (Match td in tdMatches)
+					{
+						List<string> cellUrls = ExtractUrlsFromCellFragment(td.Value);
+						orderedUrls.AddRange(cellUrls);
+					}
+				}
+				else
+				{
+					orderedUrls.AddRange(ExtractUrlsFromCellFragment(htmlBody));
+				}
+			}
+
+			// 2. 如果存在部分 Google Sheets 巧克力胶囊（如云盘文件芯片/特殊芯片）未在 HTML <td> 中写出 URL，
+			//    则进一步读取 Chromium 专属剪贴板格式 (Chromium Web Custom MIME Data Format，内部为 UTF-16LE JSON) 及其他自定义格式
+			if (orderedUrls.Count == 0 || (tdCellCount > 0 && orderedUrls.Count < tdCellCount))
+			{
+				var existingSet = new HashSet<string>(orderedUrls, StringComparer.OrdinalIgnoreCase);
+				void AddSupplementalUrl(string rawCandidate)
+				{
+					string cleaned = NormalizeAndUnwrapClipboardUrl(rawCandidate);
+					if (!string.IsNullOrWhiteSpace(cleaned) && !IsIgnoredClipboardMetaUrl(cleaned))
+					{
+						if (existingSet.Add(cleaned))
+							orderedUrls.Add(cleaned);
+					}
+				}
+
+				// 检查 Chromium Web Custom MIME Data Format 及所有包含 google/sheets/custom/html/rtf 的格式
+				var candidateFormats = new List<string>(dataObj.GetFormats());
+				if (!candidateFormats.Contains("Chromium Web Custom MIME Data Format"))
+					candidateFormats.Add("Chromium Web Custom MIME Data Format");
+
+				foreach (string fmt in candidateFormats)
+				{
+					if (string.Equals(fmt, DataFormats.Html, StringComparison.OrdinalIgnoreCase) ||
+						string.Equals(fmt, "HTML Format", StringComparison.OrdinalIgnoreCase) ||
+						string.Equals(fmt, DataFormats.Text, StringComparison.OrdinalIgnoreCase) ||
+						string.Equals(fmt, DataFormats.UnicodeText, StringComparison.OrdinalIgnoreCase) ||
+						string.Equals(fmt, DataFormats.OemText, StringComparison.OrdinalIgnoreCase))
+					{
+						continue;
+					}
+
+					foreach (string customText in TryReadClipboardFormatBothEncodings(dataObj, fmt))
+					{
+						if (string.IsNullOrWhiteSpace(customText))
+							continue;
+
+						string decodedCustom = DecodeHtmlAndJsonEscapes(customText);
+						foreach (Match m in Regex.Matches(decodedCustom, @"https?://[^\x00-\x20""'<>\\})\]]+", RegexOptions.IgnoreCase))
+						{
+							AddSupplementalUrl(m.Value);
+						}
+					}
+				}
+			}
+
+			// 3. 解析纯文本（处理纯文本多行网址、多列带标题网址，或补充漏网的裸链接）
+			if (Clipboard.ContainsText())
+			{
+				rawFallbackText = Clipboard.GetText() ?? string.Empty;
+				if (orderedUrls.Count == 0)
+				{
+					foreach (string line in rawFallbackText.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries))
+					{
+						List<string> lineUrls = ExtractUrlsFromCellFragment(line);
+						orderedUrls.AddRange(lineUrls);
+					}
+				}
+			}
+
+			extractedUrls = orderedUrls;
+			int distinctCount = new HashSet<string>(orderedUrls, StringComparer.OrdinalIgnoreCase).Count;
+			if (tdCellCount > 0)
+			{
+				if (distinctCount < orderedUrls.Count)
+					diagnosticSummary = $"[智能粘贴] 检测到表格 {tdCellCount} 个单元格，已完整提取 {orderedUrls.Count} 条视频链接（含 {orderedUrls.Count - distinctCount} 条相同链接，已按原表格行数完整保留）。";
+				else
+					diagnosticSummary = $"[智能粘贴] 检测到表格 {tdCellCount} 个单元格，已完整提取 {orderedUrls.Count} 条真实视频链接。";
+			}
+			else
+			{
+				diagnosticSummary = $"[智能粘贴] 自动从剪贴板中提取了 {orderedUrls.Count} 条真实视频链接。";
+			}
+			return extractedUrls.Count > 0 || !string.IsNullOrWhiteSpace(rawFallbackText);
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static string DecodeHtmlAndJsonEscapes(string input)
+	{
+		if (string.IsNullOrEmpty(input))
+			return string.Empty;
+
+		string s = WebUtility.HtmlDecode(input);
+		// 二次 HtmlDecode 应对双重转义（如 data-sheets-formula 或嵌套 JSON 属性中的 &amp;quot;）
+		if (s.IndexOf('&') >= 0)
+			s = WebUtility.HtmlDecode(s);
+
+		s = s.Replace(@"\/", "/")
+			 .Replace(@"\u0026", "&")
+			 .Replace(@"\u0026", "&")
+			 .Replace(@"\u003d", "=")
+			 .Replace(@"\u003D", "=")
+			 .Replace(@"\u003f", "?")
+			 .Replace(@"\u003F", "?")
+			 .Replace(@"\u0022", "\"");
+		return s;
+	}
+
+	private static string TryReadRawClipboardFormatUtf8(string formatName)
+	{
+		byte[] bytes = TryReadRawClipboardBytes(formatName);
+		if (bytes == null || bytes.Length == 0)
+			return null;
+		return Encoding.UTF8.GetString(bytes).TrimEnd('\0');
+	}
+
+	private static byte[] TryReadRawClipboardBytes(string formatName)
+	{
+		uint fmtId = RegisterClipboardFormat(formatName);
+		if (fmtId == 0)
+			return null;
+
+		if (!OpenClipboard(IntPtr.Zero))
+			return null;
+
+		try
+		{
+			IntPtr hGlobal = GetClipboardData(fmtId);
+			if (hGlobal == IntPtr.Zero)
+				return null;
+
+			uint size = (uint)GlobalSize(hGlobal);
+			if (size == 0)
+				return null;
+
+			IntPtr ptr = GlobalLock(hGlobal);
+			if (ptr == IntPtr.Zero)
+				return null;
+
+			try
+			{
+				byte[] buffer = new byte[size];
+				Marshal.Copy(ptr, buffer, 0, (int)size);
+				return buffer;
+			}
+			finally
+			{
+				GlobalUnlock(hGlobal);
+			}
+		}
+		catch
+		{
+			return null;
+		}
+		finally
+		{
+			CloseClipboard();
+		}
+	}
+
+	private static List<string> TryReadClipboardFormatBothEncodings(IDataObject dataObj, string format)
+	{
+		var results = new List<string>();
+		try
+		{
+			byte[] bytes = TryReadRawClipboardBytes(format);
+			if (bytes == null && dataObj != null && dataObj.GetDataPresent(format))
+			{
+				object raw = dataObj.GetData(format);
+				if (raw is MemoryStream ms)
+				{
+					bytes = ms.ToArray();
+				}
+				else if (raw is Stream stream && stream.CanRead)
+				{
+					using var copy = new MemoryStream();
+					stream.CopyTo(copy);
+					bytes = copy.ToArray();
+				}
+				else if (raw is byte[] arr)
+				{
+					bytes = arr;
+				}
+				else if (raw is string str)
+				{
+					results.Add(str);
+					return results;
+				}
+			}
+
+			if (bytes != null && bytes.Length > 0)
+			{
+				results.Add(Encoding.UTF8.GetString(bytes));
+				// Chromium Web Custom MIME Data Format 使用 Pickle UTF-16LE 存储 Google Sheets 内部剪贴板 JSON
+				results.Add(Encoding.Unicode.GetString(bytes));
+			}
+		}
+		catch
+		{
+		}
+		return results;
+	}
+
+	private static string TryReadClipboardFormatAsUtf8String(IDataObject dataObj, string format)
+	{
+		try
+		{
+			if (!dataObj.GetDataPresent(format))
+				return null;
+
+			object raw = dataObj.GetData(format);
+			if (raw is MemoryStream ms)
+			{
+				byte[] bytes = ms.ToArray();
+				return Encoding.UTF8.GetString(bytes).TrimEnd('\0');
+			}
+			if (raw is Stream stream && stream.CanRead)
+			{
+				using var copy = new MemoryStream();
+				stream.CopyTo(copy);
+				return Encoding.UTF8.GetString(copy.ToArray()).TrimEnd('\0');
+			}
+			if (raw is byte[] byteArr)
+			{
+				return Encoding.UTF8.GetString(byteArr).TrimEnd('\0');
+			}
+			if (raw is string str)
+			{
+				return str;
+			}
+		}
+		catch
+		{
+		}
+		return null;
+	}
+
+	private static string StripCfHtmlHeader(string cfHtml)
+	{
+		if (string.IsNullOrEmpty(cfHtml))
+			return string.Empty;
+
+		int idxHtml = cfHtml.IndexOf("<html", StringComparison.OrdinalIgnoreCase);
+		if (idxHtml >= 0)
+			return cfHtml.Substring(idxHtml);
+
+		int idxFragment = cfHtml.IndexOf("<!--StartFragment-->", StringComparison.OrdinalIgnoreCase);
+		if (idxFragment >= 0)
+			return cfHtml.Substring(idxFragment);
+
+		int idxFirstTag = cfHtml.IndexOf('<');
+		if (idxFirstTag >= 0)
+			return cfHtml.Substring(idxFirstTag);
+
+		return cfHtml;
+	}
+
+	private static string NormalizeAndUnwrapClipboardUrl(string rawUrl)
+	{
+		if (string.IsNullOrWhiteSpace(rawUrl))
+			return null;
+
+		string url = DecodeHtmlAndJsonEscapes(rawUrl.Trim());
+		url = url.Trim('"', '\'', ' ', '\t', '\r', '\n', ')', ']', '}', '>', ';', ',');
+
+		if (url.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+		{
+			url = "https://" + url;
+		}
+
+		if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+			!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+		{
+			return null;
+		}
+
+		// 解包 Google Sheets / Google 跳转链接: https://www.google.com/url?q=https%3A%2F%2Fwww.youtube.com%2F...&sa=D...
+		// 以及 Facebook 跳转链接: https://l.facebook.com/l.php?u=https%3A%2F%2F...
+		try
+		{
+			if (Uri.TryCreate(url, UriKind.Absolute, out Uri uri))
+			{
+				string host = uri.Host ?? string.Empty;
+				if ((host.EndsWith("google.com", StringComparison.OrdinalIgnoreCase) && uri.AbsolutePath.Equals("/url", StringComparison.OrdinalIgnoreCase)) ||
+					(host.EndsWith("facebook.com", StringComparison.OrdinalIgnoreCase) && uri.AbsolutePath.Equals("/l.php", StringComparison.OrdinalIgnoreCase)))
+				{
+					string query = uri.Query.TrimStart('?');
+					foreach (string part in query.Split('&'))
+					{
+						int eq = part.IndexOf('=');
+						if (eq <= 0) continue;
+						string key = part.Substring(0, eq);
+						string val = part.Substring(eq + 1);
+						if ((key.Equals("q", StringComparison.OrdinalIgnoreCase) ||
+							 key.Equals("url", StringComparison.OrdinalIgnoreCase) ||
+							 key.Equals("u", StringComparison.OrdinalIgnoreCase)) &&
+							!string.IsNullOrWhiteSpace(val))
+						{
+							string decoded = Uri.UnescapeDataString(val);
+							if (decoded.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+								decoded.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+							{
+								return decoded.Trim();
+							}
+						}
+					}
+				}
+			}
+		}
+		catch
+		{
+		}
+
+		return url;
+	}
+
+	private static bool IsIgnoredClipboardMetaUrl(string url)
+	{
+		if (string.IsNullOrWhiteSpace(url))
+			return true;
+
+		if (!Uri.TryCreate(url, UriKind.Absolute, out Uri uri))
+			return true;
+
+		string host = uri.Host ?? string.Empty;
+		// 过滤 XML/Office/W3C 命名空间与 Google 静态图标资源链接
+		if (host.EndsWith("schemas.openxmlformats.org", StringComparison.OrdinalIgnoreCase) ||
+			host.EndsWith("schemas.microsoft.com", StringComparison.OrdinalIgnoreCase) ||
+			host.EndsWith("w3.org", StringComparison.OrdinalIgnoreCase) ||
+			host.EndsWith("gstatic.com", StringComparison.OrdinalIgnoreCase) ||
+			host.EndsWith("googleapis.com", StringComparison.OrdinalIgnoreCase) ||
+			host.Equals("drive-thirdparty.googleusercontent.com", StringComparison.OrdinalIgnoreCase))
+		{
+			return true;
+		}
+
+		// 过滤 Google Smart Chip 的 16x16 网站小图标链接
+		if (host.EndsWith("google.com", StringComparison.OrdinalIgnoreCase) &&
+			uri.AbsolutePath.StartsWith("/s2/favicons", StringComparison.OrdinalIgnoreCase))
+		{
+			return true;
+		}
+
+		// 过滤 Google Sheets 表格页面自身链接（保留 drive.google.com 视频链接）
+		if (host.Equals("docs.google.com", StringComparison.OrdinalIgnoreCase) &&
+			uri.AbsolutePath.StartsWith("/spreadsheets/", StringComparison.OrdinalIgnoreCase))
+		{
+			return true;
+		}
+
+		return false;
 	}
 
 	private async Task ParseUrlsAsync()
@@ -1189,11 +1703,33 @@ internal sealed class DownloaderPanel : UserControl
 
 	private string[] GetUrlsFromInput()
 	{
-		return _txtUrls.Lines
-			.Select(l => l.Trim())
-			.Where(l => !string.IsNullOrWhiteSpace(l) && (l.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || l.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
-			.Distinct()
-			.ToArray();
+		var results = new List<string>();
+
+		foreach (string rawLine in _txtUrls.Lines)
+		{
+			string line = rawLine?.Trim();
+			if (string.IsNullOrWhiteSpace(line))
+				continue;
+
+			if (line.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+				line.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+			{
+				string normalized = NormalizeAndUnwrapClipboardUrl(line) ?? line;
+				results.Add(normalized);
+				continue;
+			}
+
+			// 兼容一行中带有表格标题/序号前缀或制表符的情况（如: "视频1\thttps://www.youtube.com/watch?v=xxx"）
+			var lineSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			foreach (Match m in Regex.Matches(line, @"https?://[^\s""'<>]+", RegexOptions.IgnoreCase))
+			{
+				string normalized = NormalizeAndUnwrapClipboardUrl(m.Value);
+				if (!string.IsNullOrWhiteSpace(normalized) && lineSeen.Add(normalized))
+					results.Add(normalized);
+			}
+		}
+
+		return results.ToArray();
 	}
 
 	private string GetEffectiveProxy()
@@ -1465,6 +2001,36 @@ internal sealed class DownloaderPanel : UserControl
 		if (item != null && File.Exists(item.SaveFilePath))
 		{
 			Process.Start(new ProcessStartInfo(item.SaveFilePath) { UseShellExecute = true });
+		}
+	}
+
+	/// <summary>
+	/// 支持拦截 Ctrl+V / 右键粘贴 (WM_PASTE) 并自动提取表格超链接与 Google Sheets 巧克力胶囊链接的智能输入框
+	/// </summary>
+	private sealed class SmartUrlTextBox : TextBox
+	{
+		private const int WM_PASTE = 0x0302;
+		private readonly Func<bool> _onSmartPaste;
+
+		public SmartUrlTextBox(Func<bool> onSmartPaste)
+		{
+			_onSmartPaste = onSmartPaste;
+		}
+
+		protected override void WndProc(ref Message m)
+		{
+			if (m.Msg == WM_PASTE && _onSmartPaste != null)
+			{
+				try
+				{
+					if (_onSmartPaste())
+						return;
+				}
+				catch
+				{
+				}
+			}
+			base.WndProc(ref m);
 		}
 	}
 }

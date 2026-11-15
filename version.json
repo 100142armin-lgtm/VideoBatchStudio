@@ -1,16 +1,16 @@
 {
-    "version":  "9.7.0",
-    "releaseDate":  "2026-11-11",
-    "title":  "VideoBatchStudio V9.7.0 配音工坊全屏自适应 + 5维音频自检 + 童声音色库 + 安全加固升级",
+    "version":  "9.8.0",
+    "releaseDate":  "2026-11-15",
+    "title":  "VideoBatchStudio V9.8.0 视频下载智能识别表格超链接与谷歌表格巧克力胶囊链接升级",
     "changelog":  [
-                      "【配音工坊·全屏自适应与丝滑拖拽】右侧参数面板随窗口全屏自动等比例缩放，修复滚动条鼠标拖拽实时联动响应",
-                      "【五维自检·失败原因与解决方案】文字转语音新增 5 维质量自检弹窗（文案/音频/SRT一致性、清晰度、流畅度防卡顿结巴）与排障向导",
-                      "【音色扩充·男女童声与近场试听】主讲音色下拉菜单新增葡语/英语/中文男童与女童音色，试听按钮紧邻音色选单并按模型智能显隐克隆设置",
-                      "【安全加固·DPAPI加密与组件升级】API 密钥升级 Windows DPAPI 加密存储，升级 Whisper 识别引擎至最新 b5454 并强化全链路 SHA256 校验"
+                      "【视频下载·表格超链接与谷歌巧克力胶囊智能识别】支持从 Excel / WPS / 飞书表格及 Google 表格（Smart Chips 巧克力胶囊样式）直接复制粘贴自动提取真实视频链接",
+                      "【多行逐格精准解析·防吞行与防截断】直读 Win32 原始 UTF-8 与 Chromium UTF-16LE 剪贴板流，按单元格逐格解析并自动剥离 Google/Facebook 重定向包装链接",
+                      "【配音工坊·全屏自适应与五维自检】右侧参数面板随窗口全屏自动等比例缩放，支持 5 维质量自检弹窗与男女童声音色库",
+                      "【安全加固·组件升级】升级 Whisper 离线识别引擎至最新 b5454 并强化全链路 SHA256 校验"
                   ],
-    "downloadUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v9.7.0",
-    "portableZipUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.7.0/VideoBatchStudio_Portable.zip",
-    "fastPortableZipUrl":  "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.7.0/VideoBatchStudio_Portable.zip",
-    "exeUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.7.0/VideoBatchStudio.exe",
-    "sha256":  "0972f932f58d9c9c956d251c9b1b28d682f9169e1c14356f4dcf3b9ddd02e220"
+    "downloadUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v9.8.0",
+    "portableZipUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.8.0/VideoBatchStudio_Portable.zip",
+    "fastPortableZipUrl":  "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.8.0/VideoBatchStudio_Portable.zip",
+    "exeUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.8.0/VideoBatchStudio.exe",
+    "sha256":  "687689596bb1501fb7f1c972ff1033cb4202ec2950d402cba8826840dcb8e41a"
 }
