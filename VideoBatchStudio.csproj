@@ -12,7 +12,8 @@
     <LangVersion>14.0</LangVersion>
     <AllowUnsafeBlocks>False</AllowUnsafeBlocks>
     <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
-    <Optimize>False</Optimize>
+    <Optimize>True</Optimize>
+    <Deterministic>True</Deterministic>
     <DebugType>none</DebugType>
     <DebugSymbols>False</DebugSymbols>
     <IntermediateOutputPath>obj_build\Release\net48\</IntermediateOutputPath>
@@ -33,7 +34,6 @@
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
-    <Reference Include="System.Security" />
     <Reference Include="System.Speech" />
   </ItemGroup>
   <ItemGroup>

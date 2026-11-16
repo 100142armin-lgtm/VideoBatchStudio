@@ -83,9 +83,26 @@ internal static class Program
 	{
 		try
 		{
-			foreach (string oldFile in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory, "*.old_update", SearchOption.AllDirectories))
+			string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+			foreach (string oldFile in Directory.GetFiles(baseDir, "*.old_update", SearchOption.AllDirectories))
 			{
 				try { File.Delete(oldFile); } catch { }
+			}
+
+			string stagingDir = Path.Combine(baseDir, "_update_staging");
+			if (Directory.Exists(stagingDir))
+			{
+				try { Directory.Delete(stagingDir, true); } catch { }
+			}
+
+			string tempDir = Path.GetTempPath();
+			foreach (string oldZip in Directory.GetFiles(tempDir, "vbs_update_*.zip", SearchOption.TopDirectoryOnly))
+			{
+				try { File.Delete(oldZip); } catch { }
+			}
+			foreach (string oldExtract in Directory.GetDirectories(tempDir, "vbs_extract_*", SearchOption.TopDirectoryOnly))
+			{
+				try { Directory.Delete(oldExtract, true); } catch { }
 			}
 		}
 		catch { }

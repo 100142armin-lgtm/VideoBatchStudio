@@ -257,29 +257,26 @@ internal sealed class UpdateNotificationForm : Form
 		_lblStatus.ForeColor = Color.FromArgb(56, 189, 248);
 		_lblStatus.Text = "🚀 正在连接高速通道下载更新包...";
 
-		string tempZip = Path.Combine(Path.GetTempPath(), $"vbs_update_{_newVer}_{DateTime.Now.Ticks}.zip");
-		string tempExtractDir = Path.Combine(Path.GetTempPath(), $"vbs_extract_{_newVer}_{DateTime.Now.Ticks}");
+		string stagingBaseDir = ResolveSafeStagingBaseDir();
+		string tempZip = Path.Combine(stagingBaseDir, $"vbs_update_{_newVer}_{DateTime.Now.Ticks}.zip");
+		string tempExtractDir = Path.Combine(stagingBaseDir, $"vbs_extract_{_newVer}_{DateTime.Now.Ticks}");
 
 		try
 		{
-			// 1. 静默下载更新包
+			// 1. 静默下载更新包（暂存于软件自身白名单目录内 _update_staging，避免触发 %TEMP% 释放拦截）
 			await DownloadWithFallbackAsync(_fastPortableZipUrl, _portableZipUrl, tempZip, _cts.Token);
 
 			_lblStatus.Text = "📦 下载完成，正在解压并准备自动重启...";
 			_pbProgress.Value = 100;
 
-			// 2. 解压并在后台启动替换脚本
+			// 2. 解压并在后台启动替换
 			await Task.Run(() =>
 			{
+				bool zipHashMatched = false;
 				if (!string.IsNullOrWhiteSpace(_expectedSha256) && _expectedSha256.Length == 64)
 				{
-					using var sha256 = SHA256.Create();
-					using var fs = File.OpenRead(tempZip);
-					string actualHash = BitConverter.ToString(sha256.ComputeHash(fs)).Replace("-", "").ToLowerInvariant();
-					if (!string.Equals(actualHash, _expectedSha256, StringComparison.OrdinalIgnoreCase))
-					{
-						throw new InvalidDataException("更新包 SHA256 完整性校验不通过，已拒绝解压安装！");
-					}
+					string actualZipHash = ComputeFileSha256(tempZip);
+					zipHashMatched = string.Equals(actualZipHash, _expectedSha256, StringComparison.OrdinalIgnoreCase);
 				}
 
 				if (Directory.Exists(tempExtractDir)) Directory.Delete(tempExtractDir, true);
@@ -291,6 +288,15 @@ internal sealed class UpdateNotificationForm : Form
 				if (string.IsNullOrEmpty(exeFound))
 				{
 					throw new Exception("更新包中未检测到可执行程序 VideoBatchStudio.exe！");
+				}
+
+				if (!string.IsNullOrWhiteSpace(_expectedSha256) && _expectedSha256.Length == 64 && !zipHashMatched)
+				{
+					string actualExeHash = ComputeFileSha256(exeFound);
+					if (!string.Equals(actualExeHash, _expectedSha256, StringComparison.OrdinalIgnoreCase))
+					{
+						throw new InvalidDataException("更新包 SHA256 完整性校验不通过，已拒绝解压安装！");
+					}
 				}
 
 				string sourceFolder = Path.GetDirectoryName(exeFound);
@@ -340,19 +346,6 @@ internal sealed class UpdateNotificationForm : Form
 		}
 	}
 
-	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-	[return: MarshalAs(UnmanagedType.Bool)]
-	private static extern bool DeleteFile(string lpFileName);
-
-	private static void UnblockFileNative(string filePath)
-	{
-		try
-		{
-			DeleteFile(filePath + ":Zone.Identifier");
-		}
-		catch { }
-	}
-
 	private static bool IsApprovedUpdateUrl(string value)
 	{
 		if (string.IsNullOrWhiteSpace(value)) return false;
@@ -394,7 +387,6 @@ internal sealed class UpdateNotificationForm : Form
 			try
 			{
 				File.Copy(srcFile, destFile, true);
-				UnblockFileNative(destFile);
 			}
 			catch (IOException)
 			{
@@ -404,7 +396,6 @@ internal sealed class UpdateNotificationForm : Form
 					if (File.Exists(backupPath)) File.Delete(backupPath);
 					File.Move(destFile, backupPath);
 					File.Copy(srcFile, destFile, true);
-					UnblockFileNative(destFile);
 				}
 				catch { }
 			}
@@ -617,6 +608,31 @@ internal sealed class UpdateNotificationForm : Form
 		}
 	}
 
+	private static string ResolveSafeStagingBaseDir()
+	{
+		try
+		{
+			string appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
+			string localStaging = Path.Combine(appDir, "_update_staging");
+			Directory.CreateDirectory(localStaging);
+			string probeFile = Path.Combine(localStaging, ".write_test");
+			File.WriteAllText(probeFile, "ok");
+			File.Delete(probeFile);
+			return localStaging;
+		}
+		catch
+		{
+			return Path.GetTempPath();
+		}
+	}
+
+	private static string ComputeFileSha256(string filePath)
+	{
+		using var sha256 = SHA256.Create();
+		using var fs = File.OpenRead(filePath);
+		return BitConverter.ToString(sha256.ComputeHash(fs)).Replace("-", "").ToLowerInvariant();
+	}
+
 	private static void TryCleanFiles(string zipFile, string extractDir)
 	{
 		try
@@ -627,6 +643,15 @@ internal sealed class UpdateNotificationForm : Form
 		try
 		{
 			if (!string.IsNullOrEmpty(extractDir) && Directory.Exists(extractDir)) Directory.Delete(extractDir, true);
+		}
+		catch { }
+		try
+		{
+			string appStaging = Path.Combine(AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/'), "_update_staging");
+			if (Directory.Exists(appStaging) && !Directory.EnumerateFileSystemEntries(appStaging).Any())
+			{
+				Directory.Delete(appStaging, false);
+			}
 		}
 		catch { }
 	}
