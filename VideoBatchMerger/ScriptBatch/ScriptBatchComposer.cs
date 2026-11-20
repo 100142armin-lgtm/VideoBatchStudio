@@ -552,7 +552,7 @@ namespace VideoBatchMerger.ScriptBatch
 			float outlineWidth = Math.Max(0, settings.SubtitleStrokeWidth);
 			int borderStyle = settings.SubtitleBorderStyle;
 			int displayMode = settings.SubtitleDisplayMode;
-			if (displayMode == 4) borderStyle = 1; // 上滚底板由独立矢量层绘制，文字始终保留可调描边。
+			if (displayMode == 4 || displayMode == 6 || displayMode == 7 || displayMode == 8) borderStyle = 1; // 矢量底板/纱条/红带由独立图层绘制，文字始终保留可调描边。
 			bool layeredPanel = borderStyle == 3 && (displayMode == 0 || displayMode == 2 || displayMode == 5);
 			float shadowDepth = Math.Max(0, settings.SubtitleShadowDepth);
 			if (borderStyle == 3) outlineWidth = Math.Max(10, (float)Math.Round(fontSize * 0.18));
@@ -577,12 +577,13 @@ namespace VideoBatchMerger.ScriptBatch
 			sb.AppendLine("[V4+ Styles]");
 			sb.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
 			string bold = settings.SubtitleBold ? "-1" : "0";
+			string italic = settings.SubtitleItalic ? "-1" : "0";
 			string panelPrimaryColor = layeredPanel ? ScriptBatchSettings.ToAssStyleColor(settings.SubtitleColorHex, Color.White, 0) : primaryColor;
-			sb.AppendLine($"Style: Default,{fontName},{fontSize},{panelPrimaryColor},&H000000FF,{outlineColor},{backColor},{bold},0,0,0,100,100,0,0,{borderStyle},{outlineWidth.ToString("0.0", CultureInfo.InvariantCulture)},{(layeredPanel ? 0f : shadowDepth).ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
+			sb.AppendLine($"Style: Default,{fontName},{fontSize},{panelPrimaryColor},&H000000FF,{outlineColor},{backColor},{bold},{italic},0,0,100,100,0,0,{borderStyle},{outlineWidth.ToString("0.0", CultureInfo.InvariantCulture)},{(layeredPanel ? 0f : shadowDepth).ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
 			if (layeredPanel)
 			{
 				string textOutline = ScriptBatchSettings.ToAssStyleColor(settings.SubtitleStrokeColorHex, Color.FromArgb(112, 92, 65));
-				sb.AppendLine($"Style: PanelText,{fontName},{fontSize},{primaryColor},&H000000FF,{textOutline},{backColor},{bold},0,0,0,100,100,0,0,1,{Math.Max(0, settings.SubtitleStrokeWidth).ToString("0.0", CultureInfo.InvariantCulture)},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
+				sb.AppendLine($"Style: PanelText,{fontName},{fontSize},{primaryColor},&H000000FF,{textOutline},{backColor},{bold},{italic},0,0,100,100,0,0,1,{Math.Max(0, settings.SubtitleStrokeWidth).ToString("0.0", CultureInfo.InvariantCulture)},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
 			}
 			int boxPadding = (int)Math.Max(10, Math.Round(fontSize * 0.18));
 			string boxBgColor = ScriptBatchSettings.ToAssStyleColor(settings.SubtitleHighlightBoxColorHex, Color.FromArgb(214, 0, 0), settings.SubtitleHighlightBoxOpacity);
@@ -590,13 +591,13 @@ namespace VideoBatchMerger.ScriptBatch
 			int highlightStyle = settings.SubtitleHighlightBoxEnabled ? 3 : 1;
 			string highlightOutline = settings.SubtitleHighlightBoxEnabled ? boxBgColor : ScriptBatchSettings.ToAssStyleColor(settings.SubtitleStrokeColorHex, Color.FromArgb(112, 92, 65));
 			string highlightWidth = settings.SubtitleHighlightBoxEnabled ? boxPadding.ToString(CultureInfo.InvariantCulture) : outlineWidth.ToString("0.0", CultureInfo.InvariantCulture);
-			sb.AppendLine($"Style: HighlightBox,{fontName},{fontSize},{hlTextColor},&H000000FF,{highlightOutline},{backColor},{bold},0,0,0,100,100,0,0,{highlightStyle},{highlightWidth},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
-			sb.AppendLine($"Style: HighlightText,{fontName},{fontSize},{hlTextColor},&H000000FF,{ScriptBatchSettings.ToAssStyleColor(settings.SubtitleStrokeColorHex, Color.FromArgb(112, 92, 65))},{backColor},{bold},0,0,0,100,100,0,0,1,{settings.SubtitleStrokeWidth.ToString("0.0", CultureInfo.InvariantCulture)},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
+			sb.AppendLine($"Style: HighlightBox,{fontName},{fontSize},{hlTextColor},&H000000FF,{highlightOutline},{backColor},{bold},{italic},0,0,100,100,0,0,{highlightStyle},{highlightWidth},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
+			sb.AppendLine($"Style: HighlightText,{fontName},{fontSize},{hlTextColor},&H000000FF,{ScriptBatchSettings.ToAssStyleColor(settings.SubtitleStrokeColorHex, Color.FromArgb(112, 92, 65))},{backColor},{bold},{italic},0,0,100,100,0,0,1,{settings.SubtitleStrokeWidth.ToString("0.0", CultureInfo.InvariantCulture)},{shadowDepth.ToString("0.0", CultureInfo.InvariantCulture)},2,{marginL},{marginR},{marginV},1");
 			sb.AppendLine();
 			sb.AppendLine("[Events]");
 			sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
 
-			var wordTimings = displayMode == 1 || displayMode == 3 || displayMode == 5 ? LoadWordTimings(srtPath + ".words.json") : new List<WordTiming>();
+			var wordTimings = displayMode == 1 || displayMode == 3 || displayMode == 5 || displayMode == 6 || displayMode == 7 || displayMode == 8 ? LoadWordTimings(srtPath + ".words.json") : new List<WordTiming>();
 			int nextWordIndex = 0;
 			var cues = new List<ScrollCue>();
 
@@ -647,7 +648,19 @@ namespace VideoBatchMerger.ScriptBatch
 				foreach (var cue in cues) cue.Text = cue.Text?.ToUpperInvariant();
 			}
 
-			if (displayMode == 5)
+			if (displayMode == 6)
+			{
+				EmitHandwriteCursorSubtitles(sb, cues, wordTimings, settings, w, h, fontName, fontSize);
+			}
+			else if (displayMode == 7)
+			{
+				EmitBarScrollPenSubtitles(sb, cues, wordTimings, settings, w, h, fontName, fontSize);
+			}
+			else if (displayMode == 8)
+			{
+				EmitThreeLineRedRibbonSubtitles(sb, cues, wordTimings, settings, w, h, fontName, fontSize);
+			}
+			else if (displayMode == 5)
 			{
 				EmitBrightPhraseSubtitles(sb, cues, wordTimings, settings, w, fontSize);
 			}
@@ -857,6 +870,512 @@ namespace VideoBatchMerger.ScriptBatch
 			}
 			if (current.Length > 0) result.Add(current.ToString());
 			return result;
+		}
+
+		private sealed class TimedWord
+		{
+			public string Text;
+			public double Start;
+			public double End;
+			public float Width;
+		}
+
+		private sealed class TimedLine
+		{
+			public List<TimedWord> Words = new List<TimedWord>();
+			public string FullText;
+			public float FullWidth;
+			public double Start => Words.Count > 0 ? Words[0].Start : 0;
+			public double End => Words.Count > 0 ? Words[Words.Count - 1].End : 0;
+		}
+
+		private static string SanitizeAssText(string value)
+		{
+			return (value ?? string.Empty).Replace("\\", "").Replace("{", "(").Replace("}", ")");
+		}
+
+		private static string BuildRoundedRectDrawing(int w, int h, int r)
+		{
+			w = Math.Max(4, w);
+			h = Math.Max(4, h);
+			r = Math.Max(0, Math.Min(r, Math.Min(w / 2, h / 2)));
+			if (r <= 1) return $"m 0 0 l {w} 0 {w} {h} 0 {h}";
+			return $"m {r} 0 l {w - r} 0 b {w} 0 {w} 0 {w} {r} l {w} {h - r} b {w} {h} {w} {h} {w - r} {h} l {r} {h} b 0 {h} 0 {h} 0 {h - r} l 0 {r} b 0 0 0 0 {r} 0";
+		}
+
+		private static float MeasureAssTextWidth(Graphics g, Font font, string text)
+		{
+			if (string.IsNullOrEmpty(text)) return 0f;
+			using var sf = new StringFormat(StringFormat.GenericTypographic);
+			sf.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+			// Calibrated to libass rendered width on Windows for bold-italic serif/sans fonts.
+			return g.MeasureString(text, font, int.MaxValue, sf).Width * 0.94f;
+		}
+
+		private static List<TimedLine> BuildTimedLines(
+			List<ScrollCue> cues,
+			List<WordTiming> timings,
+			Graphics g,
+			Font font,
+			float maxLineWidth)
+		{
+			var allWords = new List<TimedWord>();
+			int nextTiming = 0;
+			foreach (var cue in cues)
+			{
+				if (string.IsNullOrWhiteSpace(cue.Text) || cue.End <= cue.Start) continue;
+				var tokens = cue.Text.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+				if (tokens.Length == 0) continue;
+
+				int matchedFirst = -1;
+				if (timings != null && timings.Count > 0)
+				{
+					for (int cand = nextTiming; cand < Math.Min(timings.Count, nextTiming + 8); cand++)
+					{
+						if (cand + tokens.Length > timings.Count) break;
+						if (Math.Abs(timings[cand].start - cue.Start) > 0.25) continue;
+						bool ok = true;
+						for (int k = 0; k < tokens.Length; k++)
+						{
+							if (!string.Equals(NormalizeSpokenWord(tokens[k]), NormalizeSpokenWord(timings[cand + k].text), StringComparison.OrdinalIgnoreCase))
+							{
+								ok = false;
+								break;
+							}
+						}
+						if (ok) { matchedFirst = cand; break; }
+					}
+				}
+
+				if (matchedFirst >= 0)
+				{
+					nextTiming = matchedFirst + tokens.Length;
+					for (int i = 0; i < tokens.Length; i++)
+					{
+						var wt = timings[matchedFirst + i];
+						double ws = Math.Max(cue.Start, wt.start);
+						double we = Math.Max(ws + 0.04, wt.end);
+						allWords.Add(new TimedWord { Text = tokens[i], Start = ws, End = we, Width = MeasureAssTextWidth(g, font, tokens[i]) });
+					}
+				}
+				else
+				{
+					int totalChars = Math.Max(1, tokens.Sum(t => Math.Max(1, t.Length)));
+					double cur = cue.Start;
+					double dur = cue.End - cue.Start;
+					for (int i = 0; i < tokens.Length; i++)
+					{
+						double wDur = dur * Math.Max(1, tokens[i].Length) / totalChars;
+						double ws = cur;
+						double we = (i == tokens.Length - 1) ? cue.End : cur + wDur;
+						allWords.Add(new TimedWord { Text = tokens[i], Start = ws, End = Math.Max(ws + 0.04, we), Width = MeasureAssTextWidth(g, font, tokens[i]) });
+						cur = we;
+					}
+				}
+			}
+
+			var lines = new List<TimedLine>();
+			float spaceW = MeasureAssTextWidth(g, font, " ");
+			var curLine = new TimedLine();
+			float curW = 0f;
+
+			foreach (var wd in allWords)
+			{
+				float addW = (curLine.Words.Count > 0 ? spaceW : 0f) + wd.Width;
+				bool longPause = curLine.Words.Count > 0 && (wd.Start - curLine.Words[curLine.Words.Count - 1].End) > 0.85;
+				if (curLine.Words.Count > 0 && (curW + addW > maxLineWidth || longPause))
+				{
+					curLine.FullText = string.Join(" ", curLine.Words.Select(w => w.Text));
+					curLine.FullWidth = MeasureAssTextWidth(g, font, curLine.FullText);
+					lines.Add(curLine);
+					curLine = new TimedLine();
+					curW = 0f;
+				}
+				curLine.Words.Add(wd);
+				curW += (curLine.Words.Count > 1 ? spaceW : 0f) + wd.Width;
+			}
+			if (curLine.Words.Count > 0)
+			{
+				curLine.FullText = string.Join(" ", curLine.Words.Select(w => w.Text));
+				curLine.FullWidth = MeasureAssTextWidth(g, font, curLine.FullText);
+				lines.Add(curLine);
+			}
+			return lines;
+		}
+
+		private static string BuildAssCircle(int cx, int cy, int r)
+		{
+			int k = Math.Max(1, (int)Math.Round(r * 0.55228));
+			return $"m {cx} {cy - r} " +
+				$"b {cx + k} {cy - r} {cx + r} {cy - k} {cx + r} {cy} " +
+				$"b {cx + r} {cy + k} {cx + k} {cy + r} {cx} {cy + r} " +
+				$"b {cx - k} {cy + r} {cx - r} {cy + k} {cx - r} {cy} " +
+				$"b {cx - r} {cy - k} {cx - k} {cy - r} {cx} {cy - r}";
+		}
+
+		private static void EmitAssCursorMove(StringBuilder sb, double start, double end, int x1, int y1, int x2, int y2, int cursorStyle, int fontSize)
+		{
+			if (cursorStyle <= 0 || end <= start + 0.01) return;
+			string st = FormatAssTimeSpan(TimeSpan.FromSeconds(start));
+			string et = FormatAssTimeSpan(TimeSpan.FromSeconds(end));
+
+			if (cursorStyle == 1)
+			{
+				// 🌺 1:1 复刻大号卡通四瓣红花 + 绿茎绿叶 + 黑金花蕊 (坐标原点 (0,0) = 花芯中心，使用 \an7 严格对齐各层)
+				int u = Math.Max(22, (int)Math.Round(fontSize * 0.62));
+				// Layer 2: 绿茎 + 饱满绿叶 (向左下延伸)
+				int sx1 = -(int)(u * 0.14), sy1 = (int)(u * 0.18);
+				int sx2 = -(int)(u * 0.88), sy2 = (int)(u * 1.05);
+				int stW = Math.Max(4, (int)(u * 0.12));
+				string stem = $"m {sx1} {sy1} l {sx2} {sy2} {sx2 + stW} {sy2 + stW} {sx1 + stW} {sy1 + stW}";
+				sb.AppendLine($"Dialogue: 2,{st},{et},Default,,0,0,0,,{{\\an7\\move({x1},{y1},{x2},{y2})\\p1\\1c&H439E2E&\\3c&H184A14&\\bord2\\shad0}}{stem}{{\\p0}}");
+				int lx0 = -(int)(u * 0.42), ly0 = (int)(u * 0.56);
+				int lx1 = -(int)(u * 0.92), ly1 = (int)(u * 0.22);
+				int lx2 = -(int)(u * 0.82), ly2 = (int)(u * 0.82);
+				string leaf = $"m {lx0} {ly0} b {lx1} {ly1} {lx1} {ly2} {lx0} {ly0 + (int)(u * 0.18)} b {lx2} {ly2} {lx0 + (int)(u * 0.14)} {ly0 - (int)(u * 0.12)} {lx0} {ly0}";
+				sb.AppendLine($"Dialogue: 2,{st},{et},Default,,0,0,0,,{{\\an7\\move({x1},{y1},{x2},{y2})\\p1\\1c&H59C734&\\3c&H144D1E&\\bord2\\shad0}}{leaf}{{\\p0}}");
+
+				// Layer 3: 四片饱满鲜红花瓣 (#E62620 = &H2026E6&) + 清晰深黑描边 (#1A0D0D)
+				int pr = Math.Max(12, (int)(u * 0.46));
+				int po = Math.Max(10, (int)(u * 0.44));
+				double[] angles = { -82.0, 12.0, 100.0, -168.0 };
+				foreach (double deg in angles)
+				{
+					double rad = deg * Math.PI / 180.0;
+					int px = (int)Math.Round(Math.Cos(rad) * po);
+					int py = (int)Math.Round(Math.Sin(rad) * po);
+					string petal = BuildAssCircle(px, py, pr);
+					sb.AppendLine($"Dialogue: 3,{st},{et},Default,,0,0,0,,{{\\an7\\move({x1},{y1},{x2},{y2})\\p1\\1c&H2026E6&\\3c&H0D0D1A&\\bord3\\shad0}}{petal}{{\\p0}}");
+				}
+
+				// Layer 4: 花蕊三层同心圆 (外黑环 -> 亮金黄环 -> 中心黑点)
+				int r1 = Math.Max(7, (int)(u * 0.24));
+				int r2 = Math.Max(5, (int)(u * 0.17));
+				int r3 = Math.Max(3, (int)(u * 0.09));
+				sb.AppendLine($"Dialogue: 4,{st},{et},Default,,0,0,0,,{{\\an7\\move({x1},{y1},{x2},{y2})\\p1\\1c&H0D0D1A&\\bord0\\shad0}}{BuildAssCircle(0, 0, r1)}{{\\p0}}");
+				sb.AppendLine($"Dialogue: 4,{st},{et},Default,,0,0,0,,{{\\an7\\move({x1},{y1},{x2},{y2})\\p1\\1c&H33D8FF&\\bord0\\shad0}}{BuildAssCircle(0, 0, r2)}{{\\p0}}");
+				sb.AppendLine($"Dialogue: 4,{st},{et},Default,,0,0,0,,{{\\an7\\move({x1},{y1},{x2},{y2})\\p1\\1c&H0D0D1A&\\bord0\\shad0}}{BuildAssCircle(0, 0, r3)}{{\\p0}}");
+			}
+			else if (cursorStyle == 2)
+			{
+				// 🖋️ 1:1 复刻纤细斜执黑金荧光笔 (原点 (0,0) = 笔尖发光点，向右上 45° 纤细延伸)
+				int u = Math.Max(26, (int)Math.Round(fontSize * 0.88));
+				int tipX = (int)(u * 0.24), tipY = -(int)(u * 0.24);
+				int endX = (int)(u * 1.42), endY = -(int)(u * 1.42);
+				int wHalf = Math.Max(4, (int)(u * 0.095));
+				// Layer 2: 笔尖金黄光晕与笔锋
+				string tipGlow = $"m {-wHalf} {wHalf} l {tipX - wHalf} {tipY - wHalf} {tipX + wHalf} {tipY + wHalf} {wHalf} {wHalf}";
+				sb.AppendLine($"Dialogue: 2,{st},{et},Default,,0,0,0,,{{\\an7\\move({x1},{y1},{x2},{y2})\\p1\\1c&H33E0FF&\\3c&H1090FF&\\bord2\\blur2\\shad0}}{tipGlow}{{\\p0}}");
+				// Layer 3: 纤细黑色笔杆 + 明亮金色外框
+				string barrel = $"m {tipX - wHalf} {tipY - wHalf} l {endX - wHalf} {endY - wHalf} {endX + wHalf} {endY + wHalf} {tipX + wHalf} {tipY + wHalf}";
+				sb.AppendLine($"Dialogue: 3,{st},{et},Default,,0,0,0,,{{\\an7\\move({x1},{y1},{x2},{y2})\\p1\\1c&H241B1E&\\3c&H42C5F5&\\bord2.5\\shad1}}{barrel}{{\\p0}}");
+			}
+			else if (cursorStyle == 3)
+			{
+				// ✨ 圣光四角星芒
+				int s = Math.Max(18, (int)Math.Round(fontSize * 0.48));
+				int o = Math.Max(12, (int)(s * 0.78));
+				int i = Math.Max(3, (int)(s * 0.22));
+				string star = $"m 0 {-o} l {i} {-i} {o} 0 {i} {i} 0 {o} {-i} {i} {-o} 0 {-i} {-i}";
+				sb.AppendLine($"Dialogue: 2,{st},{et},Default,,0,0,0,,{{\\an7\\move({x1},{y1},{x2},{y2})\\p1\\1c&H66E8FF&\\3c&HFFFFFF&\\bord2\\blur2\\shad0}}{star}{{\\p0}}");
+			}
+		}
+
+		/// <summary>
+		/// Mode 6: 白字粉边·红花游标跟读 (1:1 复刻 60K 绿水滴视频：已读白字 + 当前词亮黄 + 玫红描边 + 大红花游标)
+		/// </summary>
+		private static void EmitHandwriteCursorSubtitles(
+			StringBuilder sb,
+			List<ScrollCue> cues,
+			List<WordTiming> timings,
+			ScriptBatchSettings settings,
+			int canvasW,
+			int canvasH,
+			string fontName,
+			int fontSize)
+		{
+			FontStyle fStyle = (settings.SubtitleBold ? FontStyle.Bold : FontStyle.Regular) | (settings.SubtitleItalic ? FontStyle.Italic : FontStyle.Regular);
+			using var bmp = new Bitmap(16, 16);
+			using var g = Graphics.FromImage(bmp);
+			using var font = new Font(fontName, fontSize, fStyle, GraphicsUnit.Pixel);
+
+			float maxLineW = canvasW * 0.84f;
+			var allLines = BuildTimedLines(cues, timings, g, font, maxLineW);
+			if (allLines.Count == 0) return;
+
+			int visibleLines = Math.Max(1, Math.Min(3, settings.SubtitleVisibleLines));
+			int lineHeight = (int)Math.Round(fontSize * 1.28);
+			int centerY = (int)Math.Round(canvasH * Math.Max(0.18, Math.Min(0.88, settings.SubtitleVerticalPercent / 100.0)));
+			int centerX = canvasW / 2 + settings.SubtitleOffsetX;
+			string normalBgr = ScriptBatchSettings.ToAssInlineBgr(settings.SubtitleColorHex, Color.White);
+			string hlBgr = ScriptBatchSettings.ToAssInlineBgr(settings.SubtitleHighlightTextColorHex, Color.FromArgb(255, 224, 41));
+
+			for (int screenStart = 0; screenStart < allLines.Count; screenStart += visibleLines)
+			{
+				int count = Math.Min(visibleLines, allLines.Count - screenStart);
+				var screenLines = allLines.GetRange(screenStart, count);
+				double screenEnd = screenLines[count - 1].End + 0.28;
+				if (screenStart + count < allLines.Count)
+				{
+					screenEnd = Math.Min(screenEnd, allLines[screenStart + count].Start);
+				}
+
+				int totalH = count * lineHeight;
+				int topLineY = centerY - totalH / 2 + lineHeight / 2;
+
+				for (int li = 0; li < count; li++)
+				{
+					var line = screenLines[li];
+					int lineY = topLineY + li * lineHeight;
+					int lineLeft = (int)Math.Round(centerX - line.FullWidth / 2f);
+					int curX = lineLeft;
+					string settledPrefix = "";
+
+					for (int wi = 0; wi < line.Words.Count; wi++)
+					{
+						var wd = line.Words[wi];
+						string spaceStr = wi > 0 ? " " : "";
+						string wordText = wd.Text;
+						int subSteps = wordText.Length >= 5 ? 3 : (wordText.Length >= 3 ? 2 : 1);
+						double wDur = Math.Max(0.05, wd.End - wd.Start);
+
+						for (int stIdx = 0; stIdx < subSteps; stIdx++)
+						{
+							int charTake = (int)Math.Ceiling(wordText.Length * (stIdx + 1) / (double)subSteps);
+							string activeWordPart = wordText.Substring(0, charTake);
+							string stepFull = settledPrefix + spaceStr + activeWordPart;
+							double stepStart = wd.Start + wDur * stIdx / subSteps;
+							double stepEnd = (stIdx == subSteps - 1)
+								? ((wi + 1 < line.Words.Count) ? Math.Max(wd.End, line.Words[wi + 1].Start) : wd.End)
+								: (wd.Start + wDur * (stIdx + 1) / subSteps);
+							if (stepEnd <= stepStart + 0.01) continue;
+
+							int nextX = lineLeft + (int)Math.Round(MeasureAssTextWidth(g, font, stepFull));
+							string settledSafe = SanitizeAssText(settledPrefix + spaceStr);
+							string activeSafe = SanitizeAssText(activeWordPart);
+
+							string stAss = FormatAssTimeSpan(TimeSpan.FromSeconds(stepStart));
+							string etAss = FormatAssTimeSpan(TimeSpan.FromSeconds(stepEnd));
+							// 已读词为纯白，当前整个正在读的词为亮金黄，统一玫红描边
+							sb.AppendLine($"Dialogue: 1,{stAss},{etAss},Default,,0,0,0,,{{\\an4\\pos({lineLeft},{lineY})}}{{\\1c{normalBgr}}}{settledSafe}{{\\1c{hlBgr}}}{activeSafe}");
+
+							int flowerY = lineY - (int)(fontSize * 0.10);
+							int flowerOffX = -(int)(fontSize * 0.10);
+							EmitAssCursorMove(sb, stepStart, stepEnd, curX + flowerOffX, flowerY, nextX + flowerOffX, flowerY, settings.SubtitleCursorStyle, fontSize);
+							curX = nextX;
+						}
+						settledPrefix = settledPrefix + spaceStr + wordText;
+					}
+
+					// 本行写完后变回纯白并保持显示直到整屏柔和淡出
+					double holdStart = line.End;
+					if (screenEnd > holdStart + 0.02)
+					{
+						string stHold = FormatAssTimeSpan(TimeSpan.FromSeconds(holdStart));
+						string etHold = FormatAssTimeSpan(TimeSpan.FromSeconds(screenEnd));
+						string safeFull = SanitizeAssText(line.FullText);
+						sb.AppendLine($"Dialogue: 1,{stHold},{etHold},Default,,0,0,0,,{{\\an4\\pos({lineLeft},{lineY})\\fad(0,220)\\1c{normalBgr}}}{safeFull}");
+					}
+				}
+			}
+		}
+
+		/// <summary>
+		/// Mode 7: 暗紫纱条·金笔划词跟读 (1:1 复刻 207K 金色 17 号视频：3 行独立圆角紫条同时展示，黑金笔逐词滑行划过)
+		/// </summary>
+		private static void EmitBarScrollPenSubtitles(
+			StringBuilder sb,
+			List<ScrollCue> cues,
+			List<WordTiming> timings,
+			ScriptBatchSettings settings,
+			int canvasW,
+			int canvasH,
+			string fontName,
+			int fontSize)
+		{
+			FontStyle fStyle = (settings.SubtitleBold ? FontStyle.Bold : FontStyle.Regular) | (settings.SubtitleItalic ? FontStyle.Italic : FontStyle.Regular);
+			using var bmp = new Bitmap(16, 16);
+			using var g = Graphics.FromImage(bmp);
+			using var font = new Font(fontName, fontSize, fStyle, GraphicsUnit.Pixel);
+
+			float maxLineW = canvasW * 0.80f;
+			var allLines = BuildTimedLines(cues, timings, g, font, maxLineW);
+			if (allLines.Count == 0) return;
+
+			int visibleLines = Math.Max(1, Math.Min(3, settings.SubtitleVisibleLines));
+			int lineHeight = (int)Math.Round(fontSize * 1.50);
+			int centerY = (int)Math.Round(canvasH * Math.Max(0.22, Math.Min(0.86, settings.SubtitleVerticalPercent / 100.0)));
+			int centerX = canvasW / 2 + settings.SubtitleOffsetX;
+			int padX = Math.Max(26, (int)Math.Round(fontSize * 0.36));
+			int padY = Math.Max(8, (int)Math.Round(fontSize * 0.15));
+
+			string normalBgr = ScriptBatchSettings.ToAssInlineBgr(settings.SubtitleColorHex, Color.White);
+			string barBgr = ScriptBatchSettings.ToAssInlineBgr(settings.SubtitleScrollPanelColorHex, Color.FromArgb(46, 30, 66));
+			string barAlpha = ScriptBatchSettings.ToAssInlineAlpha(settings.SubtitleScrollPanelOpacity);
+
+			for (int screenStart = 0; screenStart < allLines.Count; screenStart += visibleLines)
+			{
+				int count = Math.Min(visibleLines, allLines.Count - screenStart);
+				var screenLines = allLines.GetRange(screenStart, count);
+				double screenStartSec = screenLines[0].Start;
+				double screenEndSec = screenLines[count - 1].End + 0.25;
+				if (screenStart + count < allLines.Count)
+				{
+					screenEndSec = Math.Min(screenEndSec, allLines[screenStart + count].Start);
+				}
+				if (screenEndSec <= screenStartSec + 0.02) continue;
+
+				int totalH = count * lineHeight;
+				int topLineY = centerY - totalH / 2 + lineHeight / 2;
+				string stScreen = FormatAssTimeSpan(TimeSpan.FromSeconds(screenStartSec));
+				string etScreen = FormatAssTimeSpan(TimeSpan.FromSeconds(screenEndSec));
+
+				// Layer 0: 3 行独立圆角深紫纱条底板同时显示
+				if (settings.SubtitleScrollPanelEnabled)
+				{
+					for (int li = 0; li < count; li++)
+					{
+						var line = screenLines[li];
+						int ly = topLineY + li * lineHeight;
+						int bw = (int)Math.Round(line.FullWidth) + padX * 2;
+						int bh = fontSize + padY * 2;
+						int bx = centerX - bw / 2;
+						int by = ly - bh / 2;
+						string rectPath = BuildRoundedRectDrawing(bw, bh, 14);
+						sb.AppendLine($"Dialogue: 0,{stScreen},{etScreen},Default,,0,0,0,,{{\\an7\\pos({bx},{by})\\p1\\1a{barAlpha}\\1c{barBgr}\\bord0\\shad0}}{rectPath}{{\\p0}}");
+					}
+				}
+
+				// Layer 1: 3 行清晰白字同时稳定显示
+				for (int li = 0; li < count; li++)
+				{
+					var line = screenLines[li];
+					int ly = topLineY + li * lineHeight;
+					int lx = (int)Math.Round(centerX - line.FullWidth / 2f);
+					sb.AppendLine($"Dialogue: 1,{stScreen},{etScreen},Default,,0,0,0,,{{\\an4\\pos({lx},{ly})\\1c{normalBgr}}}{SanitizeAssText(line.FullText)}");
+				}
+
+				// Layer 2 & 3: 纤细黑金笔按语音节奏逐行逐词平滑滑过
+				if (settings.SubtitleCursorStyle > 0)
+				{
+					for (int li = 0; li < count; li++)
+					{
+						var line = screenLines[li];
+						int ly = topLineY + li * lineHeight;
+						int lineLeft = (int)Math.Round(centerX - line.FullWidth / 2f);
+						string prefix = "";
+						int prevX = lineLeft;
+
+						for (int wi = 0; wi < line.Words.Count; wi++)
+						{
+							var wd = line.Words[wi];
+							double ws = wd.Start;
+							double we = (wi + 1 < line.Words.Count)
+								? Math.Max(wd.End, line.Words[wi + 1].Start)
+								: ((li + 1 < count) ? Math.Max(wd.End, screenLines[li + 1].Start) : screenEndSec);
+							if (we <= ws + 0.01) continue;
+
+							prefix = wi > 0 ? prefix + " " + wd.Text : wd.Text;
+							int nextX = lineLeft + (int)Math.Round(MeasureAssTextWidth(g, font, prefix));
+							int penY = ly + (int)(fontSize * 0.20);
+							EmitAssCursorMove(sb, ws, we, prevX, penY, nextX, penY, settings.SubtitleCursorStyle, fontSize);
+							prevX = nextX;
+						}
+					}
+				}
+			}
+		}
+
+		/// <summary>
+		/// Mode 8: 三行黑边·红带累计推进 (1:1 复刻 15 号视频：已读行保留满幅鲜红矩形底带，当前行按词从左向右铺满)
+		/// </summary>
+		private static void EmitThreeLineRedRibbonSubtitles(
+			StringBuilder sb,
+			List<ScrollCue> cues,
+			List<WordTiming> timings,
+			ScriptBatchSettings settings,
+			int canvasW,
+			int canvasH,
+			string fontName,
+			int fontSize)
+		{
+			FontStyle fStyle = (settings.SubtitleBold ? FontStyle.Bold : FontStyle.Regular) | (settings.SubtitleItalic ? FontStyle.Italic : FontStyle.Regular);
+			using var bmp = new Bitmap(16, 16);
+			using var g = Graphics.FromImage(bmp);
+			using var font = new Font(fontName, fontSize, fStyle, GraphicsUnit.Pixel);
+
+			float maxLineW = canvasW * 0.84f;
+			var allLines = BuildTimedLines(cues, timings, g, font, maxLineW);
+			if (allLines.Count == 0) return;
+
+			int visibleLines = Math.Max(1, Math.Min(3, settings.SubtitleVisibleLines));
+			int lineHeight = (int)Math.Round(fontSize * 1.24);
+			int centerY = (int)Math.Round(canvasH * Math.Max(0.20, Math.Min(0.86, settings.SubtitleVerticalPercent / 100.0)));
+			int centerX = canvasW / 2 + settings.SubtitleOffsetX;
+			int padX = Math.Max(12, (int)Math.Round(fontSize * 0.20));
+			int padY = Math.Max(4, (int)Math.Round(fontSize * 0.10));
+
+			string ribbonBgr = ScriptBatchSettings.ToAssInlineBgr(settings.SubtitleHighlightBoxColorHex, Color.FromArgb(224, 27, 36));
+			string ribbonAlpha = ScriptBatchSettings.ToAssInlineAlpha(settings.SubtitleHighlightBoxOpacity);
+
+			for (int screenStart = 0; screenStart < allLines.Count; screenStart += visibleLines)
+			{
+				int count = Math.Min(visibleLines, allLines.Count - screenStart);
+				var screenLines = allLines.GetRange(screenStart, count);
+				double screenStartSec = screenLines[0].Start;
+				double screenEndSec = screenLines[count - 1].End + 0.22;
+				if (screenStart + count < allLines.Count)
+				{
+					screenEndSec = Math.Min(screenEndSec, allLines[screenStart + count].Start);
+				}
+				if (screenEndSec <= screenStartSec + 0.02) continue;
+
+				int totalH = count * lineHeight;
+				int topLineY = centerY - totalH / 2 + lineHeight / 2;
+				string stScreen = FormatAssTimeSpan(TimeSpan.FromSeconds(screenStartSec));
+				string etScreen = FormatAssTimeSpan(TimeSpan.FromSeconds(screenEndSec));
+
+				// Layer 1: 本屏所有行同时稳定显示，纯白粗斜体 + 纯黑厚描边
+				for (int li = 0; li < count; li++)
+				{
+					var line = screenLines[li];
+					int ly = topLineY + li * lineHeight;
+					sb.AppendLine($"Dialogue: 1,{stScreen},{etScreen},Default,,0,0,0,,{{\\an5\\pos({centerX},{ly})}}{SanitizeAssText(line.FullText)}");
+				}
+
+				// Layer 0: 鲜红矩形底带随语音累计推进 —— 读完的行一直保留整行红底直到切屏！
+				if (settings.SubtitleHighlightBoxEnabled)
+				{
+					for (int li = 0; li < count; li++)
+					{
+						var line = screenLines[li];
+						int ly = topLineY + li * lineHeight;
+						int lineLeft = (int)Math.Round(centerX - line.FullWidth / 2f);
+						string covered = "";
+
+						for (int wi = 0; wi < line.Words.Count; wi++)
+						{
+							var wd = line.Words[wi];
+							covered = wi > 0 ? covered + " " + wd.Text : wd.Text;
+							double ws = wd.Start;
+							// 最后一个词的满幅红底一直持续到本屏结束 (screenEndSec)，实现累计铺满！
+							double we = (wi + 1 < line.Words.Count)
+								? Math.Max(wd.End, line.Words[wi + 1].Start)
+								: screenEndSec;
+							if (we <= ws + 0.01) continue;
+
+							int covW = (int)Math.Round(MeasureAssTextWidth(g, font, covered)) + padX * 2;
+							int ribH = fontSize + padY * 2;
+							int rx = lineLeft - padX;
+							int ry = ly - ribH / 2;
+							string rectPath = BuildRoundedRectDrawing(covW, ribH, 2);
+							string stR = FormatAssTimeSpan(TimeSpan.FromSeconds(ws));
+							string etR = FormatAssTimeSpan(TimeSpan.FromSeconds(we));
+							sb.AppendLine($"Dialogue: 0,{stR},{etR},Default,,0,0,0,,{{\\an7\\pos({rx},{ry})\\p1\\1a{ribbonAlpha}\\1c{ribbonBgr}\\bord0\\shad0}}{rectPath}{{\\p0}}");
+						}
+					}
+				}
+			}
 		}
 
 		private sealed class WordTiming

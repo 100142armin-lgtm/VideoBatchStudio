@@ -281,14 +281,87 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 
 				string fontFamilyName = SubtitlePresetCatalog.ResolveInstalledFont(_preset.FontFamily);
+				FontStyle fontStyle = (_preset.Bold ? FontStyle.Bold : FontStyle.Regular) | (_preset.Italic ? FontStyle.Italic : FontStyle.Regular);
 				Color textCol = _preset.PreviewTextColor;
 				Color strokeCol = _preset.PreviewStrokeColor;
 				Color shadowCol = _preset.PreviewShadowColor;
 				float strokeW = _preset.OutlineWidth > 0 ? Math.Max(1.8f, _preset.OutlineWidth * 0.55f) : 0f;
 
-				if (_preset.DisplayMode == 5)
+				if (_preset.DisplayMode == 6)
 				{
-					using var font = new Font(fontFamilyName, 14.5f, _preset.Bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+					// 白字粉边·红花游标跟读 (60K)
+					float fontSize = 14.5f;
+					using var font = new Font(fontFamilyName, fontSize, fontStyle, GraphicsUnit.Pixel);
+					string l1 = "Nos dias dezesseis,";
+					string l2a = "dezessete ";
+					string l2b = "e";
+					float lineH = fontSize * 1.32f;
+					float y1 = h * 0.43f;
+					float y2 = y1 + lineH;
+					DrawOutlinedCenteredLine(g, l1, font, w / 2f, y1, textCol, strokeCol, strokeW, shadowCol);
+					float w2a = g.MeasureString(l2a, font).Width;
+					float w2b = g.MeasureString(l2b, font).Width;
+					float l2X = (w - (w2a + w2b)) / 2f;
+					DrawOutlinedWordAt(g, l2a, font, l2X, y2, textCol, strokeCol, strokeW, shadowCol);
+					DrawOutlinedWordAt(g, l2b, font, l2X + w2a - 2f, y2, _preset.PreviewHighlightTextColor, strokeCol, strokeW, shadowCol);
+					DrawMiniCursor(g, l2X + w2a + w2b + 2f, y2 + fontSize * 0.42f, _preset.CursorStyle);
+				}
+				else if (_preset.DisplayMode == 7)
+				{
+					// 暗紫纱条·金笔划词跟读 (207K)
+					float fontSize = 12.2f;
+					using var font = new Font(fontFamilyName, fontSize, fontStyle, GraphicsUnit.Pixel);
+					string[] lines = { "Nos dias 16,", "17 e 18", "de novembro, a" };
+					float lineH = fontSize * 1.54f;
+					float startY = h * 0.34f;
+					Color barBase = ScriptBatchSettings.ParseToColor(_preset.ScrollPanelColorHex, Color.FromArgb(46, 30, 66));
+					int barAlpha = Math.Max(30, Math.Min(245, (int)Math.Round(_preset.ScrollPanelOpacity * 2.55)));
+					for (int i = 0; i < lines.Length; i++)
+					{
+						float ly = startY + i * lineH;
+						float lw = g.MeasureString(lines[i], font).Width;
+						if (_preset.ScrollPanelEnabled)
+						{
+							var barRect = new RectangleF((w - lw) / 2f - 10f, ly - 2f, lw + 20f, fontSize + 6f);
+							using var barBrush = new SolidBrush(Color.FromArgb(barAlpha, barBase));
+							using var barPath = GetRoundedRectPath(barRect, 5f);
+							g.FillPath(barBrush, barPath);
+						}
+						DrawOutlinedCenteredLine(g, lines[i], font, w / 2f, ly, textCol, strokeCol, strokeW * 0.7f, shadowCol);
+						if (i == lines.Length - 1)
+						{
+							float lx = (w - lw) / 2f;
+							DrawMiniCursor(g, lx + lw * 0.42f, ly + fontSize * 0.65f, _preset.CursorStyle);
+						}
+					}
+				}
+				else if (_preset.DisplayMode == 8)
+				{
+					// 三行黑边·红带累计推进 (15号：第1行满红 + 第2行推进中)
+					float fontSize = 12.5f;
+					using var font = new Font(fontFamilyName, fontSize, fontStyle, GraphicsUnit.Pixel);
+					string[] lines = { "Que o Senhor", "cure as feridas", "do teu coração e" };
+					float lineH = fontSize * 1.34f;
+					float startY = h * 0.36f;
+					int boxAlpha = Math.Max(40, Math.Min(255, (int)Math.Round(_preset.HighlightBoxOpacity * 2.55)));
+					for (int i = 0; i < lines.Length; i++)
+					{
+						float ly = startY + i * lineH;
+						float lw = g.MeasureString(lines[i], font).Width;
+						if (i <= 1 && _preset.HighlightBoxEnabled)
+						{
+							float ribbonW = i == 0 ? lw : lw * 0.68f;
+							float lx = (w - lw) / 2f;
+							var ribRect = new RectangleF(lx - 4f, ly - 1f, ribbonW + 8f, fontSize + 3f);
+							using var ribBrush = new SolidBrush(Color.FromArgb(boxAlpha, _preset.PreviewHighlightBgColor));
+							g.FillRectangle(ribBrush, ribRect);
+						}
+						DrawOutlinedCenteredLine(g, lines[i], font, w / 2f, ly, textCol, strokeCol, strokeW, shadowCol);
+					}
+				}
+				else if (_preset.DisplayMode == 5)
+				{
+					using var font = new Font(fontFamilyName, 14.5f, fontStyle, GraphicsUnit.Pixel);
 					string first = "DIOS";
 					string rest = " TE BENDIGA";
 					float firstW = g.MeasureString(first, font).Width;
@@ -439,6 +512,61 @@ namespace VideoBatchMerger.ScriptBatch
 
 				using var brush = new SolidBrush(fillCol);
 				g.FillPath(brush, path);
+			}
+
+			private static void DrawMiniCursor(Graphics g, float cx, float cy, int cursorStyle)
+			{
+				if (cursorStyle == 1)
+				{
+					// 🌺 卡通大红花 + 绿茎绿叶 + 黑金花蕊
+					using var stemPen = new Pen(Color.FromArgb(46, 158, 67), 1.8f);
+					g.DrawLine(stemPen, cx - 1f, cy + 1f, cx - 8f, cy + 9f);
+					using var leafBrush = new SolidBrush(Color.FromArgb(52, 199, 89));
+					g.FillEllipse(leafBrush, cx - 8f, cy + 2f, 5f, 3.5f);
+					using var petalBrush = new SolidBrush(Color.FromArgb(230, 38, 32));
+					using var petalPen = new Pen(Color.FromArgb(26, 13, 13), 1f);
+					double[] degs = { -82, 12, 100, -168 };
+					foreach (double d in degs)
+					{
+						double rad = d * Math.PI / 180.0;
+						float px = cx + (float)(Math.Cos(rad) * 4.6);
+						float py = cy + (float)(Math.Sin(rad) * 4.6);
+						g.FillEllipse(petalBrush, px - 4.4f, py - 4.4f, 8.8f, 8.8f);
+						g.DrawEllipse(petalPen, px - 4.4f, py - 4.4f, 8.8f, 8.8f);
+					}
+					using var darkBrush = new SolidBrush(Color.FromArgb(26, 13, 13));
+					using var goldBrush = new SolidBrush(Color.FromArgb(255, 216, 51));
+					g.FillEllipse(darkBrush, cx - 2.6f, cy - 2.6f, 5.2f, 5.2f);
+					g.FillEllipse(goldBrush, cx - 1.8f, cy - 1.8f, 3.6f, 3.6f);
+					g.FillEllipse(darkBrush, cx - 0.9f, cy - 0.9f, 1.8f, 1.8f);
+				}
+				else if (cursorStyle == 2)
+				{
+					// 🖋️ 纤细斜执黑金荧光笔
+					var state = g.Save();
+					g.TranslateTransform(cx, cy);
+					g.RotateTransform(-45f);
+					using var goldBrush = new SolidBrush(Color.FromArgb(255, 224, 51));
+					g.FillPolygon(goldBrush, new[] { new PointF(0f, 0f), new PointF(5f, -1.8f), new PointF(5f, 1.8f) });
+					using var bodyBrush = new SolidBrush(Color.FromArgb(30, 27, 36));
+					using var rimPen = new Pen(Color.FromArgb(245, 197, 66), 1.1f);
+					g.FillRectangle(bodyBrush, 4.5f, -1.8f, 16f, 3.6f);
+					g.DrawRectangle(rimPen, 4.5f, -1.8f, 16f, 3.6f);
+					g.Restore(state);
+				}
+				else if (cursorStyle == 3)
+				{
+					// ✨ 圣光星芒游标
+					using var starBrush = new SolidBrush(Color.FromArgb(255, 232, 110));
+					PointF[] pts =
+					{
+						new PointF(cx, cy - 7f), new PointF(cx + 2f, cy - 2f),
+						new PointF(cx + 7f, cy), new PointF(cx + 2f, cy + 2f),
+						new PointF(cx, cy + 7f), new PointF(cx - 2f, cy + 2f),
+						new PointF(cx - 7f, cy), new PointF(cx - 2f, cy - 2f)
+					};
+					g.FillPolygon(starBrush, pts);
+				}
 			}
 
 			private static GraphicsPath GetRoundedRectPath(RectangleF rect, float radius)

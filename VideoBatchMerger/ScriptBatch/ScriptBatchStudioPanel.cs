@@ -1037,9 +1037,14 @@ namespace VideoBatchMerger.ScriptBatch
 				_isLoadingSettings = true;
 				try
 				{
-					if (_cboSubtitleMode != null) _cboSubtitleMode.SelectedIndex = Math.Min(5, Math.Max(0, sel.DisplayMode));
+					if (_cboSubtitleMode != null) _cboSubtitleMode.SelectedIndex = Math.Min(8, Math.Max(0, sel.DisplayMode));
 					if (_numSubtitleSize != null)
 						_numSubtitleSize.Value = Math.Max(_numSubtitleSize.Minimum, Math.Min(_numSubtitleSize.Maximum, sel.FontSize));
+					if (_chkSubtitleScrollPanel != null)
+					{
+						_chkSubtitleScrollPanel.Checked = sel.ScrollPanelEnabled;
+						_chkSubtitleScrollPanel.Visible = sel.DisplayMode == 4 || sel.DisplayMode == 7;
+					}
 				}
 				finally { _isLoadingSettings = false; }
 					_settings.Save();
@@ -1058,6 +1063,13 @@ namespace VideoBatchMerger.ScriptBatch
 					{
 						_numSubtitleSize.Value = Math.Max(_numSubtitleSize.Minimum, Math.Min(_numSubtitleSize.Maximum, _settings.SubtitleFontSize));
 						_chkSubtitleUppercase.Checked = _settings.SubtitleUppercase;
+						if (_cboSubtitleMode != null && _cboSubtitleMode.Items.Count > 0)
+							_cboSubtitleMode.SelectedIndex = Math.Max(0, Math.Min(_cboSubtitleMode.Items.Count - 1, _settings.SubtitleDisplayMode));
+						if (_chkSubtitleScrollPanel != null)
+						{
+							_chkSubtitleScrollPanel.Checked = _settings.SubtitleScrollPanelEnabled;
+							_chkSubtitleScrollPanel.Visible = _settings.SubtitleDisplayMode == 4 || _settings.SubtitleDisplayMode == 7;
+						}
 					}
 					finally { _isLoadingSettings = loading; }
 					UpdatePreview();
@@ -1089,12 +1101,15 @@ namespace VideoBatchMerger.ScriptBatch
 				"2. 动感回弹弹出",
 				"3. 逐词红底框高亮",
 				"4. 随语音逐行上滚",
-				"5. 明亮分句·重点词"
+				"5. 明亮分句·重点词",
+				"6. 逐字手写·游标跟读",
+				"7. 纱条滚动·金笔流光",
+				"8. 三行斜体·红带推进"
 			});
 			_cboSubtitleMode.SelectedIndexChanged += (_, _) =>
 			{
 				_settings.SubtitleDisplayMode = _cboSubtitleMode.SelectedIndex;
-				if (_chkSubtitleScrollPanel != null) _chkSubtitleScrollPanel.Visible = _settings.SubtitleDisplayMode == 4;
+				if (_chkSubtitleScrollPanel != null) _chkSubtitleScrollPanel.Visible = _settings.SubtitleDisplayMode == 4 || _settings.SubtitleDisplayMode == 7;
 				SaveSettings();
 				UpdatePreview();
 			};
@@ -1122,7 +1137,7 @@ namespace VideoBatchMerger.ScriptBatch
 				Checked = _settings.SubtitleScrollPanelEnabled,
 				ForeColor = TextPrimary,
 				AutoSize = true,
-				Visible = _settings.SubtitleDisplayMode == 4,
+				Visible = _settings.SubtitleDisplayMode == 4 || _settings.SubtitleDisplayMode == 7,
 				Margin = new Padding(0, 2, 0, 4)
 			};
 			_chkSubtitleScrollPanel.CheckedChanged += (_, _) => { SaveSettings(); UpdatePreview(); };
@@ -1828,11 +1843,11 @@ namespace VideoBatchMerger.ScriptBatch
 				}
 
 				_numSubtitleSize.Value = Math.Max(_numSubtitleSize.Minimum, Math.Min(_numSubtitleSize.Maximum, _settings.SubtitleFontSize));
-				_cboSubtitleMode.SelectedIndex = Math.Min(5, Math.Max(0, _settings.SubtitleDisplayMode));
+				_cboSubtitleMode.SelectedIndex = Math.Min(8, Math.Max(0, _settings.SubtitleDisplayMode));
 				_chkSubtitleUppercase.Checked = _settings.SubtitleUppercase;
 				_cboPreviewDuration.SelectedIndex = _settings.PreviewDurationSeconds == 8 ? 1 : _settings.PreviewDurationSeconds == 10 ? 2 : _settings.PreviewDurationSeconds == 0 ? 3 : 0;
 				_chkSubtitleScrollPanel.Checked = _settings.SubtitleScrollPanelEnabled;
-				_chkSubtitleScrollPanel.Visible = _settings.SubtitleDisplayMode == 4;
+				_chkSubtitleScrollPanel.Visible = _settings.SubtitleDisplayMode == 4 || _settings.SubtitleDisplayMode == 7;
 				_trkSubtitlePos.Value = Math.Max(15, Math.Min(88, _settings.SubtitleVerticalPercent));
 				_trkSubtitleX.Value = Math.Max(-350, Math.Min(350, _settings.SubtitleOffsetX));
 
@@ -2366,6 +2381,9 @@ namespace VideoBatchMerger.ScriptBatch
 					["subtitleOffsetX"] = _settings.SubtitleOffsetX,
 					["subtitleFontFamily"] = _settings.SubtitleFontFamily,
 					["subtitleBold"] = _settings.SubtitleBold,
+					["subtitleItalic"] = _settings.SubtitleItalic,
+					["subtitleCursorStyle"] = _settings.SubtitleCursorStyle,
+					["subtitleVisibleLines"] = Math.Max(1, Math.Min(3, _settings.SubtitleVisibleLines)),
 
 					["watermarkEnabled"] = _settings.WatermarkEnabled,
 					["watermarkType"] = _settings.WatermarkType,
@@ -4582,7 +4600,8 @@ namespace VideoBatchMerger.ScriptBatch
 
 				float previewFontSize = Math.Max(12f, _panel._settings.SubtitleFontSize * scale);
 				string fontName = string.IsNullOrWhiteSpace(_panel._settings.SubtitleFontFamily) ? "Arial" : _panel._settings.SubtitleFontFamily;
-				using var font = new Font(fontName, previewFontSize, _panel._settings.SubtitleBold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+				FontStyle previewFontStyle = (_panel._settings.SubtitleBold ? FontStyle.Bold : FontStyle.Regular) | (_panel._settings.SubtitleItalic ? FontStyle.Italic : FontStyle.Regular);
+				using var font = new Font(fontName, previewFontSize, previewFontStyle, GraphicsUnit.Pixel);
 
 				if (displayMode == 5)
 				{

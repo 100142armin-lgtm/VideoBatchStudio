@@ -146,9 +146,43 @@ namespace VideoBatchMerger.ScriptBatch
 			AddRow(text, "字体", font);
 			AddNumber(text, "字幕字号 px", 24, 160, settings.SubtitleFontSize, 0, value => settings.SubtitleFontSize = (int)value);
 			AddCheck(text, "文字加粗", settings.SubtitleBold, value => settings.SubtitleBold = value);
+			AddCheck(text, "文字斜体 (Italic)", settings.SubtitleItalic, value => settings.SubtitleItalic = value);
 			AddCheck(text, "字幕全部大写（仅改变显示，不改变配音）", settings.SubtitleUppercase, value => settings.SubtitleUppercase = value);
 			AddColor(text, "文字颜色", settings.SubtitleColorHex, color => settings.SubtitleColorHex = color);
 			AddNumber(text, "文字不透明度 %", 20, 100, settings.SubtitleTextOpacity, 0, value => settings.SubtitleTextOpacity = (int)value);
+
+			var motion = AddSection("动效、跟读游标与行数");
+			var modeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList,
+				BackColor = Color.FromArgb(29, 42, 64), ForeColor = Color.White, DropDownHeight = 360 };
+			modeCombo.Items.AddRange(new object[]
+			{
+				"0. 句级自然居中",
+				"1. 逐词高亮跳动",
+				"2. 动感回弹弹出",
+				"3. 逐词红底框高亮",
+				"4. 随语音逐行上滚",
+				"5. 明亮分句·重点词",
+				"6. 逐字手写·游标跟读",
+				"7. 纱条滚动·金笔流光",
+				"8. 三行斜体·红带推进"
+			});
+			modeCombo.SelectedIndex = Math.Max(0, Math.Min(modeCombo.Items.Count - 1, settings.SubtitleDisplayMode));
+			modeCombo.SelectedIndexChanged += (_, _) => { settings.SubtitleDisplayMode = modeCombo.SelectedIndex; Changed(); };
+			AddRow(motion, "显示模式", modeCombo);
+
+			var cursorCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList,
+				BackColor = Color.FromArgb(29, 42, 64), ForeColor = Color.White, DropDownHeight = 240 };
+			cursorCombo.Items.AddRange(new object[]
+			{
+				"无游标",
+				"🌺 红花彩蝶游标",
+				"🖋️ 黑金钢笔游标",
+				"✨ 圣光星芒游标"
+			});
+			cursorCombo.SelectedIndex = Math.Max(0, Math.Min(cursorCombo.Items.Count - 1, settings.SubtitleCursorStyle));
+			cursorCombo.SelectedIndexChanged += (_, _) => { settings.SubtitleCursorStyle = cursorCombo.SelectedIndex; Changed(); };
+			AddRow(motion, "跟读游标样式", cursorCombo);
+			AddNumber(motion, "同屏显示行数 (1~3 行)", 1, 3, Math.Max(1, Math.Min(3, settings.SubtitleVisibleLines)), 0, value => settings.SubtitleVisibleLines = (int)value);
 
 			var outline = AddSection("描边与阴影");
 			AddColor(outline, "描边颜色", settings.SubtitleStrokeColorHex, color => settings.SubtitleStrokeColorHex = color);
@@ -157,15 +191,15 @@ namespace VideoBatchMerger.ScriptBatch
 			AddNumber(outline, "阴影距离 px", 0, 10, (decimal)settings.SubtitleShadowDepth, 1, value => settings.SubtitleShadowDepth = (float)value);
 			AddNumber(outline, "柔光强度", 0, 15, settings.SubtitleGlowBlur, 0, value => settings.SubtitleGlowBlur = (int)value);
 
-			var highlight = AddSection("重点词与背景底板");
-			AddColor(highlight, "重点词颜色", settings.SubtitleHighlightTextColorHex, color => settings.SubtitleHighlightTextColorHex = color);
-			AddCheck(highlight, "逐词高亮底框", settings.SubtitleHighlightBoxEnabled, value => settings.SubtitleHighlightBoxEnabled = value);
-			AddColor(highlight, "高亮底框颜色", settings.SubtitleHighlightBoxColorHex, color => settings.SubtitleHighlightBoxColorHex = color);
-			AddNumber(highlight, "高亮底框不透明度 %", 10, 100, settings.SubtitleHighlightBoxOpacity, 0, value => settings.SubtitleHighlightBoxOpacity = (int)value);
+			var highlight = AddSection("重点词、推进红带与底板");
+			AddColor(highlight, "重点词 / 流光高亮色", settings.SubtitleHighlightTextColorHex, color => settings.SubtitleHighlightTextColorHex = color);
+			AddCheck(highlight, "逐词底框 / 推进红带开关", settings.SubtitleHighlightBoxEnabled, value => settings.SubtitleHighlightBoxEnabled = value);
+			AddColor(highlight, "高亮底框 / 推进红带颜色", settings.SubtitleHighlightBoxColorHex, color => settings.SubtitleHighlightBoxColorHex = color);
+			AddNumber(highlight, "底框 / 红带不透明度 %", 10, 100, settings.SubtitleHighlightBoxOpacity, 0, value => settings.SubtitleHighlightBoxOpacity = (int)value);
 			AddCheck(highlight, "整句底板", settings.SubtitleBorderStyle == 3, value => settings.SubtitleBorderStyle = value ? 3 : 1);
-			AddCheck(highlight, "上滚字幕底板", settings.SubtitleScrollPanelEnabled, value => settings.SubtitleScrollPanelEnabled = value);
-			AddColor(highlight, "整句 / 上滚底板颜色", settings.SubtitleScrollPanelColorHex, color => settings.SubtitleScrollPanelColorHex = color);
-			AddNumber(highlight, "底板不透明度 %", 10, 95, settings.SubtitleScrollPanelOpacity, 0, value => settings.SubtitleScrollPanelOpacity = (int)value);
+			AddCheck(highlight, "上滚底板 / 每行纱条开关", settings.SubtitleScrollPanelEnabled, value => settings.SubtitleScrollPanelEnabled = value);
+			AddColor(highlight, "底板 / 纱条颜色", settings.SubtitleScrollPanelColorHex, color => settings.SubtitleScrollPanelColorHex = color);
+			AddNumber(highlight, "底板 / 纱条不透明度 %", 10, 95, settings.SubtitleScrollPanelOpacity, 0, value => settings.SubtitleScrollPanelOpacity = (int)value);
 
 			_uiScale.SelectedIndexChanged += (_, _) => { _settings.SubtitleEditorUiScalePercent = scales[_uiScale.SelectedIndex]; ApplyReadableLayout(); _persist(); };
 			_autoScale.CheckedChanged += (_, _) => { _settings.SubtitleEditorAutoScale = _autoScale.Checked; ApplyReadableLayout(); _persist(); };

@@ -30,7 +30,10 @@ namespace VideoBatchMerger.ScriptBatch
 		public string FontFamily { get; set; } = "Arial Rounded MT Bold";
 		public int FontSize { get; set; } = 86;
 		public bool Bold { get; set; } = true;
-		public int DisplayMode { get; set; } = 0;      // 0: 句级自然居中, 1: 逐词卡拉OK高亮, 2: 动感回弹弹出, 3: 逐词底框高亮, 4: 随语音逐行上滚
+		public bool Italic { get; set; } = false;
+		public int DisplayMode { get; set; } = 0;      // 0: 居中, 1: 逐词高亮, 2: 回弹弹出, 3: 逐词底框高亮, 4: 逐行上滚, 5: 明亮分句, 6: 逐字手写游标跟读, 7: 纱条滚动金笔流光, 8: 三行斜体红带推进
+		public int CursorStyle { get; set; } = 0;      // 0: 无游标, 1: 红花彩蝶, 2: 黑金钢笔, 3: 圣光星芒
+		public int VisibleLines { get; set; } = 3;     // 同屏最大行数 (1~3)
 		public int BorderStyle { get; set; } = 1;      // 1: 描边阴影/立体, 3: 整句胶囊底框 (Box)
 
 		public string PrimaryColorHex { get; set; } = "#FFFFFF";
@@ -107,7 +110,10 @@ namespace VideoBatchMerger.ScriptBatch
 			settings.SubtitleFontFamily = SubtitlePresetCatalog.ResolveInstalledFont(FontFamily);
 			settings.SubtitleFontSize = FontSize;
 			settings.SubtitleBold = Bold;
+			settings.SubtitleItalic = Italic;
 			settings.SubtitleDisplayMode = DisplayMode;
+			settings.SubtitleCursorStyle = CursorStyle;
+			settings.SubtitleVisibleLines = Math.Max(1, Math.Min(3, VisibleLines));
 			settings.SubtitleBorderStyle = BorderStyle;
 
 			settings.SubtitleColorHex = ScriptBatchSettings.NormalizeToHtmlHex(PrimaryColorHex, Color.White);
@@ -184,8 +190,95 @@ namespace VideoBatchMerger.ScriptBatch
 		public static readonly List<SubtitlePreset> Presets = new List<SubtitlePreset>
 		{
 			// ==========================================
-			// 1. 爆款推荐 (1:1 复刻海外葡语/宗教/短视频爆款截图)
+			// 1. 爆款推荐 (1:1 复刻海外葡语/宗教/短视频爆款)
 			// ==========================================
+			new SubtitlePreset
+			{
+				Id = "viral_rose_flower_handwrite",
+				Name = "🌺 白字粉边·红花游标跟读",
+				Category = "爆款推荐",
+				TagText = "60K爆款 · 白字玫红边 + 黄字红花游标",
+				FontFamily = "Georgia",
+				FontSize = 88,
+				Bold = true,
+				Italic = true,
+				DisplayMode = 6,
+				CursorStyle = 1,
+				VisibleLines = 2,
+				BorderStyle = 1,
+				PrimaryColorHex = "#FFFFFF",
+				TextOpacity = 100,
+				OutlineColorHex = "#E01686",
+				OutlineWidth = 4.5f,
+				ShadowColorHex = "#990A58",
+				ShadowDepth = 0.0f,
+				GlowBlur = 1,
+				HighlightTextColorHex = "#FFE029",
+				HighlightBoxEnabled = false,
+				HighlightBoxColorHex = "#E01686",
+				HighlightBoxOpacity = 90,
+				ScrollPanelEnabled = false,
+				ScrollPanelColorHex = "#2E1E42",
+				ScrollPanelOpacity = 74
+			},
+			new SubtitlePreset
+			{
+				Id = "viral_purple_bar_gold_pen",
+				Name = "🖋️ 暗紫纱条·金笔划词跟读",
+				Category = "爆款推荐",
+				TagText = "207K爆款 · 3行圆角紫条 + 黑金笔划词",
+				FontFamily = "Georgia",
+				FontSize = 80,
+				Bold = true,
+				Italic = true,
+				DisplayMode = 7,
+				CursorStyle = 2,
+				VisibleLines = 3,
+				BorderStyle = 1,
+				PrimaryColorHex = "#FFFFFF",
+				TextOpacity = 100,
+				OutlineColorHex = "#1C0F2E",
+				OutlineWidth = 3.0f,
+				ShadowColorHex = "#0D0618",
+				ShadowDepth = 2.0f,
+				GlowBlur = 0,
+				HighlightTextColorHex = "#FFE033",
+				HighlightBoxEnabled = false,
+				HighlightBoxColorHex = "#2E1E42",
+				HighlightBoxOpacity = 90,
+				ScrollPanelEnabled = true,
+				ScrollPanelColorHex = "#2E1E42",
+				ScrollPanelOpacity = 74
+			},
+			new SubtitlePreset
+			{
+				Id = "viral_three_line_red_ribbon",
+				Name = "📕 三行黑边·红带累计推进",
+				Category = "爆款推荐",
+				TagText = "15号爆款 · 3行黑边斜体 + 鲜红底带累计铺满",
+				FontFamily = "Arial",
+				FontSize = 82,
+				Bold = true,
+				Italic = true,
+				DisplayMode = 8,
+				CursorStyle = 0,
+				VisibleLines = 3,
+				BorderStyle = 1,
+				PrimaryColorHex = "#FFFFFF",
+				TextOpacity = 100,
+				OutlineColorHex = "#000000",
+				OutlineWidth = 5.5f,
+				ShadowColorHex = "#000000",
+				ShadowDepth = 2.0f,
+				GlowBlur = 0,
+				HighlightTextColorHex = "#FFFFFF",
+				HighlightBoxEnabled = true,
+				HighlightBoxColorHex = "#E01B24",
+				HighlightBoxOpacity = 96,
+				ScrollPanelEnabled = false,
+				ScrollPanelColorHex = "#1A1A1A",
+				ScrollPanelOpacity = 60
+			},
 			new SubtitlePreset
 			{
 				Id = "viral_blue_red_yellow",
@@ -811,7 +904,10 @@ namespace VideoBatchMerger.ScriptBatch
 				FontFamily = settings.SubtitleFontFamily,
 				FontSize = settings.SubtitleFontSize,
 				Bold = settings.SubtitleBold,
+				Italic = settings.SubtitleItalic,
 				DisplayMode = settings.SubtitleDisplayMode,
+				CursorStyle = settings.SubtitleCursorStyle,
+				VisibleLines = Math.Max(1, Math.Min(3, settings.SubtitleVisibleLines)),
 				BorderStyle = settings.SubtitleBorderStyle,
 				PrimaryColorHex = settings.SubtitleColorHex,
 				TextOpacity = settings.SubtitleTextOpacity,

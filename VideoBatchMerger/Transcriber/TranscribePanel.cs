@@ -364,7 +364,7 @@ internal sealed class TranscribePanel : UserControl
 			BorderStyle = BorderStyle.None,
 			Font = new Font("Consolas", 9f)
 		};
-		_txtOnlineUrls.Text = "https://www.youtube.com/shorts/bqLBK7GuPCk\r\nhttps://www.tiktok.com/@lucia.gove/video/7617254633341308178";
+		_txtOnlineUrls.Text = string.Empty;
 		_txtOnlineUrls.TextChanged += (s, e) => UpdateInputCount();
 		AttachDragDrop(_txtOnlineUrls);
 

@@ -33,6 +33,9 @@ class PreviewStage {
             subtitleOffsetX: 0,
             subtitleFontFamily: "Arial",
             subtitleBold: true,
+            subtitleItalic: false,
+            subtitleCursorStyle: 0,
+            subtitleVisibleLines: 3,
 
             watermarkEnabled: true,
             watermarkType: 0, // 0: 文字, 1: 图片
@@ -288,8 +291,11 @@ class PreviewStage {
         const fontSize = Math.max(10, (this.state.subtitleFontSize || preset.fontsize || 86) * scale);
         const fontFamily = this.state.subtitleFontFamily || preset.font_family || 'Arial, -apple-system, sans-serif';
         const fontWeight = this.state.subtitleBold !== false ? 'bold' : 'normal';
+        const fontStyle = this.state.subtitleItalic ? 'italic' : 'normal';
+        const visibleLines = Math.max(1, Math.min(3, Number(this.state.subtitleVisibleLines || 3)));
+        const cursorStyle = Number(this.state.subtitleCursorStyle || 0);
 
-        ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+        ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px "${fontFamily}", ${fontFamily}, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
@@ -351,6 +357,216 @@ class PreviewStage {
         ctx.shadowOffsetX = Number(this.state.subtitleShadowDepth || 0) * scale;
         ctx.shadowOffsetY = Number(this.state.subtitleShadowDepth || 0) * scale;
         ctx.shadowBlur = Number(this.state.subtitleGlowBlur || 0) * scale;
+
+        const textAlpha = Math.max(0.2, Math.min(1, Number(this.state.subtitleTextOpacity || 100) / 100));
+
+        // ============================================================
+        // Mode 6: 白字粉边·红花游标跟读 (1:1 复刻 60K 绿水滴视频)
+        // ============================================================
+        if (displayMode === 6) {
+            const shownLines = lines.slice(0, visibleLines);
+            const totalChars = shownLines.reduce((acc, l) => acc + l.length, 0) || 1;
+            const cycleMs = 4200;
+            const t = (this.currentTimeMs % cycleMs) / cycleMs;
+            const revealProgress = Math.min(1, t / 0.78);
+            const fadeAlpha = t > 0.90 ? Math.max(0, 1 - (t - 0.90) / 0.10) : 1;
+            const revealedCount = Math.max(1, Math.floor(revealProgress * totalChars));
+            const mode6LineH = fontSize * 1.28;
+            const mode6TotalH = shownLines.length * mode6LineH;
+            const mode6StartY = subCenterY - mode6TotalH / 2 + mode6LineH / 2;
+
+            let charsLeft = revealedCount;
+            let tipX = subCenterX;
+            let tipY = mode6StartY;
+
+            ctx.save();
+            ctx.globalAlpha = textAlpha * fadeAlpha;
+            for (let li = 0; li < shownLines.length; li++) {
+                const fullLine = shownLines[li];
+                const ly = mode6StartY + li * mode6LineH;
+                const fullW = ctx.measureText(fullLine).width;
+                const startX = subCenterX - fullW / 2;
+                const take = Math.max(0, Math.min(fullLine.length, charsLeft));
+                charsLeft -= take;
+                if (take <= 0) continue;
+
+                const part = fullLine.slice(0, take);
+                const isActiveLine = charsLeft === 0 && revealProgress < 1;
+                // 已读词纯白，当前整个正在读的词亮金黄
+                let settledPart = part;
+                let activeWordPart = '';
+                if (isActiveLine) {
+                    const lastSpace = part.lastIndexOf(' ');
+                    settledPart = lastSpace >= 0 ? part.slice(0, lastSpace + 1) : '';
+                    activeWordPart = lastSpace >= 0 ? part.slice(lastSpace + 1) : part;
+                }
+
+                ctx.textAlign = 'left';
+                if (preset.use_stroke && preset.border_width > 0) {
+                    ctx.strokeStyle = preset.color_outline || '#E01686';
+                    ctx.lineWidth = Math.max(2, preset.border_width * scale * 2);
+                    ctx.lineJoin = 'round';
+                    ctx.strokeText(part, startX, ly);
+                }
+                if (settledPart) {
+                    ctx.fillStyle = preset.color_text || '#FFFFFF';
+                    ctx.fillText(settledPart, startX, ly);
+                }
+                if (activeWordPart) {
+                    const settledW = settledPart ? ctx.measureText(settledPart).width : 0;
+                    ctx.fillStyle = this.state.subtitleHighlightTextColor || '#FFE029';
+                    ctx.fillText(activeWordPart, startX + settledW, ly);
+                }
+                tipX = startX + ctx.measureText(part).width;
+                tipY = ly - fontSize * 0.08;
+            }
+            if (cursorStyle > 0 && fadeAlpha > 0.1) {
+                this.drawFollowerCursor(ctx, tipX, tipY, fontSize, cursorStyle, scale);
+            }
+            ctx.restore();
+            ctx.restore();
+            return;
+        }
+
+        // ============================================================
+        // Mode 7: 暗紫纱条·金笔划词跟读 (1:1 复刻 207K 金色 17 号视频)
+        // ============================================================
+        if (displayMode === 7) {
+            const shownLines = lines.slice(0, visibleLines);
+            const barLineH = fontSize * 1.40;
+            const mode7TotalH = shownLines.length * barLineH;
+            const mode7StartY = subCenterY - mode7TotalH / 2 + barLineH / 2;
+            const panelEnabled = this.state.subtitleScrollPanelEnabled !== false;
+            const panelAlpha = Math.max(0.1, Math.min(0.95, Number(this.state.subtitlePanelOpacity ?? 74) / 100));
+            const panelColor = this.state.subtitlePanelColor || '#2E1E42';
+
+            // 计算黑金笔当前扫过哪一行、哪一位置
+            const totalChars = shownLines.reduce((acc, l) => acc + Math.max(1, l.length), 0) || 1;
+            const cycleMs = 4500;
+            const prog = (this.currentTimeMs % cycleMs) / cycleMs;
+            let penChars = Math.floor(prog * totalChars);
+            let tipX = subCenterX;
+            let tipY = mode7StartY;
+
+            for (let li = 0; li < shownLines.length; li++) {
+                const fullLine = shownLines[li];
+                const ly = mode7StartY + li * barLineH;
+                const fullW = ctx.measureText(fullLine).width;
+                const startX = subCenterX - fullW / 2;
+
+                if (panelEnabled) {
+                    const padX = 26 * scale;
+                    const padY = 10 * scale;
+                    const barW = fullW + padX * 2;
+                    const barH = fontSize + padY * 2;
+                    ctx.save();
+                    ctx.shadowColor = 'transparent';
+                    ctx.globalAlpha = panelAlpha;
+                    ctx.fillStyle = panelColor;
+                    this.drawRoundedRect(ctx, subCenterX - barW / 2, ly - barH / 2, barW, barH, 14 * scale);
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                ctx.textAlign = 'left';
+                if (preset.use_stroke && preset.border_width > 0) {
+                    ctx.strokeStyle = preset.color_outline || '#1C0F2E';
+                    ctx.lineWidth = Math.max(1.5, preset.border_width * scale * 2);
+                    ctx.lineJoin = 'round';
+                    ctx.strokeText(fullLine, startX, ly);
+                }
+                ctx.save();
+                ctx.globalAlpha = textAlpha;
+                ctx.fillStyle = preset.color_text || '#FFFFFF';
+                ctx.fillText(fullLine, startX, ly);
+                ctx.restore();
+
+                if (penChars >= 0 && penChars <= fullLine.length) {
+                    const sub = fullLine.slice(0, penChars);
+                    tipX = startX + ctx.measureText(sub).width;
+                    tipY = ly + fontSize * 0.20;
+                    penChars = -1;
+                } else if (penChars > fullLine.length) {
+                    penChars -= fullLine.length;
+                }
+            }
+
+            if (cursorStyle > 0) {
+                this.drawFollowerCursor(ctx, tipX, tipY, fontSize, cursorStyle, scale);
+            }
+            ctx.restore();
+            return;
+        }
+
+        // ============================================================
+        // Mode 8: 三行黑边·红带累计推进 (1:1 复刻 15 号粉色数字视频)
+        // ============================================================
+        if (displayMode === 8) {
+            const shownLines = lines.slice(0, visibleLines);
+            const mode8LineH = fontSize * 1.24;
+            const mode8TotalH = shownLines.length * mode8LineH;
+            const mode8StartY = subCenterY - mode8TotalH / 2 + mode8LineH / 2;
+
+            const lineWordCounts = shownLines.map(l => Math.max(1, l.trim().split(/\s+/).length));
+            const totalWords = lineWordCounts.reduce((a, b) => a + b, 0) || 1;
+            const currentGlobalWord = Math.floor(this.currentTimeMs / 420) % totalWords;
+            let activeLineIdx = 0;
+            let activeWordInLine = 0;
+            let acc = 0;
+            for (let li = 0; li < lineWordCounts.length; li++) {
+                if (currentGlobalWord < acc + lineWordCounts[li]) {
+                    activeLineIdx = li;
+                    activeWordInLine = currentGlobalWord - acc;
+                    break;
+                }
+                acc += lineWordCounts[li];
+            }
+
+            const ribbonEnabled = this.state.subtitleHighlightBoxEnabled !== false;
+            const ribbonColor = this.state.subtitleHighlightBgColor || '#E01B24';
+            const ribbonAlpha = Math.max(0.15, Math.min(1, Number(this.state.subtitleHighlightBoxOpacity || 96) / 100));
+
+            for (let li = 0; li < shownLines.length; li++) {
+                const line = shownLines[li];
+                const ly = mode8StartY + li * mode8LineH;
+                const lineW = ctx.measureText(line).width;
+                const startX = subCenterX - lineW / 2;
+
+                if (ribbonEnabled && li <= activeLineIdx) {
+                    let coveredW = lineW;
+                    if (li === activeLineIdx) {
+                        const lineWords = line.trim().split(/\s+/);
+                        const coveredPrefix = lineWords.slice(0, activeWordInLine + 1).join(' ');
+                        coveredW = ctx.measureText(coveredPrefix).width;
+                    }
+                    const padX = 12 * scale;
+                    const padY = 4 * scale;
+                    ctx.save();
+                    ctx.shadowColor = 'transparent';
+                    ctx.globalAlpha = ribbonAlpha;
+                    ctx.fillStyle = ribbonColor;
+                    this.drawRoundedRect(ctx, startX - padX, ly - fontSize / 2 - padY, coveredW + padX * 2, fontSize + padY * 2, 2 * scale);
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                ctx.textAlign = 'center';
+                if (preset.use_stroke && preset.border_width > 0) {
+                    ctx.strokeStyle = preset.color_outline || '#000000';
+                    ctx.lineWidth = Math.max(2, preset.border_width * scale * 2);
+                    ctx.lineJoin = 'round';
+                    ctx.strokeText(line, subCenterX, ly);
+                }
+                ctx.save();
+                ctx.globalAlpha = textAlpha;
+                ctx.fillStyle = preset.color_text || '#FFFFFF';
+                ctx.fillText(line, subCenterX, ly);
+                ctx.restore();
+            }
+
+            ctx.restore();
+            return;
+        }
 
         let globalWordIndex = 0;
         const wordCount = text.trim().split(/\s+/).length;
@@ -443,6 +659,102 @@ class PreviewStage {
             ctx.restore();
         });
 
+        ctx.restore();
+    }
+
+    drawFollowerCursor(ctx, x, y, fontSize, cursorStyle, scale) {
+        ctx.save();
+        ctx.shadowColor = 'transparent';
+
+        if (cursorStyle === 1) {
+            // 🌺 1:1 大号卡通四瓣红花 + 绿茎绿叶 + 黑金花蕊
+            const u = Math.max(16, fontSize * 0.62);
+            // 1. 绿茎 + 绿叶
+            ctx.strokeStyle = '#184A14';
+            ctx.lineWidth = Math.max(2, u * 0.16);
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(x - u * 0.12, y + u * 0.18);
+            ctx.lineTo(x - u * 0.88, y + u * 1.05);
+            ctx.stroke();
+            ctx.strokeStyle = '#2E9E43';
+            ctx.lineWidth = Math.max(1.5, u * 0.10);
+            ctx.stroke();
+
+            ctx.fillStyle = '#34C759';
+            ctx.strokeStyle = '#144D1E';
+            ctx.lineWidth = Math.max(1.5, 2 * scale);
+            ctx.beginPath();
+            ctx.ellipse(x - u * 0.56, y + u * 0.52, u * 0.28, u * 0.15, -0.9, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // 2. 四片饱满鲜红花瓣 + 深黑描边
+            const pr = u * 0.46;
+            const po = u * 0.44;
+            const angles = [-82, 12, 100, -168];
+            ctx.fillStyle = '#E62620';
+            ctx.strokeStyle = '#1A0D0D';
+            ctx.lineWidth = Math.max(1.8, 3 * scale);
+            for (const deg of angles) {
+                const rad = (deg * Math.PI) / 180;
+                ctx.beginPath();
+                ctx.arc(x + Math.cos(rad) * po, y + Math.sin(rad) * po, pr, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            }
+
+            // 3. 三层同心花蕊 (黑 -> 金黄 -> 黑)
+            ctx.fillStyle = '#1A0D0D';
+            ctx.beginPath();
+            ctx.arc(x, y, u * 0.24, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#FFD833';
+            ctx.beginPath();
+            ctx.arc(x, y, u * 0.17, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#1A0D0D';
+            ctx.beginPath();
+            ctx.arc(x, y, u * 0.09, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (cursorStyle === 2) {
+            // 🖋️ 1:1 纤细斜执黑金荧光笔 (笔尖在 (x, y)，向右上 45° 纤细延伸)
+            const u = Math.max(20, fontSize * 0.88);
+            ctx.translate(x, y);
+            ctx.rotate(-Math.PI / 4);
+            // 笔尖发光金黄
+            ctx.fillStyle = '#FFE033';
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(u * 0.34, -u * 0.11);
+            ctx.lineTo(u * 0.34, u * 0.11);
+            ctx.closePath();
+            ctx.fill();
+            // 纤细黑色笔杆 + 金色细边框
+            ctx.fillStyle = '#1E1B24';
+            ctx.strokeStyle = '#F5C542';
+            ctx.lineWidth = Math.max(1.5, 2.5 * scale);
+            this.drawRoundedRect(ctx, u * 0.30, -u * 0.11, u * 1.65, u * 0.22, u * 0.10);
+            ctx.fill();
+            ctx.stroke();
+        } else if (cursorStyle === 3) {
+            // ✨ 圣光四角星芒
+            const s = Math.max(14, fontSize * 0.48);
+            ctx.fillStyle = '#FFE866';
+            const outer = s * 0.78;
+            const inner = s * 0.22;
+            ctx.beginPath();
+            for (let i = 0; i < 8; i++) {
+                const rad = i % 2 === 0 ? outer : inner;
+                const ang = (i * Math.PI) / 4;
+                const px = x + Math.cos(ang) * rad;
+                const py = y + Math.sin(ang) * rad;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
         ctx.restore();
     }
 

@@ -110,7 +110,10 @@ namespace VideoBatchMerger.ScriptBatch
 		public string SubtitleFontFamily { get; set; } = "Arial Rounded MT Bold";
 		public int SubtitleFontSize { get; set; } = 86; // 36 ~ 140 px 连续可调
 		public bool SubtitleBold { get; set; } = true;
+		public bool SubtitleItalic { get; set; } = false;
 		public bool SubtitleUppercase { get; set; } = false;
+		public int SubtitleCursorStyle { get; set; } = 0; // 0: 无游标, 1: 红花彩蝶, 2: 黑金钢笔, 3: 圣光星芒
+		public int SubtitleVisibleLines { get; set; } = 3; // 同屏最大行数 (1 ~ 3)
 		public string SubtitleStyleId { get; set; } = "viral_blue_red_yellow";
 		public string SubtitleColorHex { get; set; } = "#FFFFFF"; // 主文字颜色 (#RRGGBB 或 &H00BBGGRR)
 		public int SubtitleTextOpacity { get; set; } = 100; // 主文字不透明度 20% ~ 100%
@@ -320,6 +323,8 @@ namespace VideoBatchMerger.ScriptBatch
 						if (loaded.SubtitleTextOpacity <= 0) loaded.SubtitleTextOpacity = 100;
 						if (loaded.SubtitleHighlightBoxOpacity <= 0) loaded.SubtitleHighlightBoxOpacity = 95;
 						if (loaded.SubtitleScrollPanelOpacity <= 0) loaded.SubtitleScrollPanelOpacity = 62;
+						if (loaded.SubtitleVisibleLines < 1 || loaded.SubtitleVisibleLines > 3) loaded.SubtitleVisibleLines = 3;
+						if (loaded.SubtitleCursorStyle < 0 || loaded.SubtitleCursorStyle > 3) loaded.SubtitleCursorStyle = 0;
 						if (string.IsNullOrWhiteSpace(loaded.SubtitleFontFamily)) loaded.SubtitleFontFamily = "Arial Rounded MT Bold";
 						if (string.IsNullOrWhiteSpace(loaded.WatermarkFontFamily)) loaded.WatermarkFontFamily = "Arial";
 						if (loaded.ScriptTitlePlan == null) loaded.ScriptTitlePlan = new ScriptBatchSettings().ScriptTitlePlan;

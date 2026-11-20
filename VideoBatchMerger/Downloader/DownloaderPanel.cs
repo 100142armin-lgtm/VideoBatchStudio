@@ -483,9 +483,9 @@ internal sealed class DownloaderPanel : UserControl
 
 		_urlCountBadge = new Label
 		{
-			Text = "5 个示例链接",
+			Text = "0 个待下载链接",
 			Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-			ForeColor = EmeraldNeon,
+			ForeColor = TextMuted,
 			BackColor = Color.FromArgb(20, 45, 40),
 			Padding = new Padding(6, 2, 6, 2),
 			Location = new Point(200, -2),
@@ -518,8 +518,8 @@ internal sealed class DownloaderPanel : UserControl
 			BorderStyle = BorderStyle.FixedSingle,
 			Font = new Font("Consolas", 9f)
 		};
-		_txtUrls.Text = "https://www.facebook.com/reel/1116404280831830\r\nhttps://www.youtube.com/watch?v=XqJMIE6_9gY\r\nhttps://www.youtube.com/shorts/bqLBK7GuPCk\r\nhttps://www.tiktok.com/@lucia.gove/video/7617254633341308178\r\nhttps://drive.google.com/file/d/1msP8BcsLRbFe5G8b67roWlkJTYN5fIoL/view";
-		_hasDefaultSampleUrls = true;
+		_txtUrls.Text = string.Empty;
+		_hasDefaultSampleUrls = false;
 		_txtUrls.TextChanged += (s, e) =>
 		{
 			int count = GetUrlsFromInput().Length;
@@ -1276,6 +1276,8 @@ internal sealed class DownloaderPanel : UserControl
 		return Encoding.UTF8.GetString(bytes).TrimEnd('\0');
 	}
 
+	private const uint MaxSafeClipboardBytes = 8 * 1024 * 1024; // 8 MB 上限，防止超大剪贴板对象导致内存耗尽或正则卡死
+
 	private static byte[] TryReadRawClipboardBytes(string formatName)
 	{
 		uint fmtId = RegisterClipboardFormat(formatName);
@@ -1291,9 +1293,10 @@ internal sealed class DownloaderPanel : UserControl
 			if (hGlobal == IntPtr.Zero)
 				return null;
 
-			uint size = (uint)GlobalSize(hGlobal);
-			if (size == 0)
+			ulong rawSize = GlobalSize(hGlobal).ToUInt64();
+			if (rawSize == 0 || rawSize > MaxSafeClipboardBytes)
 				return null;
+			uint size = (uint)rawSize;
 
 			IntPtr ptr = GlobalLock(hGlobal);
 			if (ptr == IntPtr.Zero)
@@ -1331,26 +1334,31 @@ internal sealed class DownloaderPanel : UserControl
 				object raw = dataObj.GetData(format);
 				if (raw is MemoryStream ms)
 				{
+					if (ms.Length > MaxSafeClipboardBytes) return results;
 					bytes = ms.ToArray();
 				}
 				else if (raw is Stream stream && stream.CanRead)
 				{
+					if (stream.CanSeek && stream.Length > MaxSafeClipboardBytes) return results;
 					using var copy = new MemoryStream();
 					stream.CopyTo(copy);
+					if (copy.Length > MaxSafeClipboardBytes) return results;
 					bytes = copy.ToArray();
 				}
 				else if (raw is byte[] arr)
 				{
+					if (arr.Length > MaxSafeClipboardBytes) return results;
 					bytes = arr;
 				}
 				else if (raw is string str)
 				{
-					results.Add(str);
+					if (str.Length <= MaxSafeClipboardBytes)
+						results.Add(str);
 					return results;
 				}
 			}
 
-			if (bytes != null && bytes.Length > 0)
+			if (bytes != null && bytes.Length > 0 && bytes.Length <= MaxSafeClipboardBytes)
 			{
 				results.Add(Encoding.UTF8.GetString(bytes));
 				// Chromium Web Custom MIME Data Format 使用 Pickle UTF-16LE 存储 Google Sheets 内部剪贴板 JSON
