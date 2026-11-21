@@ -142,7 +142,7 @@ public sealed class DownloadEngine
 		{
 			return ("Google Drive", "云端文件");
 		}
-		if (lower.Contains("instagram.com"))
+		if (lower.Contains("instagram.com") || lower.Contains("instagr.am"))
 		{
 			if (lower.Contains("/reel/")) return ("Instagram", "Reel短视频");
 			return ("Instagram", "帖子视频");
@@ -213,6 +213,8 @@ public sealed class DownloadEngine
 				StandardOutputEncoding = Encoding.UTF8,
 				StandardErrorEncoding = Encoding.UTF8
 			};
+			psi.EnvironmentVariables["PYTHONUTF8"] = "1";
+			psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
 
 			using var proc = new Process { StartInfo = psi };
 			proc.Start();
@@ -352,6 +354,8 @@ public sealed class DownloadEngine
 			StandardOutputEncoding = Encoding.UTF8,
 			StandardErrorEncoding = Encoding.UTF8
 		};
+		psi.EnvironmentVariables["PYTHONUTF8"] = "1";
+		psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
 
 		using var proc = new Process { StartInfo = psi };
 		string detectedFilePath = string.Empty;
@@ -554,9 +558,12 @@ public sealed class DownloadEngine
 					return false;
 				}
 
-				// 策略 A: 提取现代 Google Drive 下载表单 (action + hidden inputs)
+				// 策略 A: 提取现代 Google Drive 下载表单 (action + hidden inputs)，并严格校验仅允许 Google 官方受信任 HTTPS 域名，防止 SSRF
 				var formMatch = Regex.Match(html, @"<form[^>]*action=""([^""]*)""");
-				string formAction = formMatch.Success ? formMatch.Groups[1].Value : "https://drive.usercontent.google.com/download";
+				string rawAction = formMatch.Success ? WebUtility.HtmlDecode(formMatch.Groups[1].Value).Trim() : string.Empty;
+				string formAction = IsTrustedGoogleDownloadActionUrl(rawAction)
+					? rawAction
+					: "https://drive.usercontent.google.com/download";
 
 				var inputMatches = Regex.Matches(html, @"<input[^>]*name=""([^""]*)""[^>]*value=""([^""]*)""");
 				if (inputMatches.Count > 0)
@@ -588,34 +595,7 @@ public sealed class DownloadEngine
 			string mediaType = response.Content.Headers.ContentType?.MediaType?.ToLowerInvariant() ?? string.Empty;
 			string defaultExt = GuessExtensionFromMimeType(mediaType);
 
-			string fileName = null;
-			var cd = response.Content.Headers.ContentDisposition;
-			if (!string.IsNullOrWhiteSpace(cd?.FileNameStar))
-			{
-				fileName = cd.FileNameStar.Trim('"', '\'');
-			}
-			else if (!string.IsNullOrWhiteSpace(cd?.FileName))
-			{
-				fileName = cd.FileName.Trim('"', '\'');
-			}
-			if (string.IsNullOrWhiteSpace(fileName) && response.Content.Headers.TryGetValues("Content-Disposition", out var rawCdValues))
-			{
-				string rawCd = string.Join(";", rawCdValues);
-				var utf8Match = Regex.Match(rawCd, @"filename\*=UTF-8''([^;\r\n]+)", RegexOptions.IgnoreCase);
-				if (utf8Match.Success)
-				{
-					fileName = Uri.UnescapeDataString(utf8Match.Groups[1].Value.Trim('"', '\''));
-				}
-				else
-				{
-					var fnMatch = Regex.Match(rawCd, @"filename=""?([^"";\r\n]+)""?", RegexOptions.IgnoreCase);
-					if (fnMatch.Success)
-					{
-						fileName = fnMatch.Groups[1].Value.Trim('"', '\'');
-					}
-				}
-			}
-
+			string fileName = ExtractHeaderFileName(response);
 			if (string.IsNullOrWhiteSpace(fileName))
 			{
 				fileName = $"GoogleDrive_{fileId}{defaultExt}";
@@ -749,68 +729,104 @@ public sealed class DownloadEngine
 			if (!vMatch.Success) return;
 
 			string vcodec = vMatch.Groups[1].Value.ToLowerInvariant();
-			if (vcodec == "h264" || vcodec == "avc1" ||
-			    vcodec == "mjpeg" || vcodec == "png" || vcodec == "webp" || vcodec == "gif" || vcodec == "bmp" || vcodec == "tiff")
+			if (vcodec == "mjpeg" || vcodec == "png" || vcodec == "webp" || vcodec == "gif" || vcodec == "bmp" || vcodec == "tiff")
 			{
 				return;
 			}
 
-			item.Status = "转码H.264画面中...";
-			logCallback?.Invoke($"[兼容转码] 检测到原始视频流为 {vcodec.ToUpperInvariant()} 编码，正在自动转换为全平台通用的 H.264 高清画面...");
+			var aMatch = Regex.Match(info ?? string.Empty, @"Stream\s+#\d+:\d+.*?Audio:\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
+			string acodec = aMatch.Success ? aMatch.Groups[1].Value.ToLowerInvariant() : string.Empty;
+			bool needsVideoTranscode = vcodec == "av1" || vcodec == "av01";
+			bool needsAudioFix = !string.IsNullOrEmpty(acodec) && acodec != "aac" && acodec != "mp3" && acodec != "mp4a" && acodec != "pcm_s16le";
+
+			if (!needsVideoTranscode && !needsAudioFix)
+			{
+				return;
+			}
 
 			string dir = Path.GetDirectoryName(item.SaveFilePath) ?? Path.GetTempPath();
 			string nameNoExt = Path.GetFileNameWithoutExtension(item.SaveFilePath);
-			string tempOut = Path.Combine(dir, $"{nameNoExt}.h264_temp_{Guid.NewGuid():N}.mp4");
+			string tempOut = Path.Combine(dir, $"{nameNoExt}.compat_temp_{Guid.NewGuid():N}.mp4");
+			string quotedIn = ScriptBatch.ScriptBatchComposer.QuoteArg(item.SaveFilePath);
+			string quotedOut = ScriptBatch.ScriptBatchComposer.QuoteArg(tempOut);
 
-			var convPsi = new ProcessStartInfo
+			bool converted = false;
+			if (!needsVideoTranscode && needsAudioFix)
 			{
-				FileName = ffmpegPath,
-				Arguments = $"-hide_banner -y -i {ScriptBatch.ScriptBatchComposer.QuoteArg(item.SaveFilePath)} -map 0:v:0 -map 0:a:0? -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart {ScriptBatch.ScriptBatchComposer.QuoteArg(tempOut)}",
-				UseShellExecute = false,
-				CreateNoWindow = true,
-				RedirectStandardError = true,
-				StandardErrorEncoding = Encoding.UTF8
-			};
-
-			using (var convProc = new Process { StartInfo = convPsi })
+				// 极速音轨兼容修复：画面无损拷贝 (-c:v copy)，仅将 Opus/Vorbis 转为通用 AAC，7分钟视频 < 1 秒完成
+				item.Status = "极速修复通用音轨...";
+				logCallback?.Invoke($"[音轨兼容] 画面为 {vcodec.ToUpperInvariant()} 无需重编，仅将 {acodec.ToUpperInvariant()} 音轨极速封装为标准 AAC...");
+				string audioOnlyArgs = $"-hide_banner -y -i {quotedIn} -map 0:v:0 -map 0:a:0? -c:v copy -c:a aac -b:a 192k -movflags +faststart {quotedOut}";
+				converted = await RunFfmpegCompatAsync(ffmpegPath, audioOnlyArgs, ct);
+			}
+			else
 			{
-				convProc.Start();
-				var errTask = convProc.StandardError.ReadToEndAsync();
-				using (ct.Register(() =>
-				{
-					try { if (!convProc.HasExited) convProc.Kill(); } catch { }
-				}))
-				{
-					await Task.Run(() => convProc.WaitForExit(), ct);
-				}
-				await errTask;
-
-				if (convProc.ExitCode == 0 && File.Exists(tempOut) && new FileInfo(tempOut).Length > 1024)
-				{
-					string finalMp4 = Path.ChangeExtension(item.SaveFilePath, ".mp4");
-					try
-					{
-						File.Delete(item.SaveFilePath);
-					}
-					catch { }
-					if (File.Exists(finalMp4))
-					{
-						try { File.Delete(finalMp4); } catch { }
-					}
-					File.Move(tempOut, finalMp4);
-					item.SaveFilePath = finalMp4;
-					item.FileSizeStr = $"{new FileInfo(finalMp4).Length / (1024.0 * 1024.0):F1} MB";
-					logCallback?.Invoke($"[兼容转码完成] 已转换为标准 H.264 + AAC 编码 ({item.FileSizeStr})，所有播放器均可正常播放画面与声音。");
-				}
-				else
+				// 仅对会导致 Windows 黑屏的 AV1 (av01) 进行 H.264 转码，优先尝试 NVENC 显卡硬编，失败自动回退 CPU veryfast
+				item.Status = "转码H.264画面中...";
+				logCallback?.Invoke($"[兼容转码] 检测到 {vcodec.ToUpperInvariant()} 编码，正在转换为通用 H.264 + AAC 高清画面...");
+				string nvencArgs = $"-hide_banner -y -i {quotedIn} -map 0:v:0 -map 0:a:0? -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -c:v h264_nvenc -preset p4 -cq 20 -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart {quotedOut}";
+				converted = await RunFfmpegCompatAsync(ffmpegPath, nvencArgs, ct);
+				if (!converted)
 				{
 					try { if (File.Exists(tempOut)) File.Delete(tempOut); } catch { }
+					string cpuArgs = $"-hide_banner -y -i {quotedIn} -map 0:v:0 -map 0:a:0? -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart {quotedOut}";
+					converted = await RunFfmpegCompatAsync(ffmpegPath, cpuArgs, ct);
 				}
+			}
+
+			if (converted && File.Exists(tempOut) && new FileInfo(tempOut).Length > 1024)
+			{
+				string finalMp4 = Path.ChangeExtension(item.SaveFilePath, ".mp4");
+				try { File.Delete(item.SaveFilePath); } catch { }
+				if (File.Exists(finalMp4))
+				{
+					try { File.Delete(finalMp4); } catch { }
+				}
+				File.Move(tempOut, finalMp4);
+				item.SaveFilePath = finalMp4;
+				item.FileSizeStr = $"{new FileInfo(finalMp4).Length / (1024.0 * 1024.0):F1} MB";
+				logCallback?.Invoke($"[兼容完成] 已输出通用 MP4 (AAC 音轨，{item.FileSizeStr})，所有播放器均可正常播放画面与声音。");
+			}
+			else
+			{
+				try { if (File.Exists(tempOut)) File.Delete(tempOut); } catch { }
 			}
 		}
 		catch (Exception ex)
 		{
 			logCallback?.Invoke($"[兼容转码提示] {ex.Message}");
+		}
+	}
+
+	private static async Task<bool> RunFfmpegCompatAsync(string ffmpegPath, string arguments, CancellationToken ct)
+	{
+		try
+		{
+			var psi = new ProcessStartInfo
+			{
+				FileName = ffmpegPath,
+				Arguments = arguments,
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardError = true,
+				StandardErrorEncoding = Encoding.UTF8
+			};
+			using var proc = new Process { StartInfo = psi };
+			proc.Start();
+			var errTask = proc.StandardError.ReadToEndAsync();
+			using (ct.Register(() =>
+			{
+				try { if (!proc.HasExited) proc.Kill(); } catch { }
+			}))
+			{
+				await Task.Run(() => proc.WaitForExit(), ct);
+			}
+			await errTask;
+			return proc.ExitCode == 0;
+		}
+		catch
+		{
+			return false;
 		}
 	}
 
@@ -832,35 +848,38 @@ public sealed class DownloadEngine
 		}
 		else
 		{
-			sb.Append("--no-playlist --newline --encoding UTF-8 ");
+			sb.Append("--no-playlist --newline --encoding UTF-8 --windows-filenames ");
 			if (resume) sb.Append("-c ");
 			if (skipExisting) sb.Append("--no-overwrites ");
-			// 网络传输与分片重试防御（解决长视频 403 Forbidden / 片段中断）
-			sb.Append("--retries 15 --fragment-retries 20 --file-access-retries 10 ");
+			// 网络传输加速与分片并发：直连优先 + 分片场景 8 线程并发拉满宽带
+			sb.Append("--concurrent-fragments 8 --retries 15 --fragment-retries 20 --file-access-retries 10 ");
 			sb.Append("--extractor-args \"youtube:player_client=default,mweb,web\" ");
 
 			// 自动挂载 node.js 运行时以应对复杂的 YouTube 签名加密挑战
 			sb.Append("--js-runtimes node ");
 
-			// 画质与编码选择：优先选取 H.264 (avc1) + AAC (m4a) 标准编码，同时保留包含完整原声的高清流并合并为 mp4
+			// 极速直连 + 原声保全 + H.264/AAC 优先：
+			// 1) proto:https 置顶，优先直连单文件/直连音视频流，彻底避免掉进慢速单线程 m3u8；
+			// 2) b[acodec!=none][protocol^=http] 优先保障 TikTok/IG/FB 原生完整混合人声；
+			// 3) 横屏 1080p 不误拉 2K/4K，同时兼容 1080x1920 竖屏短视频。
 			switch (quality)
 			{
 				case "1080p":
-					sb.Append("-S \"res:1080,vcodec:h264,acodec:m4a\" --merge-output-format mp4 -f \"bv*[height<=1920]+ba/b[height<=1920]/bv*+ba/b\" ");
+					sb.Append("-S \"proto:https,vcodec:h264,acodec:m4a,res:1080\" --merge-output-format mp4 -f \"b[width<=1080][height<=1920][acodec!=none][protocol^=http]/b[height<=1080][acodec!=none][protocol^=http]/bv*[height<=1080][protocol^=http]+ba[protocol^=http]/bv*[width<=1080][height<=1920][protocol^=http]+ba[protocol^=http]/b[height<=1080][acodec!=none]/bv*[height<=1080]+ba/b\" ");
 					break;
 				case "720p":
-					sb.Append("-S \"res:720,vcodec:h264,acodec:m4a\" --merge-output-format mp4 -f \"bv*[height<=1280]+ba/b[height<=1280]/bv*+ba/b\" ");
+					sb.Append("-S \"proto:https,vcodec:h264,acodec:m4a,res:720\" --merge-output-format mp4 -f \"b[width<=720][height<=1280][acodec!=none][protocol^=http]/b[height<=720][acodec!=none][protocol^=http]/bv*[height<=720][protocol^=http]+ba[protocol^=http]/bv*[width<=720][height<=1280][protocol^=http]+ba[protocol^=http]/b[height<=720][acodec!=none]/bv*[height<=720]+ba/b\" ");
 					break;
 				case "audio":
 					sb.Append("-x --audio-format mp3 ");
 					break;
 				default: // best
-					sb.Append("-S \"res,vcodec:h264,acodec:m4a\" --merge-output-format mp4 -f \"bv*+ba/b\" ");
+					sb.Append("-S \"proto:https,vcodec:h264,acodec:m4a,res\" --merge-output-format mp4 -f \"b[acodec!=none][protocol^=http]/bv*[protocol^=http]+ba[protocol^=http]/b[acodec!=none]/bv*+ba/b\" ");
 					break;
 			}
 
-			// 输出文件名模版
-			string outTemplate = Path.Combine(outputDir, "%(title).100B [%(id)s].%(ext)s");
+			// 输出文件名模版：使用按字符安全截断 (%.80S)，避免中文/Emoji 在 UTF-8 字节中间截断导致乱码
+			string outTemplate = Path.Combine(outputDir, "%(title).80S [%(id)s].%(ext)s");
 			sb.Append($"--output {ScriptBatch.ScriptBatchComposer.QuoteArg(outTemplate)} ");
 
 			if (!string.IsNullOrWhiteSpace(ffmpegPath) && File.Exists(ffmpegPath))
@@ -885,10 +904,153 @@ public sealed class DownloadEngine
 		return sb.ToString();
 	}
 
+	internal static string ExtractHeaderFileName(HttpResponseMessage response)
+	{
+		if (response?.Content?.Headers == null) return null;
+
+		// 1. 最优先解析原始 Content-Disposition 中的 filename*=UTF-8''... (RFC 5987)，彻底避开 .NET 4.8 Latin-1 乱码
+		if (response.Content.Headers.TryGetValues("Content-Disposition", out var rawValues))
+		{
+			string rawCd = string.Join(";", rawValues);
+			var starMatch = Regex.Match(rawCd, @"filename\*\s*=\s*(?:UTF-8|utf-8)''([^;\r\n]+)", RegexOptions.IgnoreCase);
+			if (starMatch.Success)
+			{
+				try
+				{
+					string decoded = Uri.UnescapeDataString(starMatch.Groups[1].Value.Trim().Trim('"', '\''));
+					if (!string.IsNullOrWhiteSpace(decoded)) return decoded;
+				}
+				catch { }
+			}
+		}
+
+		// 2. 其次读取解析后的 FileNameStar / FileName，并对 RFC 2047 与 Latin-1 误解码 UTF-8 自动无损还原
+		var cd = response.Content.Headers.ContentDisposition;
+		string candidate = null;
+		if (!string.IsNullOrWhiteSpace(cd?.FileNameStar))
+		{
+			candidate = cd.FileNameStar.Trim().Trim('"', '\'');
+		}
+		else if (!string.IsNullOrWhiteSpace(cd?.FileName))
+		{
+			candidate = cd.FileName.Trim().Trim('"', '\'');
+		}
+		else if (response.Content.Headers.TryGetValues("Content-Disposition", out var fallbackValues))
+		{
+			string rawCd = string.Join(";", fallbackValues);
+			var fnMatch = Regex.Match(rawCd, @"filename\s*=\s*""?([^"";\r\n]+)""?", RegexOptions.IgnoreCase);
+			if (fnMatch.Success)
+			{
+				candidate = fnMatch.Groups[1].Value.Trim().Trim('"', '\'');
+			}
+		}
+
+		if (string.IsNullOrWhiteSpace(candidate)) return null;
+		if (candidate.Contains("%"))
+		{
+			try { candidate = Uri.UnescapeDataString(candidate); } catch { }
+		}
+		candidate = DecodeRfc2047(candidate);
+		candidate = RepairLatin1Utf8Mojibake(candidate);
+		return candidate;
+	}
+
+	internal static string DecodeRfc2047(string input)
+	{
+		if (string.IsNullOrEmpty(input) || !input.Contains("=?")) return input;
+		return Regex.Replace(input, @"=\?([^?]+)\?([BQ])\?([^?]+)\?=", m =>
+		{
+			try
+			{
+				string charset = m.Groups[1].Value;
+				string mode = m.Groups[2].Value.ToUpperInvariant();
+				string payload = m.Groups[3].Value;
+				Encoding enc = Encoding.GetEncoding(charset);
+				if (mode == "B")
+				{
+					return enc.GetString(Convert.FromBase64String(payload));
+				}
+				// Q-encoding
+				var bytes = new List<byte>();
+				for (int i = 0; i < payload.Length; i++)
+				{
+					if (payload[i] == '_') bytes.Add((byte)' ');
+					else if (payload[i] == '=' && i + 2 < payload.Length &&
+					         byte.TryParse(payload.Substring(i + 1, 2), System.Globalization.NumberStyles.HexNumber, null, out byte b))
+					{
+						bytes.Add(b);
+						i += 2;
+					}
+					else bytes.Add((byte)payload[i]);
+				}
+				return enc.GetString(bytes.ToArray());
+			}
+			catch
+			{
+				return m.Value;
+			}
+		}, RegexOptions.IgnoreCase);
+	}
+
+	internal static string RepairLatin1Utf8Mojibake(string input)
+	{
+		if (string.IsNullOrEmpty(input)) return input;
+		// 仅当字符串所有字符均在 0..255 范围内且包含 >=0x80 的扩展字节（典型 UTF-8 被按 ISO-8859-1 误解码特征）时尝试还原
+		bool hasHighByte = false;
+		for (int i = 0; i < input.Length; i++)
+		{
+			char ch = input[i];
+			if (ch > 255) return input; // 已经包含正常 Unicode 中文/符号，无需转换
+			if (ch >= 128) hasHighByte = true;
+		}
+		if (!hasHighByte) return input;
+
+		try
+		{
+			byte[] rawBytes = new byte[input.Length];
+			for (int i = 0; i < input.Length; i++) rawBytes[i] = (byte)input[i];
+			var strictUtf8 = new UTF8Encoding(false, true);
+			string restored = strictUtf8.GetString(rawBytes);
+			if (!string.IsNullOrEmpty(restored)) return restored;
+		}
+		catch
+		{
+			// 不是有效的 UTF-8 字节序列，说明原字符串本来就是正常 Latin-1 字符（如单个 é/ç），原样保留
+		}
+		return input;
+	}
+
+	private static bool IsTrustedGoogleDownloadActionUrl(string url)
+	{
+		if (string.IsNullOrWhiteSpace(url))
+			return false;
+		if (!Uri.TryCreate(url, UriKind.Absolute, out Uri uri) || uri.Scheme != Uri.UriSchemeHttps)
+			return false;
+		string host = (uri.Host ?? string.Empty).TrimEnd('.').ToLowerInvariant();
+		return host == "drive.google.com" ||
+		       host == "docs.google.com" ||
+		       host == "drive.usercontent.google.com" ||
+		       host.EndsWith(".googleusercontent.com", StringComparison.OrdinalIgnoreCase);
+	}
+
 	private static string SanitizeFileName(string name)
 	{
+		if (string.IsNullOrWhiteSpace(name))
+			return "downloaded_video.mp4";
+		string baseName = Path.GetFileName(name.Replace('\\', '/'));
 		string invalidChars = Regex.Escape(new string(Path.GetInvalidFileNameChars()));
-		string sanitized = Regex.Replace(name, "[" + invalidChars + "]", "_");
+		string sanitized = Regex.Replace(baseName ?? string.Empty, "[" + invalidChars + "]", "_").Trim('.', ' ');
+		if (sanitized.Length > 180)
+		{
+			string ext = Path.GetExtension(sanitized);
+			string stem = Path.GetFileNameWithoutExtension(sanitized);
+			sanitized = stem.Substring(0, Math.Max(1, 180 - ext.Length)) + ext;
+		}
+		string stemOnly = Path.GetFileNameWithoutExtension(sanitized) ?? string.Empty;
+		if (Regex.IsMatch(stemOnly, @"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$", RegexOptions.IgnoreCase))
+		{
+			sanitized = "_" + sanitized;
+		}
 		return string.IsNullOrWhiteSpace(sanitized) ? "downloaded_video.mp4" : sanitized;
 	}
 

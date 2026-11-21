@@ -1,16 +1,16 @@
 {
-    "version":  "9.9.0",
-    "releaseDate":  "2026-11-20",
-    "title":  "VideoBatchStudio V9.9.0 爆款字幕预设库 1:1 升级 + 链接输入体验优化",
+    "version":  "9.9.1",
+    "releaseDate":  "2026-11-21",
+    "title":  "VideoBatchStudio V9.9.1 视频下载极速恢复 + 根治图片/视频文件名乱码 + 音画双保",
     "changelog":  [
-                      "【爆款字幕预设库·3款1:1复刻】新增「🌺 白字粉边·红花游标跟读」「🖋️ 暗紫纱条·金笔划词跟读」「📕 三行黑边·红带累计推进」，置顶于爆款推荐分类一键选用",
-                      "【字幕全参数自由调节】字幕自定义面板新增文字斜体(Italic)、跟读游标样式(红花/黑金笔/圣光星芒)、同屏行数(1~3行)及模式 6/7/8 独立调控",
-                      "【双端渲染引擎同步升级】60FPS 手机实时预览与后台 FFmpeg/ASS 纯矢量渲染器同步支持卡通红花游标、纤细黑金笔、圆角紫纱横条与累计红底推进",
-                      "【智能字幕 \u0026 视频下载·纯净空白输入框】移除默认预设的示例链接，打开软件即可直接粘贴链接，无需手动点击清空"
+                      "【视频下载·极速直连恢复】YouTube / Facebook / Instagram / TikTok 恢复直连 HTTPS 极速流优先与 8 线程分片并发加速，修复横屏 1080p 误拉 2K/4K 大包问题，长视频恢复几秒级下载速度",
+                      "【音画双保·绝不无声不黑屏】保留原声单流优先与 AAC 音轨封装，Opus 音轨采用无损画面拷贝极速秒转 AAC；仅对黑屏风险 AV1 画面触发转码并优先启用显卡硬编(NVENC)",
+                      "【彻底根治图片与视频文件名乱码】重写谷歌云盘 Content-Disposition 文件名解码（支持 RFC 5987/2047 与 Latin-1 乱码自动无损还原），并为 yt-dlp 强制注入 UTF-8 环境与按字符安全截断",
+                      "【谷歌云盘图片 \u0026 IG 完整兼顾】谷歌云盘原图继续走直连无损原格式通道不压缩不转码，新增 instagr.am 短链自动识别"
                   ],
-    "downloadUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v9.9.0",
-    "portableZipUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.9.0/VideoBatchStudio_Portable.zip",
-    "fastPortableZipUrl":  "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.9.0/VideoBatchStudio_Portable.zip",
-    "exeUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.9.0/VideoBatchStudio.exe",
-    "sha256":  "6f37dfa26d7df6b0bf523a9d79a083646884983f6b03d59e7d920751710e2fbe"
+    "downloadUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v9.9.1",
+    "portableZipUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.9.1/VideoBatchStudio_Portable.zip",
+    "fastPortableZipUrl":  "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.9.1/VideoBatchStudio_Portable.zip",
+    "exeUrl":  "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v9.9.1/VideoBatchStudio.exe",
+    "sha256":  "407530e1697ed110d8a0471cc87139e63e3dd13ed2be4bae730595b4d983590c"
 }
