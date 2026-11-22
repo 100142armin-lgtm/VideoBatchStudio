@@ -1,16 +1,14 @@
 {
-    "version": "10.0.1",
-    "releaseDate": "2026-11-22",
-    "title": "VideoBatchStudio V10.0.1 安全加固补丁（WebView2 来源校验 + 表格公式注入防护 + 链接校验）",
+    "version": "10.0.2",
+    "releaseDate": "2026-11-23",
+    "title": "VideoBatchStudio V10.0.2 修复团队安装 FFmpeg 组件 404 失效问题（永久固定校验包）",
     "changelog": [
-        "【安全加固·WebView2 通信与跨域隔离】收紧智能合成预览页虚拟主机跨域策略为 DenyCors，并在 WebMessageReceived 入口强制校验消息来源 e.Source，同时保持媒体预览视频正常播放",
-        "【安全加固·Google Sheets 公式注入防护】回填表格状态与链接前自动转义公式前缀字符（=、+、-、@），防止异常文本触发电子表格公式求值",
-        "【安全加固·外部链接严格校验】任务链接与成品链接打开前严格校验合法 http/https 协议，阻断非标准 URI Scheme 调用",
-        "【包含 V10.0.0 全部特性】「🤖 智能合成」云端闭环工作台、9:16 有声实时素材预览、5 维成品质检门禁、生产-上传异步双流水线、频道/矩阵方案一键切换、无人值守自动巡检与 -14 LUFS 全片人声均衡"
+        "【组件修复·彻底解决 FFmpeg / FFprobe 404 失败】将 FFmpeg 8.1 官方构建包托管至本仓库永久 Release 资产并锁定 SHA256，彻底解决上游临时日期链接过期导致团队新人一键安装组件报 404 Not Found 的问题",
+        "【包含 V10.0.1 全部功能与安全加固】「🤖 智能合成」云端闭环工作台、9:16 有声实时素材预览、5 维成品质检门禁、生产-上传异步双流水线、频道方案一键切换、WebView2 来源校验及表格公式注入防护"
     ],
-    "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v10.0.1",
-    "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.1/VideoBatchStudio_Portable.zip",
-    "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.1/VideoBatchStudio_Portable.zip",
-    "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.1/VideoBatchStudio.exe",
-    "sha256": "329c14b651369aafdef96dc910e32287fa21c797ed7a3ed4909bcdca043abb25"
+    "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v10.0.2",
+    "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.2/VideoBatchStudio_Portable.zip",
+    "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.2/VideoBatchStudio_Portable.zip",
+    "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.2/VideoBatchStudio.exe",
+    "sha256": "c2592af7a506cf00f6f5d948e22c4edb931a61615d32f1b92c66d64185034dbc"
 }
