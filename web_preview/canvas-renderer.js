@@ -59,6 +59,9 @@ class PreviewStage {
         this.initialOffsets = { x: 0, y: 0 };
 
         this.bgImage = null;
+        this.bgVideo = null;
+        this.cachedBgVideoUrl = '';
+        this.isMuted = false;
         this.wmImage = null;
 
         this.initDOM();
@@ -128,6 +131,37 @@ class PreviewStage {
             }
         }
 
+        // 背景视频载入（支持实时 60FPS 播放与滑块拖拽预览）
+        if (typeof settings.bgVideoUrl === 'string' && settings.bgVideoUrl !== this.cachedBgVideoUrl) {
+            this.cachedBgVideoUrl = settings.bgVideoUrl;
+            if (!settings.bgVideoUrl) {
+                if (this.bgVideo) { try { this.bgVideo.pause(); this.bgVideo.src = ''; } catch (e) {} }
+                this.bgVideo = null;
+            } else {
+                if (!this.bgVideo) {
+                    const v = document.createElement('video');
+                    v.muted = this.isMuted;
+                    v.volume = 1.0;
+                    v.loop = true;
+                    v.playsInline = true;
+                    v.crossOrigin = 'anonymous';
+                    v.preload = 'auto';
+                    v.addEventListener('loadeddata', () => {
+                        try { v.currentTime = Math.min(0.5, (v.duration || 1) * 0.1); } catch (e) {}
+                        this.requestRender();
+                        if (this.isPlaying) {
+                            v.muted = this.isMuted;
+                            v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+                        }
+                    });
+                    v.addEventListener('seeked', () => this.requestRender());
+                    this.bgVideo = v;
+                }
+                this.bgVideo.src = settings.bgVideoUrl;
+                this.bgVideo.load();
+            }
+        }
+
         // 背景图与水印图载入
         if (settings.bgThumbnailDataUrl && settings.bgThumbnailDataUrl !== this.cachedBgUrl) {
             this.cachedBgUrl = settings.bgThumbnailDataUrl;
@@ -193,8 +227,25 @@ class PreviewStage {
         vctx.clearRect(0, 0, w, h);
         octx.clearRect(0, 0, w, h);
 
-        // 1. 绘制背景 (Cover 居中等比裁剪模式，杜绝拉伸畸变)
-        if (this.bgImage && this.bgImage.complete && this.bgImage.naturalWidth > 0) {
+        // 1. 绘制背景 (优先实时视频帧 -> 其次静态缩略图，均采用 Cover 居中等比裁剪杜绝拉伸)
+        if (this.bgVideo && this.bgVideo.readyState >= 2 && this.bgVideo.videoWidth > 0) {
+            const vid = this.bgVideo;
+            const targetAspect = w / h;
+            const vidAspect = vid.videoWidth / vid.videoHeight;
+            let sx, sy, sWidth, sHeight;
+            if (vidAspect > targetAspect) {
+                sHeight = vid.videoHeight;
+                sWidth = Math.round(sHeight * targetAspect);
+                sx = Math.round((vid.videoWidth - sWidth) / 2);
+                sy = 0;
+            } else {
+                sWidth = vid.videoWidth;
+                sHeight = Math.round(sWidth / targetAspect);
+                sx = 0;
+                sy = Math.round((vid.videoHeight - sHeight) / 2);
+            }
+            vctx.drawImage(vid, sx, sy, sWidth, sHeight, 0, 0, w, h);
+        } else if (this.bgImage && this.bgImage.complete && this.bgImage.naturalWidth > 0) {
             const img = this.bgImage;
             const targetAspect = w / h;
             const imgAspect = img.naturalWidth / img.naturalHeight;
@@ -786,6 +837,7 @@ class PreviewStage {
             vctx.save();
             vctx.font = `bold ${fontSize}px "${this.state.watermarkFontFamily || 'Arial'}", Arial, sans-serif`;
             vctx.textBaseline = 'top';
+            vctx.textAlign = 'left';
 
             // 支持手动回车换行与超长行自动折行，保证长文本不溢出画面边缘
             const rawLines = rawText.split(/\r?\n/);
@@ -819,14 +871,17 @@ class PreviewStage {
 
             const pt = this.calcPosition(posType, w, h, maxLineW, totalH, offX, offY);
 
-            // 绘制文字实体到 videoCanvas
+            // 绘制文字实体到 videoCanvas（居中模式时按盒内居中绘制，杜绝文字偏移到左侧边缘）
+            const isCenterPos = (posType === 4 || posType === 5);
+            vctx.textAlign = isCenterPos ? 'center' : 'left';
+            const drawX = isCenterPos ? (pt.x + maxLineW / 2) : pt.x;
             lines.forEach((l, idx) => {
                 const y = pt.y + idx * lineH;
                 vctx.fillStyle = `rgba(0, 0, 0, ${opacity * 0.7})`;
-                vctx.fillText(l, pt.x + 1, y + 1);
+                vctx.fillText(l, drawX + 1, y + 1);
                 vctx.fillStyle = this.state.watermarkTextColorHex || '#FFFFFF';
                 vctx.globalAlpha = opacity;
-                vctx.fillText(l, pt.x, y);
+                vctx.fillText(l, drawX, y);
             });
             vctx.restore();
 
@@ -899,6 +954,7 @@ class PreviewStage {
     bindEvents() {
         const btnPlay = document.getElementById('btn-play');
         const btnReset = document.getElementById('btn-reset');
+        const btnMute = document.getElementById('btn-mute');
         const slider = document.getElementById('time-slider');
         const label = document.getElementById('time-label');
 
@@ -907,6 +963,26 @@ class PreviewStage {
                 this.isPlaying = !this.isPlaying;
                 btnPlay.textContent = this.isPlaying ? '⏸️ 暂停' : '▶️ 动效';
                 btnPlay.classList.toggle('active', this.isPlaying);
+                if (this.bgVideo && this.bgVideo.readyState >= 2) {
+                    if (this.isPlaying) {
+                        this.bgVideo.muted = this.isMuted;
+                        this.bgVideo.play().catch(() => {
+                            this.bgVideo.muted = true;
+                            this.bgVideo.play().catch(() => {});
+                        });
+                    } else {
+                        this.bgVideo.pause();
+                    }
+                }
+            });
+        }
+        if (btnMute) {
+            btnMute.addEventListener('click', () => {
+                this.isMuted = !this.isMuted;
+                btnMute.textContent = this.isMuted ? '🔇' : '🔊';
+                if (this.bgVideo) {
+                    this.bgVideo.muted = this.isMuted;
+                }
             });
         }
         if (btnReset) {
@@ -914,6 +990,9 @@ class PreviewStage {
                 this.currentTimeMs = 0;
                 if (slider) slider.value = 0;
                 if (label) label.textContent = '0.00s';
+                if (this.bgVideo && this.bgVideo.readyState >= 2) {
+                    try { this.bgVideo.currentTime = 0; } catch (e) {}
+                }
                 this.requestRender();
             });
         }
@@ -921,6 +1000,9 @@ class PreviewStage {
             slider.addEventListener('input', (e) => {
                 this.currentTimeMs = parseFloat(e.target.value);
                 if (label) label.textContent = `${(this.currentTimeMs / 1000).toFixed(2)}s`;
+                if (this.bgVideo && this.bgVideo.readyState >= 2 && this.bgVideo.duration > 0) {
+                    try { this.bgVideo.currentTime = (this.currentTimeMs / 3000) * Math.min(this.bgVideo.duration, 10); } catch (ex) {}
+                }
                 this.requestRender();
             });
         }

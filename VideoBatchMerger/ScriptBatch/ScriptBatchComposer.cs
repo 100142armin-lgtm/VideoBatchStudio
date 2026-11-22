@@ -536,7 +536,7 @@ namespace VideoBatchMerger.ScriptBatch
 			return defaultColor;
 		}
 
-		private static void BuildAssSubtitleFile(string srtPath, string assPath, ScriptBatchSettings settings)
+		internal static void BuildAssSubtitleFile(string srtPath, string assPath, ScriptBatchSettings settings)
 		{
 			int w = settings.CanvasWidth > 0 ? settings.CanvasWidth : 1080;
 			int h = settings.CanvasHeight > 0 ? settings.CanvasHeight : 1920;

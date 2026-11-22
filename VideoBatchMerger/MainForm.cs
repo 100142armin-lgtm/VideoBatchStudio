@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
 
 	private Panel _bottomNavBar;
 	private Panel _bottomNavLine;
-	public const string CurrentAppVersion = "9.9.1";
+	public const string CurrentAppVersion = "10.0.0";
 
 	public const int WorkspaceMerge = 0;
 	public const int WorkspaceSplit = 1;
@@ -53,6 +53,7 @@ internal sealed class MainForm : Form
 	public const int WorkspaceTranscribe = 8;
 	public const int WorkspaceScriptBatch = 9;
 	public const int WorkspaceTextToSpeech = 10;
+	public const int WorkspaceSmartCompose = 11;
 
 	private VideoBatchMerger.Downloader.DownloaderPanel _downloaderPanel;
 	private VideoBatchMerger.Transcriber.TranscribePanel _transcribePanel;
@@ -1293,9 +1294,10 @@ internal sealed class MainForm : Form
 		_tabs.TabPages.Add(BuildSplitScreenTab());  // 5
 		_tabs.TabPages.Add(BuildCutEditTab());      // 6
 		_tabs.TabPages.Add(BuildDeliverTab());      // 7
-		_tabs.TabPages.Add(BuildTranscribeTab());   // 8 (智能字幕)
+		_tabs.TabPages.Add(BuildTranscribeTab());   // 8 (语音转字)
 		_tabs.TabPages.Add(BuildScriptBatchTab());  // 9 (文案成片)
-		_tabs.TabPages.Add(BuildTextToSpeechTab()); // 10 (文字转语音)
+		_tabs.TabPages.Add(BuildTextToSpeechTab()); // 10 (文字转音)
+		_tabs.TabPages.Add(BuildSmartComposeTab()); // 11 (智能合成)
 		tableLayoutPanel.Controls.Add(_tabs, 0, 0);
 
 		_bottomNavBar = new Panel();
@@ -1350,23 +1352,35 @@ internal sealed class MainForm : Form
 
 		_navButtons.Clear();
 		_navButtonTabs.Clear();
+		// 第一段：前置准备（下素材 & 音字互转）
+		navCenter.Controls.Add(MakeNavButton("📥 视频下载", WorkspaceDownload));
+		navCenter.Controls.Add(MakeNavButton("🎙️ 语音转字", WorkspaceTranscribe));
+		navCenter.Controls.Add(MakeNavButton("🔊 文字转音", WorkspaceTextToSpeech));
+
+		Panel navDivider1 = new Panel();
+		navDivider1.Width = 1;
+		navDivider1.Height = 24;
+		navDivider1.Margin = new Padding(6, 4, 6, 4);
+		navDivider1.BackColor = BorderColor;
+		navCenter.Controls.Add(navDivider1);
+
+		// 第二段：四大成片中心（出片主战场）
+		navCenter.Controls.Add(MakeNavButton("📝 文案成片", WorkspaceScriptBatch));
+		navCenter.Controls.Add(MakeNavButton("🤖 智能合成", WorkspaceSmartCompose));
+		navCenter.Controls.Add(MakeNavButton("▦ 视频拼屏", WorkspaceSplitScreen));
+		navCenter.Controls.Add(MakeNavButton("🖼️ 图片成片", WorkspaceImageVideo));
+
+		Panel navDivider2 = new Panel();
+		navDivider2.Width = 1;
+		navDivider2.Height = 24;
+		navDivider2.Margin = new Padding(6, 4, 6, 4);
+		navDivider2.BackColor = BorderColor;
+		navCenter.Controls.Add(navDivider2);
+
+		// 第三段：精修加工与最终交付
 		navCenter.Controls.Add(MakeNavButton("📦 批量合并", WorkspaceMerge));
 		navCenter.Controls.Add(MakeNavButton("✂️ 视频拆分", WorkspaceSplit));
 		navCenter.Controls.Add(MakeNavButton("💧 水印处理", WorkspaceWatermark));
-		navCenter.Controls.Add(MakeNavButton("🖼️ 图片成片", WorkspaceImageVideo));
-
-		Panel navDivider = new Panel();
-		navDivider.Width = 1;
-		navDivider.Height = 24;
-		navDivider.Margin = new Padding(6, 4, 6, 4);
-		navDivider.BackColor = BorderColor;
-		navCenter.Controls.Add(navDivider);
-
-		navCenter.Controls.Add(MakeNavButton("📥 视频下载", WorkspaceDownload));
-		navCenter.Controls.Add(MakeNavButton("🎙️ 智能字幕", WorkspaceTranscribe));
-		navCenter.Controls.Add(MakeNavButton("📝 文案成片", WorkspaceScriptBatch));
-		navCenter.Controls.Add(MakeNavButton("🔊 文字转语音", WorkspaceTextToSpeech));
-		navCenter.Controls.Add(MakeNavButton("▦ 视频拼屏", WorkspaceSplitScreen));
 		navCenter.Controls.Add(MakeNavButton("🎬 视频剪辑", WorkspaceCutEdit));
 		navCenter.Controls.Add(MakeNavButton("🚀 导出交付", WorkspaceDeliver));
 		_bottomNavBar.Controls.Add(navCenter);
@@ -6089,11 +6103,21 @@ internal sealed class MainForm : Form
 
 	private TabPage BuildTextToSpeechTab()
 	{
-		TabPage tabPage = new TabPage("文字转语音");
+		TabPage tabPage = new TabPage("文字转音");
 		tabPage.BackColor = CanvasColor;
 		_ttsStudioPanel = new VideoBatchMerger.ScriptBatch.TextToSpeechStudioPanel(this);
 		_ttsStudioPanel.Dock = DockStyle.Fill;
 		tabPage.Controls.Add(_ttsStudioPanel);
+		return tabPage;
+	}
+
+	private TabPage BuildSmartComposeTab()
+	{
+		TabPage tabPage = new TabPage("智能合成");
+		tabPage.BackColor = CanvasColor;
+		var smartPanel = new VideoBatchMerger.SmartCompose.SmartComposePanel();
+		smartPanel.Dock = DockStyle.Fill;
+		tabPage.Controls.Add(smartPanel);
 		return tabPage;
 	}
 

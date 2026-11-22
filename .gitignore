@@ -31,6 +31,8 @@ whisper/
 bin_out/
 obj_build/
 component_cache/
+_update_staging/
+*.old_update
 chatterbox_runtime/
 edge_runtime/
 tools/
