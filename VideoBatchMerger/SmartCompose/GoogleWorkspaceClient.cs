@@ -620,12 +620,24 @@ namespace VideoBatchMerger.SmartCompose
 
 			if (!string.IsNullOrWhiteSpace(outputDriveUrl) && colOut >= 0)
 			{
-				await WriteCellAsync(colOut, outputDriveUrl).ConfigureAwait(false);
+				string safeOut = EscapeSpreadsheetFormula(outputDriveUrl);
+				await WriteCellAsync(colOut, safeOut).ConfigureAwait(false);
 			}
 			if (!string.IsNullOrWhiteSpace(statusText) && colStatus >= 0)
 			{
-				await WriteCellAsync(colStatus, statusText).ConfigureAwait(false);
+				await WriteCellAsync(colStatus, EscapeSpreadsheetFormula(statusText)).ConfigureAwait(false);
 			}
+		}
+
+		private static string EscapeSpreadsheetFormula(string value)
+		{
+			if (string.IsNullOrEmpty(value)) return value;
+			char c = value[0];
+			if (c == '=' || c == '+' || c == '-' || c == '@' || c == '\t' || c == '\r')
+			{
+				return "'" + value;
+			}
+			return value;
 		}
 
 		/// <summary>

@@ -1,17 +1,16 @@
 {
-    "version": "10.0.0",
+    "version": "10.0.1",
     "releaseDate": "2026-11-22",
-    "title": "VideoBatchStudio V10.0.0 全新「🤖 智能合成」云端闭环工作台 + 5维成品质检 + 异步双流水线",
+    "title": "VideoBatchStudio V10.0.1 安全加固补丁（WebView2 来源校验 + 表格公式注入防护 + 链接校验）",
     "changelog": [
-        "【全新板块·🤖 智能合成云端闭环】直连普通 Gmail 谷歌表格与谷歌云盘（支持多页签/超链接/Smart Chip胶囊自动读取），支持「☁️ 云端工作区」与「📂 本地工作区」严格隔离切换，并优化顶部 12 栏工作区布局",
-        "【9:16 实时素材预览与拖拽】自动加载选中任务首段真实素材视频并支持有声播放/静音开关，鼠标直接拖拽微调爆款字幕与水印位置，水印居中对齐与字幕参数均独立永久记忆",
-        "【5 维成品质检门禁】上传前自动核验：标准文案↔音频一致度（忽略重音差异）、全片首句/前中后四重字幕分区核验、音量健康度、视频流完整性、音画同步；不合格自动拦截，双击可看详情对照并支持人工放行",
-        "【生产-上传异步双流水线 + 极速提速】合成与后台流式直传彻底解耦，后台上传自动让行 3 路并行下载、断网自动重试 3 次并支持「🔁 仅重试上传」，新增极速单次 AI 识别、-14 LUFS 全片人声音量均衡、三档画质/速度可选",
-        "【团队规模化效率工具】新增「🎯 频道/矩阵方案」一键保存切换、「⏰ 无人值守自动巡检挂机」、云端自动跳过已完成/已回填行、成品链接单击直开、可选本地保留副本及三级自动清盘零残留"
+        "【安全加固·WebView2 通信与跨域隔离】收紧智能合成预览页虚拟主机跨域策略为 DenyCors，并在 WebMessageReceived 入口强制校验消息来源 e.Source，同时保持媒体预览视频正常播放",
+        "【安全加固·Google Sheets 公式注入防护】回填表格状态与链接前自动转义公式前缀字符（=、+、-、@），防止异常文本触发电子表格公式求值",
+        "【安全加固·外部链接严格校验】任务链接与成品链接打开前严格校验合法 http/https 协议，阻断非标准 URI Scheme 调用",
+        "【包含 V10.0.0 全部特性】「🤖 智能合成」云端闭环工作台、9:16 有声实时素材预览、5 维成品质检门禁、生产-上传异步双流水线、频道/矩阵方案一键切换、无人值守自动巡检与 -14 LUFS 全片人声均衡"
     ],
-    "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v10.0.0",
-    "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.0/VideoBatchStudio_Portable.zip",
-    "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.0/VideoBatchStudio_Portable.zip",
-    "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.0/VideoBatchStudio.exe",
-    "sha256": "b5800d0a097e7092add6d10fe0b98a7355c34b26c122b3c776b23c9bd84bc046"
+    "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v10.0.1",
+    "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.1/VideoBatchStudio_Portable.zip",
+    "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.1/VideoBatchStudio_Portable.zip",
+    "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.1/VideoBatchStudio.exe",
+    "sha256": "329c14b651369aafdef96dc910e32287fa21c797ed7a3ed4909bcdca043abb25"
 }

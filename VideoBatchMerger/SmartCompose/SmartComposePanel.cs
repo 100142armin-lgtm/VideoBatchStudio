@@ -1034,7 +1034,8 @@ namespace VideoBatchMerger.SmartCompose
 
 				Directory.CreateDirectory(_previewCacheDir);
 				_webViewPreview.CoreWebView2.SetVirtualHostNameToFolderMapping(
-					"app-smart-preview.local", webPreviewDir, CoreWebView2HostResourceAccessKind.Allow);
+					"app-smart-preview.local", webPreviewDir, CoreWebView2HostResourceAccessKind.DenyCors);
+				// 媒体虚拟主机仅放临时预览 MP4，需允许 app-smart-preview.local 通过 CORS 读取视频帧绘制到 Canvas
 				_webViewPreview.CoreWebView2.SetVirtualHostNameToFolderMapping(
 					"app-smart-media.local", _previewCacheDir, CoreWebView2HostResourceAccessKind.Allow);
 				_webViewPreview.WebMessageReceived -= OnWebViewMessageReceived;
@@ -1053,6 +1054,11 @@ namespace VideoBatchMerger.SmartCompose
 		{
 			try
 			{
+				if (string.IsNullOrEmpty(e.Source) ||
+				    !e.Source.StartsWith("https://app-smart-preview.local/", StringComparison.OrdinalIgnoreCase))
+				{
+					return;
+				}
 				string raw = e.TryGetWebMessageAsString();
 				var msg = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(raw);
 				if (msg == null || !msg.ContainsKey("action")) return;
@@ -2199,7 +2205,7 @@ namespace VideoBatchMerger.SmartCompose
 				if (t.QcPassed == true) row.Cells["Qc"].Style.ForeColor = Color.FromArgb(110, 231, 183);
 				else if (t.QcPassed == false) row.Cells["Qc"].Style.ForeColor = Color.FromArgb(252, 165, 165);
 
-				bool hasUrl = !string.IsNullOrWhiteSpace(t.UploadedDriveUrl) && t.UploadedDriveUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+				bool hasUrl = IsSafeHttpUrl(t.UploadedDriveUrl);
 				bool hasFile = !string.IsNullOrWhiteSpace(t.OutputFilePath) && File.Exists(t.OutputFilePath);
 				if (hasUrl || hasFile)
 				{
@@ -2211,14 +2217,21 @@ namespace VideoBatchMerger.SmartCompose
 			}
 		}
 
+		private static bool IsSafeHttpUrl(string url)
+		{
+			return !string.IsNullOrWhiteSpace(url)
+				&& Uri.TryCreate(url.Trim(), UriKind.Absolute, out Uri uri)
+				&& (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
+		}
+
 		private void OnTaskGridCellClick(object sender, DataGridViewCellEventArgs e)
 		{
 			if (e.RowIndex < 0 || e.RowIndex >= _tasks.Count) return;
 			if (e.ColumnIndex != _gridTasks.Columns["Result"].Index) return;
 			var task = _tasks[e.RowIndex];
-			if (!string.IsNullOrWhiteSpace(task.UploadedDriveUrl) && task.UploadedDriveUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+			if (IsSafeHttpUrl(task.UploadedDriveUrl))
 			{
-				try { Process.Start(new ProcessStartInfo { FileName = task.UploadedDriveUrl, UseShellExecute = true }); } catch { }
+				try { Process.Start(new ProcessStartInfo { FileName = task.UploadedDriveUrl.Trim(), UseShellExecute = true }); } catch { }
 			}
 			else if (!string.IsNullOrWhiteSpace(task.OutputFilePath) && File.Exists(task.OutputFilePath))
 			{
@@ -2390,12 +2403,12 @@ namespace VideoBatchMerger.SmartCompose
 				footer.Controls.Add(btnForceUpload);
 			}
 
-			if (!string.IsNullOrWhiteSpace(task.UploadedDriveUrl) && task.UploadedDriveUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+			if (IsSafeHttpUrl(task.UploadedDriveUrl))
 			{
 				var btnOpenDrive = MakeBtn("🌐 打开云盘成品", AccentBlue, Color.White, 138, 32);
 				btnOpenDrive.Click += (_, _) =>
 				{
-					try { Process.Start(new ProcessStartInfo { FileName = task.UploadedDriveUrl, UseShellExecute = true }); } catch { }
+					try { Process.Start(new ProcessStartInfo { FileName = task.UploadedDriveUrl.Trim(), UseShellExecute = true }); } catch { }
 				};
 				footer.Controls.Add(btnOpenDrive);
 			}
