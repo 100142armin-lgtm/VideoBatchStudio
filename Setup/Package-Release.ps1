@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory=$true)][string]$BuildDirectory,
     [Parameter(Mandatory=$true)][string]$OutputDirectory,
     [string]$CacheDirectory = ''
@@ -47,7 +47,7 @@ if ($process.ExitCode -ne 0) {
 $process = Start-Process -FilePath (Join-Path $stagingDirectory 'VideoBatchStudio.exe') -ArgumentList '--verify-package' -WorkingDirectory $stagingDirectory -WindowStyle Hidden -Wait -PassThru
 if ($process.ExitCode -ne 0) { throw 'The final staged package failed validation.' }
 
-$required = @('ffmpeg.exe','ffprobe.exe','yt-dlp.exe','tools/node/node.exe','edge_runtime/python/python.exe','edge_runtime/ready.json','whisper/whisper-cli.exe','whisper/models/ggml-base.bin','Setup/components.json','Setup/edge-requirements.lock','ScriptBatch/edge_tts_worker.py','ScriptBatch/chatterbox_worker.py','ScriptBatch/chatterbox_install.py','ScriptBatch/chatterbox-requirements.lock')
+$required = @('WebView2Loader.dll','runtimes/win-x64/native/WebView2Loader.dll','ffmpeg.exe','ffprobe.exe','yt-dlp.exe','tools/node/node.exe','edge_runtime/python/python.exe','edge_runtime/ready.json','whisper/whisper-cli.exe','whisper/models/ggml-base.bin','Setup/components.json','Setup/edge-requirements.lock','ScriptBatch/edge_tts_worker.py','ScriptBatch/chatterbox_worker.py','ScriptBatch/chatterbox_install.py','ScriptBatch/chatterbox-requirements.lock')
 foreach ($file in $required) { if (-not (Test-Path -LiteralPath (Join-Path $stagingDirectory $file))) { throw ('Incomplete package: ' + $file) } }
 
 $packageFiles = @(Get-ChildItem -LiteralPath $stagingDirectory -File -Recurse | Where-Object {

@@ -1,15 +1,15 @@
 {
-    "version": "10.0.2",
-    "releaseDate": "2026-11-23",
-    "title": "VideoBatchStudio V10.0.2 修复团队安装 FFmpeg 组件 404 失效问题（切换永久官方源）",
+    "version": "10.0.3",
+    "releaseDate": "2026-11-24",
+    "title": "VideoBatchStudio V10.0.3 修复 WebView2 预览运行库 0x8007000B 架构不匹配问题（全量 64 位适配）",
     "changelog": [
-        "【组件修复·彻底解决 FFmpeg / FFprobe 404 失败】将 FFmpeg 下载源切换为永久官方发行版 GyanD/codexffmpeg 9.1（固定 SHA256 校验），彻底解决原临时日期链接过期导致团队安装组件报 404 Not Found 的问题",
-        "【便携包文件补全】便携压缩包完整包含 fonts 字体、docs 文档与所有运行时组件清单，开箱即用",
-        "【包含 V10.0.1 全部功能与安全加固】「🤖 智能合成」云端闭环工作台、9:16 有声实时素材预览、5 维成品质检门禁、生产-上传异步双流水线、频道方案一键切换、WebView2 来源校验及表格公式注入防护"
+        "【核心修复·彻底解决 WebView2 0x8007000B 报错】显式锁定 64 位编译目标（PlatformTarget=x64），确保程序本体与随包分发的 WebView2Loader.dll（含 runtimes/win-x64）严格匹配 64 位架构，彻底解决团队电脑检测或安装「微软 WebView2 预览运行库」时报错「试图加载格式不正确的程序 (HRESULT:0x8007000B)」的问题",
+        "【打包防回归门禁】发布打包校验脚本新增 64 位 WebView2Loader.dll 完整性检查，防止后续版本误打入 32 位依赖",
+        "【包含 V10.0.2 全部功能与修复】永久官方源 FFmpeg 9.1（彻底修复 404）、「🤖 智能合成」云端闭环工作台、9:16 有声实时素材预览、5 维成品质检门禁、生产-上传异步双流水线与安全加固"
     ],
-    "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v10.0.2",
-    "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.2/VideoBatchStudio_Portable.zip",
-    "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.2/VideoBatchStudio_Portable.zip",
-    "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.2/VideoBatchStudio.exe",
-    "sha256": "72e89df2337d76b7f06a113d8b71e94147bf8a31cde3d0b26aa1e77ff63c7b0e"
+    "downloadUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/tag/v10.0.3",
+    "portableZipUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.3/VideoBatchStudio_Portable.zip",
+    "fastPortableZipUrl": "https://ghfast.top/https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.3/VideoBatchStudio_Portable.zip",
+    "exeUrl": "https://github.com/100142armin-lgtm/VideoBatchStudio/releases/download/v10.0.3/VideoBatchStudio.exe",
+    "sha256": ""
 }
